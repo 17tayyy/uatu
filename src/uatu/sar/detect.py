@@ -47,6 +47,10 @@ class CfarParams:
     # Rough sea seen at low incidence is bright and spiky: CFAR flags its peaks, which stand
     # only ~6-8 dB above the surrounding sea, while ships stand 15-40 dB above it.
     min_contrast_db: float = 12.0
+    # Ships return strongly in cross-polarisation too (VH -20 to -7 dB for the first 12
+    # AIS-confirmed ones); sea features flagged in VV sit near VH's noise floor (-25 to -28 dB).
+    # Provisional: revisit as more passes are paired. Not applied when VH is unavailable.
+    min_vh_db: float = -23.0
     # A very bright target smears into a cross of sidelobes that CFAR also flags: drop
     # objects this much fainter than a neighbour within the radius.
     sidelobe_radius_m: float = 2000.0
@@ -54,13 +58,17 @@ class CfarParams:
 
 
 def detect(vv: np.ndarray, vh: np.ndarray, land: np.ndarray, grid: Grid, params: CfarParams) -> list[Detection]:
-    """Ships in a scene: CFAR on VV at sea, grouped into objects, without faint or sidelobe ones."""
+    """Ships in a scene: CFAR on VV at sea, grouped into objects, without the ones that look like
+    speckle, rough sea or sidelobes."""
     valid = sea_mask(vv, land, grid, params.coast_buffer_m)
     hits = cfar(vv, valid, grid, params)
     found = [
         d
         for d in extract(hits, vv, vh, valid, grid, params.merge_m, params.background_m)
-        if d.pixels >= params.min_pixels and d.peak_db >= params.min_peak_db and d.contrast_db >= params.min_contrast_db
+        if d.pixels >= params.min_pixels
+        and d.peak_db >= params.min_peak_db
+        and d.contrast_db >= params.min_contrast_db
+        and not d.vh_db < params.min_vh_db  # NaN (no VH) passes
     ]
     return suppress_sidelobes(found, params.sidelobe_radius_m, params.sidelobe_contrast_db)
 

@@ -55,17 +55,23 @@ uv run uatu-sar detect data/sar/<scene>.zip --ais
 3. **Land mask**: ESA WorldCover 2021 (10 m), read remotely from its Cloud Optimised
    GeoTIFFs, plus a 300 m coastal buffer: harbours and breakwaters look like ships.
 4. **Detection**: two-parameter CFAR on VV (pixels more than k standard deviations above
-   the surrounding sea), hits grouped into objects. Then faint objects (speckle in calm,
-   dark water near the noise floor) and the sidelobes of very bright targets are dropped.
+   the surrounding sea), hits grouped into objects. Then dropped: faint objects (speckle in
+   calm water near the noise floor), objects standing < 12 dB above the surrounding sea
+   (rough sea at low incidence), objects dark in VH (ships return in cross-polarisation
+   too) and the sidelobes of very bright targets.
 5. **AIS at acquisition time**: each vessel's track is interpolated (or dead-reckoned from
    its speed and course) to the instant the radar looked at that spot, from the per-line
    azimuth times in the product annotation.
 6. **Moving-target shift**: a ship's motion along the radar's line of sight shifts it along
    the track by -(R/V) * range rate, ~110 s x range rate for Sentinel-1, often hundreds of
    metres. Expected AIS positions get the same shift.
-7. **Pairing**: one-to-one assignment minimising total distance (Hungarian method), within
-   1 km. Unpaired detections are **dark vessel candidates**. AIS vessels outside the
-   searched sea are reported apart from those the radar missed.
+7. **Pairing**: one-to-one assignment (Hungarian method) minimising distances measured in
+   units of each vessel's tolerance: 1 km, plus a share of how far the vessel travels
+   between its nearest AIS report and the acquisition. Vessels just outside the searched
+   sea can still pair; if they don't, they count as not imaged rather than missed.
+8. **AIS coverage**: an unpaired detection is a **dark vessel candidate** only where
+   aisstream.io hears AIS around it (at least 5 vessels within 15 km and 2 h). Elsewhere
+   it is reported as `no_coverage`: nothing can be said about it.
 
 Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io
 coverage has gaps (see `ingest_gaps`), and it delivers about one position per vessel per

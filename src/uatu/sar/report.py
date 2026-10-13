@@ -24,7 +24,11 @@ def detections_geojson(detections: list[Detection], result: MatchResult | None, 
         if (m := paired.get(id(d))) is not None:
             v = m.expected.vessel
             properties |= {"mmsi": v.mmsi, "ais_name": v.name, "ais_length_m": v.length_m, "distance_m": m.distance_m}
-        properties["dark"] = result is not None and id(d) not in paired
+        properties["contrast_db"] = round(d.contrast_db, 1)
+        if result is not None:
+            properties["status"] = "matched" if id(d) in paired else "dark" if d in result.dark else "no_coverage"
+            if d in result.ais_nearby:
+                properties["ais_vessels_nearby"] = result.ais_nearby[d]
         features.append(_point(d.lon, d.lat, properties))
     _write(path, features)
 
@@ -55,7 +59,8 @@ def quicklook(
     path: Path,
     step: int = 8,
 ) -> None:
-    """VV backscatter with detections (green: AIS match, red: dark) and AIS vessels the radar missed (yellow)."""
+    """VV backscatter with detections (green: AIS match, red: dark, orange: no AIS coverage to tell)
+    and AIS vessels the radar missed (yellow)."""
     with np.errstate(divide="ignore", invalid="ignore"):
         db = 10 * np.log10(vv[::step, ::step])
     height, width = db.shape
@@ -76,11 +81,16 @@ def quicklook(
     else:
         for m in result.matches:
             ax.add_patch(plt.Circle(pixel(m.detection.x, m.detection.y), 10, fill=False, color="lime", lw=1))
+        for d in result.no_coverage:
+            ax.add_patch(plt.Circle(pixel(d.x, d.y), 12, fill=False, color="orange", lw=1.2))
         for d in result.dark:
             ax.add_patch(plt.Circle(pixel(d.x, d.y), 14, fill=False, color="red", lw=1.6))
         for e in result.undetected:
             ax.plot(*pixel(e.x, e.y), marker="^", color="yellow", markersize=5, markeredgewidth=0)
-        counts = f"{len(result.matches)} matched, {len(result.dark)} dark, {len(result.undetected)} AIS undetected"
+        counts = (
+            f"{len(result.matches)} matched, {len(result.dark)} dark, {len(result.no_coverage)} without AIS coverage,"
+            f" {len(result.undetected)} AIS undetected"
+        )
         title = f"{title}\n{counts}"
     ax.set_title(title)
     ax.set_xticks([])

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.config import BBox
@@ -95,6 +95,25 @@ def predict(reports: list[Report], t: datetime) -> tuple[float, float, float | N
         lat += distance * math.cos(math.radians(nearest.cog)) / _METRES_PER_DEGREE
         lon += distance * math.sin(math.radians(nearest.cog)) / (_METRES_PER_DEGREE * math.cos(math.radians(lat)))
     return lon, lat, nearest.sog, nearest.cog, abs(dt)
+
+
+async def vessels_nearby(
+    engine: AsyncEngine, points: list[tuple[float, float]], at: datetime, radius_m: float, window: timedelta
+) -> list[int]:
+    """Distinct AIS vessels received within radius_m of each (lon, lat) point, within ±window of `at`.
+
+    A proxy for AIS coverage: shipping lanes are never empty for hours, so hearing no vessels
+    at all around a place means no receiver feeding aisstream.io covers it.
+    """
+    counts = []
+    async with engine.connect() as conn:
+        for lon, lat in points:
+            stmt = select(func.count(distinct(Position.mmsi))).where(
+                Position.received_at.between(at - window, at + window),
+                func.ST_DWithin(Position.geom, func.geography(func.ST_Point(lon, lat, 4326)), radius_m),
+            )
+            counts.append(await conn.scalar(stmt) or 0)
+    return counts
 
 
 async def _tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> dict[int, list[Report]]:
