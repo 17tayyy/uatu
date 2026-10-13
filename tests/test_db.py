@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, insert, select
 
 from uatu import db
 from uatu.db.models import IngestSession, Position, StaticReport, Vessel
@@ -165,3 +165,44 @@ async def test_ais_health_check_follows_the_recorder(engine):
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(IngestSession).where(IngestSession.id == session.id))
+
+
+async def test_ais_events_extend_rather_than_duplicate(engine):
+    from uatu.ais import store
+    from uatu.ais.events import Event
+    from uatu.db.models import AisEvent
+
+    first = Event("encounter", 2, MMSI_A, T0, 36.0, -5.6, {"hours": 2.0}, T0 + timedelta(hours=2), MMSI_B)
+    # Next run: the window has slid, so the same encounter is seen starting later and lasting longer.
+    later = Event(
+        "encounter", 2, MMSI_A, T0 + timedelta(hours=1), 36.0, -5.6, {"hours": 2.0}, T0 + timedelta(hours=3), MMSI_B
+    )
+    try:
+        assert await store.save(engine, [first]) == [first]
+        assert await store.save(engine, [later]) == []  # extended, not new
+        async with engine.connect() as conn:
+            rows = (await conn.execute(select(AisEvent).where(AisEvent.mmsi == MMSI_A))).all()
+        assert len(rows) == 1
+        assert (rows[0].start_at, rows[0].end_at, rows[0].details["hours"]) == (T0, T0 + timedelta(hours=3), 3.0)
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(AisEvent).where(AisEvent.mmsi == MMSI_A))
+
+
+async def test_sanctioned_vessels_seen_in_the_area_are_events(engine):
+    from uatu.ais import store
+    from uatu.db.models import SanctionedVessel
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            insert(SanctionedVessel).values(imo=9246322, name="TEX", programs="US-IRAN", source_id="test")
+        )
+    await write(engine, [StaticRow(MMSI_A, T0, 5, name="FLEXI TEST", imo=9246322)])
+    await write(engine, [PositionRow(MMSI_A, T0 + timedelta(minutes=5), 1, 36.1, -5.5, 10.0, 90.0, 90, 0, True)])
+    try:
+        [event] = await store.sanctioned_present(engine, T0, T0 + timedelta(hours=1))
+        assert (event.kind, event.severity, event.mmsi) == ("sanctioned_vessel", 3, MMSI_A)
+        assert event.details["listed_as"] == "TEX" and event.details["matched_by"] == "imo"
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(SanctionedVessel).where(SanctionedVessel.source_id == "test"))

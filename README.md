@@ -4,8 +4,9 @@ Dark vessel detection in the Strait of Gibraltar: finding ships that appear on S
 radar imagery but are not broadcasting AIS.
 
 **Status:** running 24/7 on a homelab. The AIS recorder stores everything aisstream.io
-sends for the area (it only streams live data: any day not recorded is lost), and a worker
-picks up every new Sentinel-1 pass, detects ships and pairs them with that AIS.
+sends for the area (it only streams live data: any day not recorded is lost); a worker
+looks for suspicious behaviour in that AIS every 10 minutes, and picks up every new
+Sentinel-1 pass to detect ships and pair them with it.
 
 ## AIS recorder
 
@@ -37,6 +38,38 @@ aisstream.io ──websocket──▶ parse ──▶ bounded queue ──batche
 
 The schema is declared in [`src/uatu/db/models.py`](src/uatu/db/models.py) (SQLAlchemy +
 GeoAlchemy2) and versioned with Alembic in [`migrations/`](migrations/).
+
+## AIS analysis
+
+Every 10 minutes the worker runs detectors ([`src/uatu/ais/events.py`](src/uatu/ais/events.py))
+over the last 6 hours of AIS and stores what they find in `ais_events`:
+
+| Event | What | Notable when |
+|---|---|---|
+| `ais_gap` | a vessel stops transmitting for 1 h+ while vessels around it are still heard | under way, at sea, and vessels are also heard where it was heading (so it did not just sail out of the area, into port, or into a hole in aisstream's coverage) |
+| `encounter` | two vessels within 500 m, both under 2 kn, for 2 h+ (ship-to-ship transfers) | > 5 km from the coast |
+| `loitering` | nearly stopped for 3 h+ | > 5 km from the coast |
+| `infrastructure_loitering` | under 3 kn for 30 min+ within 1 km of a submarine cable or pipeline | always (alert) |
+| `sanctioned_vessel` | a vessel on a sanctions list, by IMO (or listed MMSI) | always (alert) |
+| `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
+| `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
+
+Anything happening where 4+ vessels sit stopped within 8 km (an anchorage or waiting area,
+found from the data itself) is routine and only informative. Alerts with severity 3 are
+pushed to the phone at once; notable ones (2) go into a summary at 08:00 and 20:00 UTC.
+
+Reference data, refreshed by the worker:
+
+- **Sanctioned vessels**: [OpenSanctions](https://www.opensanctions.org) `sanctions`
+  collection (EU, UK, US, CH, CA, AU lists), CC BY-NC 4.0, daily.
+- **Infrastructure in Spanish waters**: [EMODnet Human Activities](https://emodnet.ec.europa.eu/en/human-activities)
+  (telecom cables from Spain's CICA, pipelines, platforms, ports) and
+  [TeleGeography](https://www.submarinecablemap.com)'s submarine cable map (CC BY-NC-SA), weekly.
+
+```sh
+uv run uatu-ais around 36.10 -5.40 --at 2026-10-13T18:25Z   # who was there: AIS, events, radar
+uv run uatu-ais events --hours 24
+```
 
 ## SAR ship detection
 
@@ -113,12 +146,15 @@ The worker also keeps the system healthy:
   are tasks that fail for good. With `HEALTHCHECK_URL` (e.g. healthchecks.io) it also pings a
   dead man's switch, which alerts when the worker or the whole machine goes quiet.
 
-Restoring a backup:
+Restoring a backup, into an empty database (`--clean` cannot drop PostGIS while tables use it):
 
 ```sh
 docker compose exec -T worker ls /data/backups
-docker compose exec -T worker cat /data/backups/<dump> \
-  | docker compose exec -T db pg_restore -U uatu -d uatu --clean --if-exists
+docker compose exec -T worker cat /data/backups/<dump> > uatu.dump
+docker compose stop recorder worker
+docker compose exec -T db sh -c 'dropdb -U uatu uatu && createdb -U uatu uatu'
+docker compose exec -T db pg_restore -U uatu -d uatu --no-owner < uatu.dump
+docker compose up -d
 ```
 
 ## Running
@@ -152,7 +188,10 @@ uv run alembic upgrade head
 LOG_FORMAT=console uv run uatu-recorder
 
 uv run pytest                                          # unit tests
-UATU_TEST_DATABASE_URL=$DATABASE_URL uv run pytest     # plus integration tests against PostGIS
+# Integration tests need a migrated database of their own (they assume nothing else in it):
+docker compose exec db createdb -U uatu uatu_test
+DATABASE_URL=${DATABASE_URL%/uatu}/uatu_test uv run alembic upgrade head
+UATU_TEST_DATABASE_URL=${DATABASE_URL%/uatu}/uatu_test uv run pytest
 uv run ruff check . && uv run ruff format .
 ```
 
@@ -167,7 +206,7 @@ Environment variables (or `.env`):
 | -------------------- | ------------------------------------- | ------------------------------------------ |
 | `AISSTREAM_API_KEY`  | required                              |                                            |
 | `DATABASE_URL`       | `postgresql+asyncpg://uatu:uatu@localhost:5432/uatu` | set by docker compose       |
-| `AIS_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`          |
+| `AIS_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`; recorder and AIS analysis |
 | `RAW_ARCHIVE_DIR`    | unset (disabled)                      | `/data/raw` volume in docker compose       |
 | `BATCH_SIZE`         | `1000`                                | rows per database transaction              |
 | `FLUSH_INTERVAL_S`   | `2`                                   | max wait before writing a partial batch    |

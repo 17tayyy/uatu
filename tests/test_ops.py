@@ -15,7 +15,7 @@ def test_to_prune_keeps_the_newest_dumps():
 async def test_alerter_notifies_on_changes_only():
     sent: list[tuple[str, str]] = []
 
-    async def send(title: str, message: str, priority: str) -> None:
+    async def send(title: str, message: str, priority: str, link: str | None) -> None:
         sent.append((title, priority))
 
     alerter = Alerter(send)

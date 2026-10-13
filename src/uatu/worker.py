@@ -8,6 +8,12 @@ Operations
     ops.backup          daily at 03:00 UTC: pg_dump of the database, the BACKUP_KEEP newest kept.
     ops.health          every 5 minutes: AIS still arriving, disk space, backups recent. Alerts on
                         changes through ntfy, and pings a dead man's switch if configured.
+AIS
+    ais.analyse         every 10 minutes: AIS gaps, encounters, loitering, vessels over cables, sanctioned
+                        vessels, identity changes... into ais_events; pushes the serious ones at once.
+    ais.digest          08:00 and 20:00 UTC: a summary notification of the notable events of 12 h.
+    ref.sanctions       daily: sanctioned vessels from OpenSanctions.
+    ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports.
 
     ardiq run uatu.worker:app
 """
@@ -24,7 +30,11 @@ from ardiq import Ardiq, ErrorContext
 from pydantic import Field
 
 from uatu import db, ops
-from uatu.config import bbox_polygon
+from uatu.ais import analysis as ais_analysis
+from uatu.ais import reference
+from uatu.ais import store as ais_store
+from uatu.ais.coast import CoastDistance
+from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, bbox_polygon
 from uatu.log import configure_logging
 from uatu.sar import store
 from uatu.sar.analysis import analyse, write_outputs
@@ -36,6 +46,7 @@ from uatu.sar.raster import Grid, land_cache
 
 
 class WorkerSettings(SarSettings):
+    ais_bbox: BBoxSetting = STRAIT_OF_GIBRALTAR  # the area the recorder records
     backup_dir: Path = Path("data/backups")
     backup_keep: int = Field(14, gt=0)
     ntfy_url: str | None = None  # https://ntfy.sh/<an unguessable topic>, to get alerts on a phone
@@ -69,9 +80,31 @@ async def lifespan():
             log.warning("cdse_credentials_missing", hint="set CDSE_USERNAME and CDSE_PASSWORD to download scenes")
         grid = Grid.covering(AOI, 10.0)
         land = await asyncio.to_thread(land_cache, grid, settings.sar_data_dir / "cache")
+        coast = await asyncio.to_thread(CoastDistance, grid, land, settings.sar_data_dir / "cache")
+        await _load_reference_if_missing(engine, http)
         log.info("worker_ready", grid=f"{grid.width}x{grid.height}", alerts=settings.ntfy_url is not None)
         await alerter.notify("Uatu worker started", f"Watching {settings.sar_bbox}", "low")
-        yield {"engine": engine, "http": http, "alerter": alerter, "auth": auth, "grid": grid, "land": land}
+        yield {
+            "engine": engine,
+            "http": http,
+            "alerter": alerter,
+            "auth": auth,
+            "grid": grid,
+            "land": land,
+            "coast": coast,
+        }
+
+
+async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
+    """First start: don't wait for the scheduled refresh to have sanctions and infrastructure."""
+    sanctions, infrastructure = await ais_store.reference_loaded(engine)
+    try:
+        if not sanctions:
+            await reference.refresh_sanctions(engine, http)
+        if not infrastructure:
+            await reference.refresh_infrastructure(engine, http)
+    except httpx.HTTPError as e:  # the scheduled refresh will try again
+        log.warning("reference_load_failed", error=repr(e))
 
 
 # --- SAR -------------------------------------------------------------------------------------------
@@ -116,6 +149,58 @@ async def process_scene(scene_id: str) -> dict[str, int]:
         path.unlink(missing_ok=True)
     log.info("scene_processed", scene=scene.name, **summary)
     return summary
+
+
+# --- AIS ------------------------------------------------------------------------------------------
+
+
+@app.cron(every=timedelta(minutes=10), name="ais.analyse", max_retries=0, timeout=300)
+async def analyse_ais() -> dict[str, int]:
+    state = app.state
+    now = datetime.now(UTC)
+    outcome = await ais_analysis.analyse(state.engine, now, settings.ais_bbox, state.coast)
+    urgent = [e for e in outcome.new if e.severity >= 3 and ais_analysis.worth_alerting(e, now)]
+    if urgent:
+        mmsis = {e.mmsi for e in urgent} | {e.other_mmsi for e in urgent if e.other_mmsi}
+        names = await ais_store.vessel_names(state.engine, mmsis)
+        for e in urgent[:5]:
+            title, message, link = ais_analysis.describe(e, names)
+            await state.alerter.notify(title, message, "high", link)
+        if len(urgent) > 5:
+            await state.alerter.notify("Uatu: más alertas AIS", f"{len(urgent) - 5} alertas más en ais_events", "high")
+    log.info(
+        "ais_analysed",
+        tracks=outcome.tracks,
+        detected=outcome.detected,
+        new=len(outcome.new),
+        urgent=len(urgent),
+        gaps_closed=outcome.gaps_closed,
+    )
+    return {"new": len(outcome.new), "urgent": len(urgent)}
+
+
+@app.cron("0 8,20 * * *", name="ais.digest", max_retries=0, timeout=120)
+async def ais_digest() -> int:
+    """Notable events go into this twice-daily summary rather than one notification each."""
+    state = app.state
+    events = await ais_store.notable_since(state.engine, datetime.now(UTC) - timedelta(hours=12), min_severity=2)
+    if events:
+        names = await ais_store.vessel_names(
+            state.engine, {e.mmsi for e in events} | {e.other_mmsi or 0 for e in events}
+        )
+        title, message = ais_analysis.digest(events, names, hours=12)
+        await state.alerter.notify(title, message, "default")
+    return len(events)
+
+
+@app.cron("0 4 * * *", name="ref.sanctions", max_retries=2, backoff_ms=30 * 60_000, timeout=900)
+async def refresh_sanctions() -> int:
+    return await reference.refresh_sanctions(app.state.engine, app.state.http)
+
+
+@app.cron("30 4 * * 1", name="ref.infrastructure", max_retries=2, backoff_ms=30 * 60_000, timeout=900)
+async def refresh_infrastructure() -> int:
+    return await reference.refresh_infrastructure(app.state.engine, app.state.http)
 
 
 # --- operations ------------------------------------------------------------------------------------

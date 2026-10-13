@@ -20,6 +20,6 @@ COPY --from=build /app/.venv /app/.venv
 # Alembic reads its config from pyproject.toml.
 COPY pyproject.toml ./
 COPY migrations ./migrations
-ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 MPLCONFIGDIR=/tmp/matplotlib
 USER uatu
 CMD ["uatu-recorder"]

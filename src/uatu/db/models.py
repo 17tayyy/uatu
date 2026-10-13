@@ -19,6 +19,7 @@ from sqlalchemy import (
     SmallInteger,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -208,3 +209,63 @@ class SarAisCheck(Base):
     sog: Mapped[float | None] = mapped_column(REAL)
     report_gap_s: Mapped[float] = mapped_column(REAL, comment="to its nearest real AIS report")
     doppler_shift_m: Mapped[float] = mapped_column(REAL)
+
+
+class SanctionedVessel(Base):
+    """A vessel on a sanctions list (from OpenSanctions), by IMO number."""
+
+    __tablename__ = "sanctioned_vessels"
+
+    imo: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    name: Mapped[str]
+    aliases: Mapped[str | None]
+    mmsis: Mapped[str | None] = mapped_column(comment="MMSIs listed for it, ';'-separated")
+    countries: Mapped[str | None] = mapped_column(comment="flags and other linked countries, ';'-separated")
+    programs: Mapped[str | None] = mapped_column(comment="sanctions programmes, ';'-separated (EU-RUS, US-RUSHAR...)")
+    sanctions: Mapped[str | None]
+    source_id: Mapped[str] = mapped_column(comment="OpenSanctions entity id")
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class Infrastructure(Base):
+    """Critical maritime infrastructure: submarine cables, pipelines, platforms, ports."""
+
+    __tablename__ = "infrastructure"
+    __table_args__ = (Index("ix_infrastructure_geom", "geom", postgresql_using="gist"),)
+
+    id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(comment="telecom_cable | pipeline | platform | port | landing_point")
+    name: Mapped[str]
+    status: Mapped[str | None] = mapped_column(comment="operational | abandoned | ...")
+    source: Mapped[str] = mapped_column(comment="where it comes from, e.g. emodnet:cicacables, telegeography")
+    geom: Mapped[WKBElement] = mapped_column(Geography("GEOMETRY", srid=4326, spatial_index=False))
+    properties: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class AisEvent(Base):
+    """Something notable in the AIS record: a vessel going silent, two vessels meeting at sea..."""
+
+    __tablename__ = "ais_events"
+    __table_args__ = (
+        Index("ix_ais_events_start_at", "start_at"),
+        Index("ix_ais_events_mmsi", "mmsi"),
+        Index("ix_ais_events_geom", "geom", postgresql_using="gist"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    key: Mapped[str] = mapped_column(unique=True, comment="deterministic, so re-running never duplicates")
+    kind: Mapped[str] = mapped_column(comment="what happened, see uatu/ais/events.py (ais_gap, encounter...)")
+    severity: Mapped[int] = mapped_column(SmallInteger, comment="1 info, 2 notable, 3 alert")
+    mmsi: Mapped[int]
+    other_mmsi: Mapped[int | None] = mapped_column(comment="the other vessel of an encounter or shared IMO")
+    start_at: Mapped[datetime]
+    end_at: Mapped[datetime | None] = mapped_column(comment="NULL while still ongoing")
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+    geom: Mapped[WKBElement] = mapped_column(
+        Geography("POINT", srid=4326, spatial_index=False),
+        Computed("ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography", persisted=True),
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
