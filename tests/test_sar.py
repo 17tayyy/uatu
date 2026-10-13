@@ -9,7 +9,7 @@ from uatu.sar.ais import AisVessel, Report, predict
 from uatu.sar.annotation import AcquisitionGeometry
 from uatu.sar.catalog import _scene, group_passes
 from uatu.sar.detect import CfarParams, Detection, detect, suppress_sidelobes
-from uatu.sar.match import Expected, expected_positions, match
+from uatu.sar.match import Expected, expected_positions, match, split_by_coverage
 from uatu.sar.raster import Grid, SigmaLut
 
 T0 = datetime(2026, 10, 13, 18, 25, tzinfo=UTC)
@@ -51,6 +51,17 @@ def test_low_contrast_spikes_are_not_ships():
     assert detect(vv, np.full_like(vv, np.nan), land, GRID, params) == []
     vv[200:203, 196:206] = 5.0  # ~17 dB out: a ship
     assert len(detect(vv, np.full_like(vv, np.nan), land, GRID, params)) == 1
+
+
+def test_objects_dark_in_vh_are_not_ships():
+    vv = speckled_sea()
+    vv[200:203, 196:206] = 5.0
+    land = np.zeros(GRID.shape, dtype=bool)
+    params = CfarParams(guard_m=300, background_m=900)
+    vh = np.full_like(vv, 0.002)  # -27 dB everywhere: nothing there in cross-polarisation
+    assert detect(vv, vh, land, GRID, params) == []
+    vh[200:203, 196:206] = 0.1  # -10 dB: a ship
+    assert len(detect(vv, vh, land, GRID, params)) == 1
 
 
 def det(x: float, y: float, peak_db: float) -> Detection:
@@ -98,18 +109,57 @@ def test_moving_ships_are_shifted_along_the_track():
     assert abs(across.shift_m) < 1e-6  # moving along the track: no range rate
 
 
+def at(x: float, y: float, tolerance: float = 500, shift: float = 0) -> Expected:
+    return Expected(vessel(0, 0), x + shift, y, shift, (x, y), tolerance)
+
+
 def test_match_pairs_one_to_one_and_reports_leftovers():
-    e1 = Expected(vessel(0, 0), 281_000, 3_989_000, 0, (281_000, 3_989_000))
-    e2 = Expected(vessel(0, 0), 281_400, 3_989_000, 0, (281_400, 3_989_000))
-    outside = Expected(vessel(0, 0), 0, 0, 0, (0, 0))
-    edge = Expected(vessel(10, 270), 279_900, 3_989_000, -300, (280_100, 3_989_000))  # shifted out of the grid
+    e1, e2, outside = at(281_000, 3_989_000), at(281_400, 3_989_000), at(0, 0)
+    edge = at(280_100, 3_989_000, shift=-200)  # shifted out of the grid
     d1, d2, dark = det(281_100, 3_989_000, 10), det(281_350, 3_989_000, 10), det(283_500, 3_987_000, 10)
     imaged = np.ones(GRID.shape, dtype=bool)
-    result = match([d1, d2, dark], [e1, e2, outside, edge], imaged, GRID, max_distance_m=500)
+    result = match([d1, d2, dark], [e1, e2, outside, edge], imaged, GRID)
     assert {(m.detection, m.expected) for m in result.matches} == {(d1, e1), (d2, e2)}
     assert result.dark == [dark]
     assert result.undetected == [edge]
     assert result.not_imaged == [outside]
+
+
+def test_vessels_just_outside_the_imaged_sea_can_still_pair():
+    imaged = np.zeros(GRID.shape, dtype=bool)
+    imaged[:, :200] = True  # the scene ends at x = 282 000
+    just_out, far_out = at(282_300, 3_988_000), at(283_900, 3_988_000)
+    seen = det(281_900, 3_988_000, 10)  # the radar saw it 400 m from its AIS position, inside the scene
+    result = match([seen], [just_out, far_out], imaged, GRID, edge_margin_m=1000)
+    assert [(m.detection, m.expected) for m in result.matches] == [(seen, just_out)]
+    assert result.undetected == []
+    assert result.not_imaged == [far_out]
+    unmatched = match([], [just_out], imaged, GRID, edge_margin_m=1000)
+    assert unmatched.not_imaged == [just_out]  # not counted as missed by the radar
+
+
+def test_tolerance_grows_with_speed_and_report_age():
+    g = geometry()
+    lon, lat = -5.4189, 36.0121  # centre of GRID
+    fresh = AisVessel(1, None, None, None, lon, lat, 0.0, 0.0, T0, 10.0)
+    stale_fast = AisVessel(2, None, None, None, lon, lat, 24.0, 0.0, T0, 500.0)  # fast ferry, 500 s old
+    e_fresh, e_stale = expected_positions([fresh, stale_fast], g, GRID, base_tolerance_m=1000, drift_fraction=0.25)
+    assert e_fresh.tolerance_m == 1000
+    assert e_stale.tolerance_m == round(1000 + 0.25 * 24 * 0.514444 * 500, 1)  # ~2.5 km
+
+    imaged = np.ones(GRID.shape, dtype=bool)
+    far = det(e_stale.x + 2000, e_stale.y, 10)
+    assert len(match([far], [e_stale], imaged, GRID).matches) == 1
+    assert match([far], [e_fresh], imaged, GRID).matches == []
+
+
+def test_unpaired_detections_without_ais_coverage_are_not_dark():
+    lonely, busy = det(282_000, 3_988_000, 10), det(283_000, 3_988_000, 10)
+    result = match([lonely, busy], [], np.ones(GRID.shape, dtype=bool), GRID)
+    split = split_by_coverage(result, ais_nearby=[0, 40], min_vessels=5)
+    assert split.dark == [busy]
+    assert split.no_coverage == [lonely]
+    assert split.ais_nearby[lonely] == 0
 
 
 def product(name: str, start: str) -> dict:

@@ -20,13 +20,13 @@ from uatu import db
 from uatu.config import bbox_polygon
 from uatu.log import configure_logging
 from uatu.sar import report
-from uatu.sar.ais import vessels_at_acquisition
+from uatu.sar.ais import vessels_at_acquisition, vessels_nearby
 from uatu.sar.annotation import read_geometry
 from uatu.sar.catalog import group_passes, search
 from uatu.sar.config import SarSettings
 from uatu.sar.detect import CfarParams, detect, sea_mask
 from uatu.sar.download import CdseAuth, download
-from uatu.sar.match import expected_positions, match
+from uatu.sar.match import expected_positions, match, split_by_coverage
 from uatu.sar.raster import Grid, land_mask, sigma0
 
 log = structlog.get_logger(component="sar")
@@ -96,14 +96,19 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
     result = None
     geometry = read_geometry(scene)
     if args.ais:
+        middle = geometry.start + timedelta(seconds=geometry.duration_s / 2)
         engine = db.create_engine(settings.database_url)
         try:
             vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, settings.sar_bbox)
+            expected = expected_positions(vessels, geometry, grid, args.max_distance, doppler_sign=args.doppler_sign)
+            imaged = sea_mask(vv, land, grid, params.coast_buffer_m)
+            result = match(detections, expected, imaged, grid)
+            nearby = await vessels_nearby(
+                engine, [(d.lon, d.lat) for d in result.dark], middle, radius_m=15_000, window=timedelta(hours=2)
+            )
         finally:
             await engine.dispose()
-        expected = expected_positions(vessels, geometry, grid, args.doppler_sign)
-        imaged = sea_mask(vv, land, grid, params.coast_buffer_m)
-        result = match(detections, expected, imaged, grid, args.max_distance)
+        result = split_by_coverage(result, nearby, min_vessels=args.min_ais_nearby)
         report.ais_geojson(result, out_dir / "ais.geojson")
         distances = sorted(m.distance_m for m in result.matches)
         log.info(
@@ -111,6 +116,7 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
             ais_vessels=len(vessels),
             matched=len(result.matches),
             dark=len(result.dark),
+            no_coverage=len(result.no_coverage),
             undetected=len(result.undetected),
             not_imaged=len(result.not_imaged),
             median_distance_m=distances[len(distances) // 2] if distances else None,
@@ -148,7 +154,16 @@ def main() -> None:
     detect_cmd.add_argument("--ais", action="store_true", help="pair detections with AIS from DATABASE_URL")
     detect_cmd.add_argument("--resolution", type=float, default=10.0, help="grid pixel size in metres (default: 10)")
     detect_cmd.add_argument(
-        "--max-distance", type=float, default=1000.0, help="max detection-AIS distance to pair, metres (default: 1000)"
+        "--max-distance",
+        type=float,
+        default=1000.0,
+        help="detection-AIS distance tolerated for a vessel with fresh AIS, metres (default: 1000)",
+    )
+    detect_cmd.add_argument(
+        "--min-ais-nearby",
+        type=int,
+        default=5,
+        help="AIS vessels heard within 15 km and 2 h for an unpaired detection to count as dark (default: 5)",
     )
     detect_cmd.add_argument("--doppler-sign", type=float, default=1.0, help=argparse.SUPPRESS)
     detect_cmd.set_defaults(run=cmd_detect)
