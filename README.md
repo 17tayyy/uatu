@@ -75,9 +75,13 @@ coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
    aisstream.io hears AIS around it (at least 5 vessels within 15 km and 2 h). Elsewhere
    it is reported as `no_coverage`: nothing can be said about it.
 
+Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io
+coverage has gaps (see `ingest_gaps`), and it delivers about one position per vessel per
+minute.
+
 ### Worker
 
-`sar-worker` ([`src/uatu/sar/worker.py`](src/uatu/sar/worker.py)) runs the same pipeline on
+`worker` ([`src/uatu/worker.py`](src/uatu/worker.py)) runs the same pipeline on
 [ArdiQ](https://github.com/17tayyy/ardiq) with Redis:
 
 - `sar.discover`, every 10 minutes: Sentinel-1 frames over the area acquired since AIS
@@ -98,9 +102,24 @@ WHERE d.status = 'dark'
 ORDER BY d.seen_at DESC;
 ```
 
-Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io
-coverage has gaps (see `ingest_gaps`), and it delivers about one position per vessel per
-minute.
+## Operations
+
+The worker also keeps the system healthy:
+
+- `ops.backup`, daily at 03:00 UTC: `pg_dump` into the `backups` volume, 14 kept. They live
+  on the same disk as the database, so also back up the container (e.g. Proxmox `vzdump`).
+- `ops.health`, every 5 minutes: AIS still arriving (< 15 min), disk > 10% free, last backup
+  < 26 h old. Changes are pushed to a phone through [ntfy](https://ntfy.sh) (`NTFY_URL`), as
+  are tasks that fail for good. With `HEALTHCHECK_URL` (e.g. healthchecks.io) it also pings a
+  dead man's switch, which alerts when the worker or the whole machine goes quiet.
+
+Restoring a backup:
+
+```sh
+docker compose exec -T worker ls /data/backups
+docker compose exec -T worker cat /data/backups/<dump> \
+  | docker compose exec -T db pg_restore -U uatu -d uatu --clean --if-exists
+```
 
 ## Running
 
@@ -165,3 +184,8 @@ Environment variables (or `.env`):
 | `SAR_LOOKBACK_DAYS`  | `3`                                   | how far back it looks                      |
 | `SAR_MIN_COVERAGE`   | `0.1`                                 | skip frames covering less of the area      |
 | `SAR_KEEP_SCENES`    | `false`                               | keep products (~1-2 GB each) after processing |
+| `NTFY_URL`           | unset                                 | `https://ntfy.sh/<unguessable topic>` for alerts |
+| `HEALTHCHECK_URL`    | unset                                 | dead man's switch ping URL                 |
+| `BACKUP_DIR` / `BACKUP_KEEP` | `data/backups` / `14`         | `/data/backups` volume in docker compose   |
+| `AIS_STALE_MINUTES`  | `15`                                  | alert when no AIS arrives for this long    |
+| `MIN_FREE_DISK`      | `0.1`                                 | alert below this fraction of free disk     |

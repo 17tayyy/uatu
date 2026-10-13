@@ -107,6 +107,11 @@ def _odata_time(t: datetime) -> str:
     return t.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
+def worth_processing(scenes: list[Scene], aoi: Geometry, min_coverage: float) -> list[Scene]:
+    """Scenes covering enough of the area: a frame that grazes it costs a 1-2 GB download for little."""
+    return [s for s in scenes if s.coverage(aoi) >= min_coverage]
+
+
 def group_passes(scenes: list[Scene]) -> dict[str, list[Scene]]:
     """Frames grouped by satellite pass (datatake), in acquisition order."""
     passes: dict[str, list[Scene]] = {}

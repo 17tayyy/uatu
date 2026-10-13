@@ -64,19 +64,21 @@ services:
         max-size: "20m"
         max-file: "5"
 
-  sar-worker:
+  worker:
     <<: *app
-    command: ["ardiq", "run", "--quiet", "uatu.sar.worker:app"]
+    command: ["ardiq", "run", "--quiet", "uatu.worker:app"]
     restart: unless-stopped
     env_file: .env
     environment:
       <<: *app-env
       REDIS_URL: redis://redis:6379
       SAR_DATA_DIR: /data/sar
+      BACKUP_DIR: /data/backups
       GDAL_CACHEMAX: "64"  # MB; by default GDAL takes 5% of the host's RAM, ignoring the container's limit
       MALLOC_ARENA_MAX: "2"  # GDAL's warper threads otherwise each keep an arena of freed memory
     volumes:
       - sardata:/data/sar
+      - backups:/data/backups
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -95,3 +97,4 @@ volumes:
   rawdata:
   redisdata:
   sardata:
+  backups:
