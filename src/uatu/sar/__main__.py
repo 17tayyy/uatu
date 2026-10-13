@@ -1,0 +1,167 @@
+"""Work with Sentinel-1 scenes by hand.
+
+uatu-sar search [--days 7]               passes over the area of interest
+uatu-sar download (--latest | DATATAKE)  download every frame of a pass
+uatu-sar detect SCENE.zip [--ais]        detect ships, optionally pairing them with recorded AIS
+"""
+
+import argparse
+import asyncio
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import httpx
+import shapely
+import structlog
+from pydantic import ValidationError
+
+from uatu import db
+from uatu.config import bbox_polygon
+from uatu.log import configure_logging
+from uatu.sar import report
+from uatu.sar.ais import vessels_at_acquisition
+from uatu.sar.annotation import read_geometry
+from uatu.sar.catalog import group_passes, search
+from uatu.sar.config import SarSettings
+from uatu.sar.detect import CfarParams, detect, sea_mask
+from uatu.sar.download import CdseAuth, download
+from uatu.sar.match import expected_positions, match
+from uatu.sar.raster import Grid, land_mask, sigma0
+
+log = structlog.get_logger(component="sar")
+
+
+async def find_passes(settings: SarSettings, days: float):
+    aoi = bbox_polygon(settings.sar_bbox)
+    until = datetime.now(UTC)
+    async with httpx.AsyncClient(timeout=30) as client:
+        scenes = await search(client, aoi, until - timedelta(days=days), until)
+    return aoi, group_passes(scenes)
+
+
+async def cmd_search(settings: SarSettings, args: argparse.Namespace) -> int:
+    aoi, passes = await find_passes(settings, args.days)
+    print(f"{'pass':8} {'start (UTC)':17} {'sat':4} {'direction':11} {'orbit':>5} {'frames':>6} {'AOI':>5} {'size':>7}")
+    for datatake, frames in passes.items():
+        first = frames[0]
+        covered = shapely.union_all([f.footprint for f in frames]).intersection(aoi).area / aoi.area
+        size_gb = sum(f.size_bytes for f in frames) / 1e9
+        print(
+            f"{datatake:8} {first.start:%Y-%m-%d %H:%M} {first.platform:4} {first.orbit_direction:11}"
+            f" {first.relative_orbit:5} {len(frames):6} {covered:5.0%} {size_gb:5.1f}GB"
+        )
+    return 0
+
+
+async def cmd_download(settings: SarSettings, args: argparse.Namespace) -> int:
+    if settings.cdse_username is None or settings.cdse_password is None:
+        print("set CDSE_USERNAME and CDSE_PASSWORD (Copernicus Data Space account)", file=sys.stderr)
+        return 2
+    aoi, passes = await find_passes(settings, args.days)
+    if not passes:
+        print("no passes found", file=sys.stderr)
+        return 1
+    datatake = list(passes)[-1] if args.latest else args.datatake
+    if datatake not in passes:
+        print(f"pass {datatake} not found in the last {args.days:g} days", file=sys.stderr)
+        return 1
+
+    timeout = httpx.Timeout(30, read=120)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        auth = CdseAuth(client, settings.cdse_username, settings.cdse_password.get_secret_value())
+        for scene in passes[datatake]:
+            if scene.coverage(aoi) < args.min_coverage:
+                print(f"skipping {scene.name}: covers {scene.coverage(aoi):.0%} of the area", file=sys.stderr)
+                continue
+            path = await download(client, auth, scene, settings.sar_data_dir)
+            print(path)
+    return 0
+
+
+async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
+    scene = Path(args.scene)
+    out_dir = settings.sar_data_dir / scene.name.removesuffix(".zip")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    grid = Grid.covering(bbox_polygon(settings.sar_bbox), args.resolution)
+    params = CfarParams()
+
+    log.info("calibrating", scene=scene.name, grid=f"{grid.width}x{grid.height} @ {grid.resolution:g} m")
+    vv = sigma0(scene, "VV", grid)
+    vh = sigma0(scene, "VH", grid)
+    land = land_mask(grid, settings.sar_data_dir / "cache")
+    detections = detect(vv, vh, land, grid, params)
+    log.info("detected", ships=len(detections))
+
+    result = None
+    geometry = read_geometry(scene)
+    if args.ais:
+        engine = db.create_engine(settings.database_url)
+        try:
+            vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, settings.sar_bbox)
+        finally:
+            await engine.dispose()
+        expected = expected_positions(vessels, geometry, grid, args.doppler_sign)
+        imaged = sea_mask(vv, land, grid, params.coast_buffer_m)
+        result = match(detections, expected, imaged, grid, args.max_distance)
+        report.ais_geojson(result, out_dir / "ais.geojson")
+        distances = sorted(m.distance_m for m in result.matches)
+        log.info(
+            "matched",
+            ais_vessels=len(vessels),
+            matched=len(result.matches),
+            dark=len(result.dark),
+            undetected=len(result.undetected),
+            not_imaged=len(result.not_imaged),
+            median_distance_m=distances[len(distances) // 2] if distances else None,
+        )
+
+    report.detections_geojson(detections, result, out_dir / "detections.geojson")
+    title = f"{scene.name[:3]} {geometry.start:%Y-%m-%d %H:%M} UTC - {len(detections)} ship detections"
+    report.quicklook(vv, land, grid, detections, result, title, out_dir / "quicklook.png")
+    print(out_dir)
+    return 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="uatu-sar", description=__doc__, formatter_class=argparse.RawTextHelpFormatter
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    search_cmd = commands.add_parser("search", help="list Sentinel-1 passes over the area of interest")
+    search_cmd.add_argument("--days", type=float, default=7, help="how far back to look (default: 7)")
+    search_cmd.set_defaults(run=cmd_search)
+
+    download_cmd = commands.add_parser("download", help="download every frame of a pass")
+    which = download_cmd.add_mutually_exclusive_group(required=True)
+    which.add_argument("datatake", nargs="?", help="pass id, as listed by `search`")
+    which.add_argument("--latest", action="store_true", help="the most recent pass")
+    download_cmd.add_argument("--days", type=float, default=14, help="how far back to look (default: 14)")
+    download_cmd.add_argument(
+        "--min-coverage", type=float, default=0.1, help="skip frames covering less of the area (default: 0.1)"
+    )
+    download_cmd.set_defaults(run=cmd_download)
+
+    detect_cmd = commands.add_parser("detect", help="detect ships in a downloaded scene")
+    detect_cmd.add_argument("scene", help="zipped SAFE, as saved by `download`")
+    detect_cmd.add_argument("--ais", action="store_true", help="pair detections with AIS from DATABASE_URL")
+    detect_cmd.add_argument("--resolution", type=float, default=10.0, help="grid pixel size in metres (default: 10)")
+    detect_cmd.add_argument(
+        "--max-distance", type=float, default=1000.0, help="max detection-AIS distance to pair, metres (default: 1000)"
+    )
+    detect_cmd.add_argument("--doppler-sign", type=float, default=1.0, help=argparse.SUPPRESS)
+    detect_cmd.set_defaults(run=cmd_detect)
+
+    args = parser.parse_args()
+    try:
+        settings = SarSettings()
+    except ValidationError as e:
+        print(f"invalid configuration:\n{e}", file=sys.stderr)
+        sys.exit(2)
+    configure_logging("INFO", "console")
+    sys.exit(asyncio.run(args.run(settings, args)))
+
+
+if __name__ == "__main__":
+    main()
