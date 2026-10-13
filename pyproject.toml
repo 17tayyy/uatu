@@ -29,6 +29,7 @@ dependencies = [
 [project.scripts]
 uatu-recorder = "uatu.recorder.__main__:main"
 uatu-sar = "uatu.sar.__main__:main"
+uatu-ais = "uatu.ais.__main__:main"
 
 [build-system]
 requires = ["uv_build>=0.9.26,<0.10.0"]

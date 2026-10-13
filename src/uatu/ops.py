@@ -1,6 +1,7 @@
 """Keeping Uatu running unattended: database backups, health checks and alerts."""
 
 import asyncio
+import base64
 import os
 import shutil
 from collections.abc import Awaitable, Callable
@@ -95,7 +96,7 @@ def check_backup(dest_dir: Path, max_age: timedelta) -> Check:
 
 # --- alerts ---------------------------------------------------------------------------------------
 
-type Send = Callable[[str, str, str], Awaitable[None]]  # title, message, priority
+type Send = Callable[[str, str, str, str | None], Awaitable[None]]  # title, message, priority, link
 
 
 class Alerter:
@@ -114,10 +115,10 @@ class Alerter:
                 del self._failing[check.name]
                 await self.notify(f"Uatu: {check.name} recovered", check.detail, "default")
 
-    async def notify(self, title: str, message: str, priority: str = "default") -> None:
+    async def notify(self, title: str, message: str, priority: str = "default", link: str | None = None) -> None:
         log.warning("alert", title=title, message=message)
         try:
-            await self._send(title, message, priority)
+            await self._send(title, message, priority, link)
         except httpx.HTTPError as e:  # alerting must never take the worker down
             log.error("alert_not_sent", error=repr(e))
 
@@ -125,13 +126,23 @@ class Alerter:
 def ntfy(http: httpx.AsyncClient, topic_url: str | None) -> Send:
     """Push notifications through ntfy (https://ntfy.sh): subscribe to the topic in its app."""
 
-    async def send(title: str, message: str, priority: str) -> None:
+    async def send(title: str, message: str, priority: str, link: str | None) -> None:
         if topic_url is None:
             return
-        response = await http.post(topic_url, content=message.encode(), headers={"Title": title, "Priority": priority})
+        # Header values must be ASCII-safe; ntfy decodes RFC 2047 encoded-words for the rest.
+        headers = {"Title": _header(title), "Priority": priority}
+        if link:
+            headers["Click"] = link
+        response = await http.post(topic_url, content=message.encode(), headers=headers)
         response.raise_for_status()
 
     return send
+
+
+def _header(value: str) -> str:
+    if value.isascii():
+        return value
+    return "=?UTF-8?B?" + base64.b64encode(value.encode()).decode() + "?="
 
 
 async def ping_healthcheck(http: httpx.AsyncClient, url: str, ok: bool) -> None:
