@@ -1,0 +1,56 @@
+[project]
+name = "uatu"
+version = "0.1.0"
+description = "Dark vessel detection in the Strait of Gibraltar: Sentinel-1 SAR x AIS"
+readme = "README.md"
+authors = [
+    { name = "17tayyy", email = "oscarfdst@proton.me" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.32.0",
+    "geoalchemy2>=0.20.0",
+    "orjson>=3.13.0",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.1.4",
+    "structlog>=26.1.0",
+    "websockets>=17.2",
+]
+
+[project.scripts]
+uatu-recorder = "uatu.recorder.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.17.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.alembic]
+script_location = "%(here)s/migrations"
+file_template = "%%(year)d%%(month).2d%%(day).2d_%%(rev)s_%%(slug)s"
+prepend_sys_path = ["."]
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff"
+type = "module"
+module = "ruff"
+options = "format REVISION_SCRIPT_FILENAME"

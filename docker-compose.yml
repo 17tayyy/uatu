@@ -1,0 +1,55 @@
+name: uatu
+
+x-app: &app
+  build: .
+  environment: &app-env
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-uatu}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-uatu}
+
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-uatu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-uatu}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Only reachable from the host itself; use an SSH tunnel for QGIS etc.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  recorder:
+    <<: *app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *app-env
+      RAW_ARCHIVE_DIR: /data/raw
+    volumes:
+      - rawdata:/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  pgdata:
+  rawdata:
