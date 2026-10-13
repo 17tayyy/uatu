@@ -3,9 +3,9 @@
 Dark vessel detection in the Strait of Gibraltar: finding ships that appear on Sentinel-1
 radar imagery but are not broadcasting AIS.
 
-**Status:** the AIS recorder runs 24/7, so there is ground truth for every satellite pass
-(aisstream.io only streams live data: any day not recorded is lost). Ship detection on
-Sentinel-1 and pairing with AIS work by hand, scene by scene; automation comes next.
+**Status:** running 24/7 on a homelab. The AIS recorder stores everything aisstream.io
+sends for the area (it only streams live data: any day not recorded is lost), and a worker
+picks up every new Sentinel-1 pass, detects ships and pairs them with that AIS.
 
 ## AIS recorder
 
@@ -75,6 +75,29 @@ coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
    aisstream.io hears AIS around it (at least 5 vessels within 15 km and 2 h). Elsewhere
    it is reported as `no_coverage`: nothing can be said about it.
 
+### Worker
+
+`sar-worker` ([`src/uatu/sar/worker.py`](src/uatu/sar/worker.py)) runs the same pipeline on
+[ArdiQ](https://github.com/17tayyy/ardiq) with Redis:
+
+- `sar.discover`, every 10 minutes: Sentinel-1 frames over the area acquired since AIS
+  recording began (frames covering < 10% are skipped), recorded in `sar_scenes` and queued.
+  The catalogue can omit fresh products for a few minutes; a later run finds them.
+- `sar.process_scene`: download, detect, pair, store; retried 3 times 10 minutes apart, then
+  marked `failed`. One at a time (~0.8 GB of RAM). Products are deleted once processed.
+
+Results land in `sar_detections` (one row per ship, with `status` matched / dark /
+no_coverage and the time the radar saw it) and `sar_ais_checks` (each AIS vessel the scene
+should have shown, detected or not), plus GeoJSON and a quicklook in the `sardata` volume.
+
+```sql
+-- Dark vessel candidates, latest first
+SELECT s.acquired_from, d.lat, d.lon, d.length_m, d.ais_vessels_nearby
+FROM sar_detections d JOIN sar_scenes s ON s.id = d.scene_id
+WHERE d.status = 'dark'
+ORDER BY d.seen_at DESC;
+```
+
 Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io
 coverage has gaps (see `ingest_gaps`), and it delivers about one position per vessel per
 minute.
@@ -137,3 +160,8 @@ Environment variables (or `.env`):
 | `CDSE_USERNAME` / `CDSE_PASSWORD` | unset                    | [Copernicus Data Space](https://dataspace.copernicus.eu) account, to download scenes |
 | `SAR_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | area for SAR search and detection          |
 | `SAR_DATA_DIR`       | `data/sar`                            | downloaded scenes and outputs              |
+| `REDIS_URL`          | `redis://localhost:6379`              | ArdiQ broker, set by docker compose        |
+| `SAR_DISCOVER_MINUTES` | `10`                                | how often the worker looks for new scenes  |
+| `SAR_LOOKBACK_DAYS`  | `3`                                   | how far back it looks                      |
+| `SAR_MIN_COVERAGE`   | `0.1`                                 | skip frames covering less of the area      |
+| `SAR_KEEP_SCENES`    | `false`                               | keep products (~1-2 GB each) after processing |

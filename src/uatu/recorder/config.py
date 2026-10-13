@@ -1,12 +1,11 @@
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field, SecretStr
 
-from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, DatabaseSettings
+from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, DatabaseSettings, LogSettings
 
 
-class RecorderSettings(DatabaseSettings):
+class RecorderSettings(DatabaseSettings, LogSettings):
     aisstream_api_key: SecretStr
     aisstream_url: str = "wss://stream.aisstream.io/v0/stream"
     ais_bbox: BBoxSetting = STRAIT_OF_GIBRALTAR
@@ -20,9 +19,6 @@ class RecorderSettings(DatabaseSettings):
     shutdown_timeout_s: float = Field(20.0, gt=0)
     raw_archive_dir: Path | None = None
     stats_interval_s: float = Field(60.0, gt=0)
-
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    log_format: Literal["json", "console"] = "json"
 
     @property
     def bounding_box(self) -> list[list[float]]:

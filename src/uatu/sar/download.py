@@ -69,7 +69,8 @@ async def download(client: httpx.AsyncClient, auth: CdseAuth, scene: Scene, dest
                 url = response.headers["location"]
                 continue
             response.raise_for_status()
-            log.info("download_started", scene=scene.name, size_mb=scene.size_bytes // 2**20)
+            size = int(response.headers.get("content-length") or scene.size_bytes)
+            log.info("download_started", scene=scene.name, size_mb=size // 2**20)
             written = 0
             next_report = 256 * 2**20
             with partial.open("wb") as f:

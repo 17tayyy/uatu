@@ -1,6 +1,6 @@
 """Settings shared by every Uatu component, read from environment variables (or a .env file)."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BeforeValidator, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -32,6 +32,13 @@ def bbox_polygon(bbox: BBox) -> Polygon:
     """The bounding box as a lon/lat (x/y) polygon."""
     lat_min, lon_min, lat_max, lon_max = bbox
     return box(lon_min, lat_min, lon_max, lat_max)
+
+
+class LogSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
+
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_format: Literal["json", "console"] = "json"
 
 
 class DatabaseSettings(BaseSettings):

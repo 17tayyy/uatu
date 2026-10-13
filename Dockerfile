@@ -10,8 +10,10 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-editable
 
 FROM python:3.14-slim
+# rasterio's wheels bundle GDAL but expect the system's expat.
+RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --no-create-home uatu \
-    && mkdir -p /data/raw && chown uatu /data/raw
+    && mkdir -p /data/raw /data/sar && chown uatu /data/raw /data/sar
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 # Alembic reads its config from pyproject.toml.
