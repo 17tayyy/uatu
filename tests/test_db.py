@@ -1,7 +1,7 @@
 """Integration tests against a real, migrated PostGIS database.
 
-Run with UATU_TEST_DATABASE_URL set, e.g. against the docker compose database. They only
-touch rows for their own MMSIs and session ids, and delete them afterwards.
+Run with UATU_TEST_DATABASE_URL set to a database no recorder is writing to, e.g. the local
+docker compose one. They only touch their own rows and delete them afterwards.
 """
 
 import os
@@ -148,3 +148,20 @@ async def test_sar_scene_lifecycle(engine):
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(SarScene).where(SarScene.id == uuid.UUID(scene_id)))
+
+
+async def test_ais_health_check_follows_the_recorder(engine):
+    from uatu.db.models import IngestSession
+    from uatu.ops import check_ais
+
+    session = Session(connected_at=datetime.now(UTC) - timedelta(hours=1))
+    session.on_message(datetime.now(UTC) - timedelta(minutes=40))
+    session.close("test: stalled recorder")
+    await write(engine, [], sessions=[session])
+    try:
+        stale = await check_ais(engine, max_age=timedelta(minutes=15))
+        assert not stale.ok and "40 min" in stale.detail
+        assert (await check_ais(engine, max_age=timedelta(hours=1))).ok
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(IngestSession).where(IngestSession.id == session.id))

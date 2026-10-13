@@ -221,8 +221,7 @@ def test_catalog_scenes_group_into_passes():
 def test_worker_skips_scenes_that_barely_cover_the_area():
     from shapely import box
 
-    from uatu.sar.catalog import Scene
-    from uatu.sar.worker import worth_processing
+    from uatu.sar.catalog import Scene, worth_processing
 
     aoi = box(-6.5, 35.5, -4.5, 36.5)
 
