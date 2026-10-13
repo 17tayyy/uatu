@@ -12,7 +12,7 @@ import numpy as np
 
 from uatu.sar.detect import Detection
 from uatu.sar.match import MatchResult
-from uatu.sar.raster import Grid
+from uatu.sar.pipeline import SceneOutput
 
 
 def detections_geojson(detections: list[Detection], result: MatchResult | None, path: Path) -> None:
@@ -49,34 +49,24 @@ def ais_geojson(result: MatchResult, path: Path) -> None:
     _write(path, features)
 
 
-def quicklook(
-    vv: np.ndarray,
-    land: np.ndarray,
-    grid: Grid,
-    detections: list[Detection],
-    result: MatchResult | None,
-    title: str,
-    path: Path,
-    step: int = 8,
-) -> None:
+def quicklook(output: SceneOutput, result: MatchResult | None, title: str, path: Path) -> None:
     """VV backscatter with detections (green: AIS match, red: dark, orange: no AIS coverage to tell)
     and AIS vessels the radar missed (yellow)."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        db = 10 * np.log10(vv[::step, ::step])
+        db = 10 * np.log10(output.vv)
     height, width = db.shape
     fig, ax = plt.subplots(figsize=(16, 16 * height / width), dpi=120)
     ax.imshow(db, cmap="gray", vmin=-25, vmax=0, interpolation="nearest")
-    small_land = land[::step, ::step]
-    ax.imshow(np.ma.masked_where(~small_land, small_land), cmap="Greens", alpha=0.3, vmin=0, vmax=2)
+    ax.imshow(np.ma.masked_where(~output.land, output.land), cmap="Greens", alpha=0.3, vmin=0, vmax=2)
 
-    inv = ~grid.transform
+    inv = ~output.coarse.transform
 
     def pixel(x: float, y: float) -> tuple[float, float]:
         col, row = inv @ (x, y)
-        return col / step, row / step
+        return col - 0.5, row - 0.5  # imshow puts pixel centres on integers
 
     if result is None:
-        for d in detections:
+        for d in output.detections:
             ax.add_patch(plt.Circle(pixel(d.x, d.y), 10, fill=False, color="red", lw=1))
     else:
         for m in result.matches:

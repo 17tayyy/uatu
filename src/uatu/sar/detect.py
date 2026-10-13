@@ -60,9 +60,14 @@ class CfarParams:
 def detect(vv: np.ndarray, vh: np.ndarray, land: np.ndarray, grid: Grid, params: CfarParams) -> list[Detection]:
     """Ships in a scene: CFAR on VV at sea, grouped into objects, without the ones that look like
     speckle, rough sea or sidelobes."""
-    valid = sea_mask(vv, land, grid, params.coast_buffer_m)
+    found = candidates(vv, vh, sea_mask(vv, land, grid, params.coast_buffer_m), grid, params)
+    return suppress_sidelobes(found, params.sidelobe_radius_m, params.sidelobe_contrast_db)
+
+
+def candidates(vv: np.ndarray, vh: np.ndarray, valid: np.ndarray, grid: Grid, params: CfarParams) -> list[Detection]:
+    """Everything but the sidelobe suppression, which needs all the scene's detections at once."""
     hits = cfar(vv, valid, grid, params)
-    found = [
+    return [
         d
         for d in extract(hits, vv, vh, valid, grid, params.merge_m, params.background_m)
         if d.pixels >= params.min_pixels
@@ -70,7 +75,6 @@ def detect(vv: np.ndarray, vh: np.ndarray, land: np.ndarray, grid: Grid, params:
         and d.contrast_db >= params.min_contrast_db
         and not d.vh_db < params.min_vh_db  # NaN (no VH) passes
     ]
-    return suppress_sidelobes(found, params.sidelobe_radius_m, params.sidelobe_contrast_db)
 
 
 def sea_mask(vv: np.ndarray, land: np.ndarray, grid: Grid, coast_buffer_m: float) -> np.ndarray:

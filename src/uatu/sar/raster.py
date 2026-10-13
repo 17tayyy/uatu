@@ -1,19 +1,26 @@
-"""Sentinel-1 GRD scenes as calibrated backscatter on a map grid, and the land mask for that grid."""
+"""Sentinel-1 GRD scenes as calibrated backscatter on a map grid, and the land mask for that grid.
+
+Everything works window by window, so a whole scene never needs to be in memory.
+"""
 
 import hashlib
 import logging
 import math
 import os
 import zipfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
 from xml.etree import ElementTree
 
 import numpy as np
 import rasterio
 from affine import Affine
+from rasterio.control import GroundControlPoint
 from rasterio.crs import CRS
 from rasterio.errors import RasterioIOError
+from rasterio.transform import GCPTransformer
 from rasterio.warp import Resampling, reproject, transform, transform_bounds
 from rasterio.windows import Window
 from shapely import Geometry
@@ -56,9 +63,38 @@ class Grid:
         return self.transform.a
 
     @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        left, top = self.transform.c, self.transform.f
+        return left, top - self.height * self.resolution, left + self.width * self.resolution, top
+
+    @property
     def key(self) -> str:
         """Short fingerprint of the grid, for cache file names."""
         return hashlib.sha1(f"{self.crs.to_string()} {tuple(self.transform)} {self.shape}".encode()).hexdigest()[:10]
+
+    def window(self, window: Window) -> Grid:
+        """The part of this grid covered by a pixel window."""
+        return Grid(
+            self.crs,
+            self.transform @ Affine.translation(window.col_off, window.row_off),
+            int(window.width),
+            int(window.height),
+        )
+
+    def coarsened(self, factor: int) -> Grid:
+        """Same area with pixels `factor` times larger (the last row and column may stick out)."""
+        return Grid(
+            self.crs,
+            self.transform @ Affine.scale(factor),
+            math.ceil(self.width / factor),
+            math.ceil(self.height / factor),
+        )
+
+    def tiles(self, size: int) -> Iterator[Window]:
+        """Windows of at most size x size pixels partitioning the grid."""
+        for row in range(0, self.height, size):
+            for col in range(0, self.width, size):
+                yield Window(col, row, min(size, self.width - col), min(size, self.height - row))
 
     def to_map(self, rows: np.ndarray, cols: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Map coordinates (metres) of pixel centres; rows/cols may be fractional."""
@@ -68,6 +104,18 @@ class Grid:
     def to_lonlat(self, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         lons, lats = transform(self.crs, "EPSG:4326", list(xs), list(ys))
         return np.asarray(lons), np.asarray(lats)
+
+    def outline_lonlat(self, per_side: int = 8) -> tuple[np.ndarray, np.ndarray]:
+        """Points along the grid's edges, in lon/lat."""
+        left, bottom, right, top = self.bounds
+        t = np.linspace(0, 1, per_side)
+        xs = np.concatenate(
+            [left + t * (right - left), np.full(per_side, right), right - t * (right - left), np.full(per_side, left)]
+        )
+        ys = np.concatenate(
+            [np.full(per_side, top), top - t * (top - bottom), np.full(per_side, bottom), bottom + t * (top - bottom)]
+        )
+        return self.to_lonlat(xs, ys)
 
     def profile(self, **overrides) -> dict:
         """Rasterio profile for writing a GeoTIFF on this grid."""
@@ -83,40 +131,76 @@ class Grid:
         } | overrides
 
 
-def sigma0(zip_path: Path, polarisation: str, grid: Grid) -> np.ndarray:
-    """Calibrated backscatter (linear sigma nought) of one polarisation, warped onto the grid.
+class CalibratedBand:
+    """One polarisation of a zipped GRD product, read as calibrated backscatter onto any grid.
 
-    NaN where the scene has no data. Pixels are geolocated from the product's tie points
-    (thin plate spline), with no terrain correction: correct at sea level, which is all
-    that matters for detecting ships.
+    Only the part of the product under the requested grid is read and calibrated. Pixels are
+    geolocated from the product's tie points (thin plate spline), with no terrain correction:
+    correct at sea level, which is all that matters for detecting ships.
     """
-    measurement, calibration = _member_paths(zip_path, polarisation)
-    with zipfile.ZipFile(zip_path) as z:
-        lut = SigmaLut.from_xml(z.read(calibration))
-    with rasterio.open(f"/vsizip/{zip_path.resolve()}/{measurement}") as src:
-        gcps, gcp_crs = src.gcps
-        calibrated = np.empty(src.shape, dtype=np.float32)
-        for row in range(0, src.height, 2048):
-            height = min(2048, src.height - row)
-            dn = src.read(1, window=Window(0, row, src.width, height)).astype(np.float32)
-            a = lut.at(np.arange(row, row + height), src.width)
-            calibrated[row : row + height] = dn * dn / (a * a)
 
+    def __init__(self, zip_path: Path, polarisation: str) -> None:
+        measurement, calibration = _member_paths(zip_path, polarisation)
+        with zipfile.ZipFile(zip_path) as z:
+            self._lut = SigmaLut.from_xml(z.read(calibration))
+        # Measurement rasters are stored uncompressed in the zip, so windows read directly.
+        self._src = rasterio.open(f"/vsizip/{zip_path.resolve()}/{measurement}")
+        self._gcps, self._gcp_crs = self._src.gcps
+        self._to_pixel = GCPTransformer(self._gcps, tps=True)
+
+    def __enter__(self) -> CalibratedBand:
+        return self
+
+    def __exit__(self, *exc: type[BaseException] | BaseException | TracebackType | None) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._src.close()
+
+    def warp(self, grid: Grid) -> np.ndarray:
+        """Linear sigma nought on the grid; NaN where the product has no data."""
+        out = np.full(grid.shape, np.nan, dtype=np.float32)
+        window = self._source_window(grid)
+        if window is None:
+            return out
+        row_off, col_off = int(window.row_off), int(window.col_off)
+        dn = self._src.read(1, window=window).astype(np.float32)
+        a = self._lut.at(np.arange(row_off, row_off + dn.shape[0]), np.arange(col_off, col_off + dn.shape[1]))
+        calibrated = dn * dn / (a * a)
+        gcps = [GroundControlPoint(g.row - row_off, g.col - col_off, g.x, g.y, g.z) for g in self._gcps]
+        reproject(
+            calibrated,
+            out,
+            gcps=gcps,
+            src_crs=self._gcp_crs,
+            src_nodata=0,
+            dst_transform=grid.transform,
+            dst_crs=grid.crs,
+            dst_nodata=np.nan,
+            resampling=Resampling.bilinear,
+            num_threads=os.cpu_count() or 1,
+            SRC_METHOD="GCP_TPS",
+        )
+        return out
+
+    def _source_window(self, grid: Grid, margin: int = 16) -> Window | None:
+        """Product pixels under the grid, or None if they do not overlap."""
+        rows, cols = self._to_pixel.rowcol(*grid.outline_lonlat(), op=float)
+        row_min = max(0, math.floor(min(rows)) - margin)
+        col_min = max(0, math.floor(min(cols)) - margin)
+        row_max = min(self._src.height, math.ceil(max(rows)) + margin)
+        col_max = min(self._src.width, math.ceil(max(cols)) + margin)
+        if row_min >= row_max or col_min >= col_max:
+            return None
+        return Window(col_min, row_min, col_max - col_min, row_max - row_min)
+
+
+def sigma0(zip_path: Path, polarisation: str, grid: Grid, tile: int = 2048) -> np.ndarray:
+    """Calibrated backscatter (linear sigma nought) of one polarisation on a whole grid."""
     out = np.full(grid.shape, np.nan, dtype=np.float32)
-    reproject(
-        calibrated,
-        out,
-        gcps=gcps,
-        src_crs=gcp_crs,
-        src_nodata=0,
-        dst_transform=grid.transform,
-        dst_crs=grid.crs,
-        dst_nodata=np.nan,
-        resampling=Resampling.bilinear,
-        num_threads=os.cpu_count() or 1,
-        warp_mem_limit=1024,
-        SRC_METHOD="GCP_TPS",
-    )
+    with CalibratedBand(zip_path, polarisation) as band:
+        for w in grid.tiles(tile):
+            out[w.toslices()] = band.warp(grid.window(w))
     return out
 
 
@@ -140,10 +224,9 @@ class SigmaLut:
         values = np.array([v.findtext("sigmaNought").split() for v in vectors], dtype=np.float64)
         return cls(lines, values, pixels)
 
-    def at(self, rows: np.ndarray, width: int) -> np.ndarray:
-        """A for every pixel of the given rows, as a (len(rows), width) array."""
-        cols = np.arange(width)
-        per_vector = np.stack([np.interp(cols, self.pixels, v) for v in self.values])  # (n, width)
+    def at(self, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
+        """A at every (row, col) combination, as a (len(rows), len(cols)) array."""
+        per_vector = np.stack([np.interp(cols, self.pixels, v) for v in self.values])  # (n, len(cols))
         upper = np.clip(np.searchsorted(self.lines, rows, side="right"), 1, len(self.lines) - 1)
         lower = upper - 1
         t = ((rows - self.lines[lower]) / (self.lines[upper] - self.lines[lower]))[:, None]
@@ -160,39 +243,48 @@ def _member_paths(zip_path: Path, polarisation: str) -> tuple[str, str]:
     return measurement, calibration
 
 
-def land_mask(grid: Grid, cache_dir: Path) -> np.ndarray:
-    """True on land, from ESA WorldCover 2021 (10 m). Cached on disk: it only depends on the grid."""
+def land_cache(grid: Grid, cache_dir: Path, tile: int = 4096) -> Path:
+    """GeoTIFF of the grid, 1 on land, from ESA WorldCover 2021 (10 m). Built once per grid."""
     path = cache_dir / f"land_{grid.key}.tif"
     if path.exists():
-        with rasterio.open(path) as src:
-            return src.read(1).astype(bool)
-
-    land = np.zeros(grid.shape, dtype=bool)
-    lon_min, lat_min, lon_max, lat_max = transform_bounds(grid.crs, "EPSG:4326", *_bounds(grid))
-    for lat in range(math.floor(lat_min / 3) * 3, math.ceil(lat_max), 3):  # WorldCover tiles are 3° x 3°
-        for lon in range(math.floor(lon_min / 3) * 3, math.ceil(lon_max), 3):
-            tile = f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}{'E' if lon >= 0 else 'W'}{abs(lon):03d}"
-            classes = np.zeros(grid.shape, dtype=np.uint8)
-            try:
-                with rasterio.open(WORLDCOVER_URL.format(tile)) as src:
-                    reproject(
-                        rasterio.band(src, 1),
-                        classes,
-                        dst_transform=grid.transform,
-                        dst_crs=grid.crs,
-                        resampling=Resampling.nearest,
-                        num_threads=os.cpu_count() or 1,
-                    )
-            except RasterioIOError:
-                continue  # no tile: open ocean
-            land |= ~np.isin(classes, _WORLDCOVER_SEA)
-
+        return path
     path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(path, "w", **grid.profile(dtype="uint8", nbits=1)) as dst:
-        dst.write(land.astype(np.uint8), 1)
-    return land
+    partial = path.with_name(path.name + ".part")
+    lon_min, lat_min, lon_max, lat_max = transform_bounds(grid.crs, "EPSG:4326", *grid.bounds)
+    worldcover = [  # tiles are 3° x 3°, named after their south-west corner
+        f"{'N' if lat >= 0 else 'S'}{abs(lat):02d}{'E' if lon >= 0 else 'W'}{abs(lon):03d}"
+        for lat in range(math.floor(lat_min / 3) * 3, math.ceil(lat_max), 3)
+        for lon in range(math.floor(lon_min / 3) * 3, math.ceil(lon_max), 3)
+    ]
+    with rasterio.open(partial, "w", **grid.profile(dtype="uint8", nbits=1)) as dst:
+        for w in grid.tiles(tile):
+            part = grid.window(w)
+            land = np.zeros(part.shape, dtype=bool)
+            for name in worldcover:
+                classes = np.zeros(part.shape, dtype=np.uint8)
+                try:
+                    with rasterio.open(WORLDCOVER_URL.format(name)) as src:
+                        reproject(
+                            rasterio.band(src, 1),
+                            classes,
+                            dst_transform=part.transform,
+                            dst_crs=part.crs,
+                            resampling=Resampling.nearest,
+                            num_threads=os.cpu_count() or 1,
+                        )
+                except RasterioIOError:
+                    continue  # no tile: open ocean
+                land |= ~np.isin(classes, _WORLDCOVER_SEA)
+            dst.write(land.astype(np.uint8), 1, window=w)
+    partial.replace(path)
+    return path
 
 
-def _bounds(grid: Grid) -> tuple[float, float, float, float]:
-    left, top = grid.transform.c, grid.transform.f
-    return left, top - grid.height * grid.resolution, left + grid.width * grid.resolution, top
+def read_land(path: Path, window: Window) -> np.ndarray:
+    with rasterio.open(path) as src:
+        return src.read(1, window=window).astype(bool)
+
+
+def land_mask(grid: Grid, cache_dir: Path) -> np.ndarray:
+    """True on land, for the whole grid."""
+    return read_land(land_cache(grid, cache_dir), Window(0, 0, grid.width, grid.height))

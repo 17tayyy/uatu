@@ -47,6 +47,8 @@ uv run uatu-sar detect data/sar/<scene>.zip --ais
 ```
 
 `detect` writes `detections.geojson`, `ais.geojson` and `quicklook.png` next to the scene.
+Scenes are processed tile by tile (20 km tiles with a 1.6 km halo, so CFAR windows and the
+coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
 
 1. **Calibration**: digital numbers to backscatter, sigma0 = DN² / A², with A interpolated
    from the product's calibration look-up table.

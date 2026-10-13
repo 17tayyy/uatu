@@ -4,12 +4,14 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 from affine import Affine
 from rasterio.crs import CRS
+from rasterio.windows import Window
 
 from uatu.sar.ais import AisVessel, Report, predict
 from uatu.sar.annotation import AcquisitionGeometry
 from uatu.sar.catalog import _scene, group_passes
 from uatu.sar.detect import CfarParams, Detection, detect, suppress_sidelobes
 from uatu.sar.match import Expected, expected_positions, match, split_by_coverage
+from uatu.sar.pipeline import _block_mean, _inside, _pad
 from uatu.sar.raster import Grid, SigmaLut
 
 T0 = datetime(2026, 10, 13, 18, 25, tzinfo=UTC)
@@ -18,9 +20,39 @@ GRID = Grid(CRS.from_epsg(32630), Affine(10, 0, 280_000, 0, -10, 3_990_000), 400
 
 def test_sigma_lut_interpolates_bilinearly():
     lut = SigmaLut(lines=np.array([0.0, 10.0]), values=np.array([[1.0, 3.0], [5.0, 7.0]]), pixels=np.array([0.0, 10.0]))
-    a = lut.at(np.array([0, 5, 10]), width=11)
+    a = lut.at(np.array([0, 5, 10]), np.arange(11))
     assert a[0, 0] == 1 and a[0, 10] == 3 and a[2, 0] == 5 and a[2, 10] == 7
     assert a[1, 5] == 4  # centre: mean of the four corners
+    assert np.array_equal(lut.at(np.array([5]), np.arange(3, 8)), a[1:2, 3:8])  # any window of columns
+
+
+def test_grid_windows_tiles_and_coarsening():
+    sub = GRID.window(Window(100, 50, 30, 20))
+    assert sub.shape == (20, 30)
+    assert np.allclose(sub.to_map(np.array([0]), np.array([0])), GRID.to_map(np.array([50]), np.array([100])))
+    tiles = list(GRID.tiles(150))
+    covered = np.zeros(GRID.shape, dtype=int)
+    for w in tiles:
+        covered[w.toslices()] += 1
+    assert len(tiles) == 9 and (covered == 1).all()  # 150 + 150 + 100 per side, no overlap
+    coarse = GRID.coarsened(8)
+    assert coarse.shape == (50, 50) and coarse.resolution == 80
+    assert (coarse.transform.c, coarse.transform.f) == (GRID.transform.c, GRID.transform.f)  # same origin
+
+
+def test_block_mean_ignores_nan_and_overhang():
+    a = np.array([[1, 3, np.nan], [5, 7, 2]], dtype=np.float32)
+    assert np.array_equal(_block_mean(a, 2), np.array([[4, 2]], dtype=np.float32))
+
+
+def test_tiles_keep_only_detections_centred_in_their_core():
+    core = Window(100, 100, 50, 50)
+    padded = _pad(core, 20, GRID)
+    assert (padded.col_off, padded.row_off, padded.width, padded.height) == (80, 80, 90, 90)
+    assert _pad(Window(0, 0, 50, 50), 20, GRID).col_off == 0  # clipped at the grid edge
+    xs, ys = GRID.to_map(np.array([120, 160]), np.array([120, 120]))
+    inside, outside = det(xs[0], ys[0], 10), det(xs[1], ys[1], 10)
+    assert _inside(inside, GRID, core) and not _inside(outside, GRID, core)
 
 
 def speckled_sea(seed: int = 0) -> np.ndarray:

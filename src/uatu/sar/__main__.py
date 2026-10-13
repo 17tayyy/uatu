@@ -24,10 +24,11 @@ from uatu.sar.ais import vessels_at_acquisition, vessels_nearby
 from uatu.sar.annotation import read_geometry
 from uatu.sar.catalog import group_passes, search
 from uatu.sar.config import SarSettings
-from uatu.sar.detect import CfarParams, detect, sea_mask
+from uatu.sar.detect import CfarParams
 from uatu.sar.download import CdseAuth, download
 from uatu.sar.match import expected_positions, match, split_by_coverage
-from uatu.sar.raster import Grid, land_mask, sigma0
+from uatu.sar.pipeline import process
+from uatu.sar.raster import Grid, land_cache
 
 log = structlog.get_logger(component="sar")
 
@@ -86,11 +87,10 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
     grid = Grid.covering(bbox_polygon(settings.sar_bbox), args.resolution)
     params = CfarParams()
 
-    log.info("calibrating", scene=scene.name, grid=f"{grid.width}x{grid.height} @ {grid.resolution:g} m")
-    vv = sigma0(scene, "VV", grid)
-    vh = sigma0(scene, "VH", grid)
-    land = land_mask(grid, settings.sar_data_dir / "cache")
-    detections = detect(vv, vh, land, grid, params)
+    log.info("processing", scene=scene.name, grid=f"{grid.width}x{grid.height} @ {grid.resolution:g} m")
+    land = land_cache(grid, settings.sar_data_dir / "cache")
+    output = process(scene, grid, land, params)
+    detections = output.detections
     log.info("detected", ships=len(detections))
 
     result = None
@@ -101,8 +101,7 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
         try:
             vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, settings.sar_bbox)
             expected = expected_positions(vessels, geometry, grid, args.max_distance, doppler_sign=args.doppler_sign)
-            imaged = sea_mask(vv, land, grid, params.coast_buffer_m)
-            result = match(detections, expected, imaged, grid)
+            result = match(detections, expected, output.searched, output.coarse)
             nearby = await vessels_nearby(
                 engine, [(d.lon, d.lat) for d in result.dark], middle, radius_m=15_000, window=timedelta(hours=2)
             )
@@ -124,7 +123,7 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
 
     report.detections_geojson(detections, result, out_dir / "detections.geojson")
     title = f"{scene.name[:3]} {geometry.start:%Y-%m-%d %H:%M} UTC - {len(detections)} ship detections"
-    report.quicklook(vv, land, grid, detections, result, title, out_dir / "quicklook.png")
+    report.quicklook(output, result, title, out_dir / "quicklook.png")
     print(out_dir)
     return 0
 
