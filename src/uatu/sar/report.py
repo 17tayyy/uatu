@@ -1,0 +1,98 @@
+"""Outputs of a processed scene: GeoJSON for GIS tools and a quicklook image."""
+
+import json
+from dataclasses import asdict
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+from uatu.sar.detect import Detection
+from uatu.sar.match import MatchResult
+from uatu.sar.raster import Grid
+
+
+def detections_geojson(detections: list[Detection], result: MatchResult | None, path: Path) -> None:
+    """One point per detection, with the AIS vessel it was paired with (if any)."""
+    paired = {id(m.detection): m for m in result.matches} if result else {}
+    features = []
+    for d in detections:
+        properties = asdict(d)
+        if (m := paired.get(id(d))) is not None:
+            v = m.expected.vessel
+            properties |= {"mmsi": v.mmsi, "ais_name": v.name, "ais_length_m": v.length_m, "distance_m": m.distance_m}
+        properties["dark"] = result is not None and id(d) not in paired
+        features.append(_point(d.lon, d.lat, properties))
+    _write(path, features)
+
+
+def ais_geojson(result: MatchResult, path: Path) -> None:
+    """One point per AIS vessel at acquisition time, with whether the radar detected it."""
+    features = []
+    groups = [
+        ("detected", [m.expected for m in result.matches]),
+        ("undetected", result.undetected),
+        ("not_imaged", result.not_imaged),
+    ]
+    for status, group in groups:
+        for e in group:
+            properties = {k: v for k, v in asdict(e.vessel).items() if k not in ("lon", "lat")}
+            properties |= {"status": status, "seen_at": e.vessel.seen_at.isoformat(), "doppler_shift_m": e.shift_m}
+            features.append(_point(e.vessel.lon, e.vessel.lat, properties))
+    _write(path, features)
+
+
+def quicklook(
+    vv: np.ndarray,
+    land: np.ndarray,
+    grid: Grid,
+    detections: list[Detection],
+    result: MatchResult | None,
+    title: str,
+    path: Path,
+    step: int = 8,
+) -> None:
+    """VV backscatter with detections (green: AIS match, red: dark) and AIS vessels the radar missed (yellow)."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        db = 10 * np.log10(vv[::step, ::step])
+    height, width = db.shape
+    fig, ax = plt.subplots(figsize=(16, 16 * height / width), dpi=120)
+    ax.imshow(db, cmap="gray", vmin=-25, vmax=0, interpolation="nearest")
+    small_land = land[::step, ::step]
+    ax.imshow(np.ma.masked_where(~small_land, small_land), cmap="Greens", alpha=0.3, vmin=0, vmax=2)
+
+    inv = ~grid.transform
+
+    def pixel(x: float, y: float) -> tuple[float, float]:
+        col, row = inv @ (x, y)
+        return col / step, row / step
+
+    if result is None:
+        for d in detections:
+            ax.add_patch(plt.Circle(pixel(d.x, d.y), 10, fill=False, color="red", lw=1))
+    else:
+        for m in result.matches:
+            ax.add_patch(plt.Circle(pixel(m.detection.x, m.detection.y), 10, fill=False, color="lime", lw=1))
+        for d in result.dark:
+            ax.add_patch(plt.Circle(pixel(d.x, d.y), 14, fill=False, color="red", lw=1.6))
+        for e in result.undetected:
+            ax.plot(*pixel(e.x, e.y), marker="^", color="yellow", markersize=5, markeredgewidth=0)
+        counts = f"{len(result.matches)} matched, {len(result.dark)} dark, {len(result.undetected)} AIS undetected"
+        title = f"{title}\n{counts}"
+    ax.set_title(title)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _point(lon: float, lat: float, properties: dict) -> dict:
+    clean = {k: (None if isinstance(v, float) and not np.isfinite(v) else v) for k, v in properties.items()}
+    return {"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat]}, "properties": clean}
+
+
+def _write(path: Path, features: list[dict]) -> None:
+    path.write_text(json.dumps({"type": "FeatureCollection", "features": features}, default=str, indent=1))
