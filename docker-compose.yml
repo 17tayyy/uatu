@@ -24,6 +24,20 @@ services:
       timeout: 5s
       retries: 12
 
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]  # keep queued and scheduled tasks across restarts
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   migrate:
     <<: *app
     command: ["alembic", "upgrade", "head"]
@@ -50,6 +64,34 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  sar-worker:
+    <<: *app
+    command: ["ardiq", "run", "--quiet", "uatu.sar.worker:app"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *app-env
+      REDIS_URL: redis://redis:6379
+      SAR_DATA_DIR: /data/sar
+      GDAL_CACHEMAX: "64"  # MB; by default GDAL takes 5% of the host's RAM, ignoring the container's limit
+      MALLOC_ARENA_MAX: "2"  # GDAL's warper threads otherwise each keep an arena of freed memory
+    volumes:
+      - sardata:/data/sar
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    mem_limit: 1500m  # a scene takes ~0.75 GB; never let it squeeze Postgres
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
 volumes:
   pgdata:
   rawdata:
+  redisdata:
+  sardata:

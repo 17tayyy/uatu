@@ -5,7 +5,20 @@ from datetime import datetime
 from typing import Any, ClassVar
 
 from geoalchemy2 import Geography, WKBElement
-from sqlalchemy import CHAR, REAL, BigInteger, Computed, DateTime, Double, Identity, Index, MetaData, SmallInteger
+from sqlalchemy import (
+    CHAR,
+    REAL,
+    BigInteger,
+    Computed,
+    DateTime,
+    Double,
+    ForeignKey,
+    Identity,
+    Index,
+    MetaData,
+    SmallInteger,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -113,3 +126,85 @@ class IngestSession(Base):
     disconnected_at: Mapped[datetime | None]
     messages: Mapped[int] = mapped_column(BigInteger, server_default="0")
     close_reason: Mapped[str | None]
+
+
+class SarScene(Base):
+    """A Sentinel-1 frame over the area, from discovery to its pairing with AIS."""
+
+    __tablename__ = "sar_scenes"
+    __table_args__ = (Index("ix_sar_scenes_footprint", "footprint", postgresql_using="gist"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, comment="Copernicus Data Space product id")
+    name: Mapped[str] = mapped_column(unique=True)
+    platform: Mapped[str] = mapped_column(CHAR(3))
+    datatake: Mapped[str] = mapped_column(comment="satellite pass; shared by the frames of one pass")
+    orbit_direction: Mapped[str]
+    relative_orbit: Mapped[int] = mapped_column(SmallInteger)
+    acquired_from: Mapped[datetime]
+    acquired_to: Mapped[datetime]
+    footprint: Mapped[WKBElement] = mapped_column(Geography("GEOMETRY", srid=4326, spatial_index=False))
+    aoi_coverage: Mapped[float] = mapped_column(REAL, comment="fraction of the area of interest in the frame")
+    status: Mapped[str] = mapped_column(comment="queued | processed | failed")
+    error: Mapped[str | None]
+    discovered_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    processed_at: Mapped[datetime | None]
+    detections: Mapped[int | None]
+    matched: Mapped[int | None]
+    dark: Mapped[int | None]
+    no_coverage: Mapped[int | None]
+    ais_vessels: Mapped[int | None] = mapped_column(comment="AIS vessels placed at acquisition time")
+    ais_undetected: Mapped[int | None] = mapped_column(comment="AIS vessels in the searched sea the radar missed")
+
+
+class SarDetection(Base):
+    """A ship detected on a scene, and what AIS says about it."""
+
+    __tablename__ = "sar_detections"
+    __table_args__ = (
+        Index("ix_sar_detections_scene_id", "scene_id"),
+        Index("ix_sar_detections_seen_at", "seen_at"),
+        Index("ix_sar_detections_geom", "geom", postgresql_using="gist"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    scene_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sar_scenes.id", ondelete="CASCADE"))
+    seen_at: Mapped[datetime] = mapped_column(comment="when the radar looked at this spot")
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+    geom: Mapped[WKBElement] = mapped_column(
+        Geography("POINT", srid=4326, spatial_index=False),
+        Computed("ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography", persisted=True),
+    )
+    status: Mapped[str] = mapped_column(comment="matched | dark | no_coverage | unpaired (no AIS pairing run)")
+    mmsi: Mapped[int | None] = mapped_column(comment="AIS vessel it was paired with")
+    distance_m: Mapped[float | None] = mapped_column(REAL, comment="to the vessel's expected position")
+    ais_vessels_nearby: Mapped[int | None] = mapped_column(SmallInteger, comment="AIS vessels heard around it")
+    pixels: Mapped[int]
+    length_m: Mapped[float] = mapped_column(REAL, comment="rough size from the radar image")
+    peak_db: Mapped[float] = mapped_column(REAL)
+    vv_db: Mapped[float] = mapped_column(REAL)
+    vh_db: Mapped[float | None] = mapped_column(REAL)
+    background_db: Mapped[float | None] = mapped_column(REAL)
+
+
+class SarAisCheck(Base):
+    """An AIS vessel that a scene should have shown, and whether the radar detected it.
+
+    The record of what the detector misses, e.g. as a function of vessel length.
+    """
+
+    __tablename__ = "sar_ais_checks"
+    __table_args__ = (Index("ix_sar_ais_checks_scene_id", "scene_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    scene_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sar_scenes.id", ondelete="CASCADE"))
+    mmsi: Mapped[int]
+    status: Mapped[str] = mapped_column(comment="detected | undetected | not_imaged")
+    seen_at: Mapped[datetime]
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+    length_m: Mapped[int | None] = mapped_column(SmallInteger)
+    ship_type: Mapped[int | None] = mapped_column(SmallInteger)
+    sog: Mapped[float | None] = mapped_column(REAL)
+    report_gap_s: Mapped[float] = mapped_column(REAL, comment="to its nearest real AIS report")
+    doppler_shift_m: Mapped[float] = mapped_column(REAL)

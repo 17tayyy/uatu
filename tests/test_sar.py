@@ -216,3 +216,18 @@ def test_catalog_scenes_group_into_passes():
     assert scenes[0].frame == scenes[1].frame and scenes[1].is_cog and not scenes[0].is_cog
     assert (scenes[0].platform, scenes[0].datatake, scenes[0].relative_orbit) == ("S1C", "013A00", 147)
     assert list(group_passes(scenes)) == ["013A00"]
+
+
+def test_worker_skips_scenes_that_barely_cover_the_area():
+    from shapely import box
+
+    from uatu.sar.catalog import Scene
+    from uatu.sar.worker import worth_processing
+
+    aoi = box(-6.5, 35.5, -4.5, 36.5)
+
+    def scene(id_: str, footprint) -> Scene:
+        return Scene(id_, f"S1C_{id_}", T0, T0, "ASCENDING", 147, 0, True, footprint)
+
+    big, sliver = scene("a", box(-7, 35, -5, 37)), scene("b", box(-4.6, 35, -4, 37))  # 75% and 5%
+    assert worth_processing([big, sliver], aoi, min_coverage=0.1) == [big]

@@ -19,15 +19,11 @@ from pydantic import ValidationError
 from uatu import db
 from uatu.config import bbox_polygon
 from uatu.log import configure_logging
-from uatu.sar import report
-from uatu.sar.ais import vessels_at_acquisition, vessels_nearby
-from uatu.sar.annotation import read_geometry
+from uatu.sar.analysis import PairingParams, analyse, write_outputs
 from uatu.sar.catalog import group_passes, search
 from uatu.sar.config import SarSettings
 from uatu.sar.detect import CfarParams
 from uatu.sar.download import CdseAuth, download
-from uatu.sar.match import expected_positions, match, split_by_coverage
-from uatu.sar.pipeline import process
 from uatu.sar.raster import Grid, land_cache
 
 log = structlog.get_logger(component="sar")
@@ -82,37 +78,25 @@ async def cmd_download(settings: SarSettings, args: argparse.Namespace) -> int:
 
 async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
     scene = Path(args.scene)
-    out_dir = settings.sar_data_dir / scene.name.removesuffix(".zip")
-    out_dir.mkdir(parents=True, exist_ok=True)
     grid = Grid.covering(bbox_polygon(settings.sar_bbox), args.resolution)
-    params = CfarParams()
-
+    pairing = PairingParams(
+        base_tolerance_m=args.max_distance, min_ais_nearby=args.min_ais_nearby, doppler_sign=args.doppler_sign
+    )
     log.info("processing", scene=scene.name, grid=f"{grid.width}x{grid.height} @ {grid.resolution:g} m")
     land = land_cache(grid, settings.sar_data_dir / "cache")
-    output = process(scene, grid, land, params)
-    detections = output.detections
-    log.info("detected", ships=len(detections))
-
-    result = None
-    geometry = read_geometry(scene)
-    if args.ais:
-        middle = geometry.start + timedelta(seconds=geometry.duration_s / 2)
-        engine = db.create_engine(settings.database_url)
-        try:
-            vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, settings.sar_bbox)
-            expected = expected_positions(vessels, geometry, grid, args.max_distance, doppler_sign=args.doppler_sign)
-            result = match(detections, expected, output.searched, output.coarse)
-            nearby = await vessels_nearby(
-                engine, [(d.lon, d.lat) for d in result.dark], middle, radius_m=15_000, window=timedelta(hours=2)
-            )
-        finally:
+    engine = db.create_engine(settings.database_url) if args.ais else None
+    try:
+        analysis = await analyse(scene, grid, land, CfarParams(), engine, settings.sar_bbox, pairing)
+    finally:
+        if engine is not None:
             await engine.dispose()
-        result = split_by_coverage(result, nearby, min_vessels=args.min_ais_nearby)
-        report.ais_geojson(result, out_dir / "ais.geojson")
+
+    log.info("detected", ships=len(analysis.output.detections))
+    if (result := analysis.result) is not None:
         distances = sorted(m.distance_m for m in result.matches)
         log.info(
             "matched",
-            ais_vessels=len(vessels),
+            ais_vessels=analysis.ais_vessels,
             matched=len(result.matches),
             dark=len(result.dark),
             no_coverage=len(result.no_coverage),
@@ -120,10 +104,8 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
             not_imaged=len(result.not_imaged),
             median_distance_m=distances[len(distances) // 2] if distances else None,
         )
-
-    report.detections_geojson(detections, result, out_dir / "detections.geojson")
-    title = f"{scene.name[:3]} {geometry.start:%Y-%m-%d %H:%M} UTC - {len(detections)} ship detections"
-    report.quicklook(output, result, title, out_dir / "quicklook.png")
+    out_dir = settings.sar_data_dir / analysis.name
+    write_outputs(analysis, out_dir)
     print(out_dir)
     return 0
 
