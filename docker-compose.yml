@@ -101,8 +101,10 @@ services:
     environment:
       <<: *app-env
       SAR_DATA_DIR: /data/sar
+      WEB_CACHE_DIR: /data/web-cache
     volumes:
       - sardata:/data/sar:ro  # radar overlays and the land mask, written by the worker
+      - webcache:/data/web-cache  # optical chips, fetched on first request
     ports:
       - "${WEB_PORT:-8000}:8000"
     depends_on:
@@ -121,6 +123,7 @@ services:
         max-file: "5"
 
 volumes:
+  webcache:
   pgdata:
   rawdata:
   redisdata:
