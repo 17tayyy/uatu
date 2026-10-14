@@ -8,9 +8,11 @@ kind of stop it is comes first from the vessel itself (AIS navigational status "
 "moored"), else from where it is: by the coast near a port, a berth; within 10 km of the coast,
 an anchorage; further out, lying still at sea.
 
-A transit is a crossing of the Strait's narrows, east of Tarifa: east into the Mediterranean or
-west into the Atlantic. The meridian is east of Tarifa's and Tangier's ferry terminals and west
-of Algeciras and Tanger Med, so that the ferries crossing between them never count.
+A transit is a passage through the Strait's narrows: east into the Mediterranean or west into the
+Atlantic. It is placed where the track crosses a meridian east of Tarifa, and counts only if the
+vessel came from well beyond it on one side and went on well beyond it on the other: ships
+manoeuvring off Tanger Med's breakwater cross that meridian back and forth, and the ferries
+between Tarifa and Tangier and between Algeciras and Tanger Med never reach both sides.
 """
 
 from collections.abc import Sequence
@@ -42,6 +44,10 @@ class StopParams:
     strait_lon: float = -5.55
     strait_lats: tuple[float, float] = (35.85, 36.06)  # the narrows between the two coasts on that meridian
     transit_max_gap_s: float = 3 * 3600  # two reports further apart don't say where it crossed
+    # A passage comes from west of this and goes on east of that (or the other way), within hours.
+    transit_west_lon: float = -5.65
+    transit_east_lon: float = -5.45
+    transit_within_s: float = 6 * 3600
 
 
 DEFAULT_STOPS = StopParams()
@@ -172,8 +178,14 @@ def detect_transits(tracks: Sequence[Track], p: StopParams = DEFAULT_STOPS) -> l
             lat = float(tr.lat[k] + f * (tr.lat[k + 1] - tr.lat[k]))
             if not p.strait_lats[0] <= lat <= p.strait_lats[1]:
                 continue
+            east = bool(tr.lon[k + 1] > tr.lon[k])
+            before = (tr.t >= tr.t[k] - p.transit_within_s) & (np.arange(len(tr.t)) <= k)
+            after = (tr.t <= tr.t[k + 1] + p.transit_within_s) & (np.arange(len(tr.t)) > k)
+            came_from, went_to = (tr.lon[before], tr.lon[after]) if east else (tr.lon[after], tr.lon[before])
+            if not ((came_from <= p.transit_west_lon).any() and (went_to >= p.transit_east_lon).any()):
+                continue  # turned back at the meridian, or not seen beyond it yet
             at = _utc(tr.t[k] + f * (tr.t[k + 1] - tr.t[k]))
-            transits.append(Transit(tr.mmsi, at, "east" if tr.lon[k + 1] > tr.lon[k] else "west", round(lat, 5)))
+            transits.append(Transit(tr.mmsi, at, "east" if east else "west", round(lat, 5)))
     return transits
 
 
