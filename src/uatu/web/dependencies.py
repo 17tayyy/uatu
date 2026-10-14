@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,10 @@ async def get_scope(
     return found
 
 
+async def get_http(request: Request) -> httpx.AsyncClient:
+    return request.app.state.http
+
+
 async def get_land(request: Request) -> FeatureCollection[LandProperties]:
     return request.app.state.land
 
@@ -36,4 +41,5 @@ async def get_land(request: Request) -> FeatureCollection[LandProperties]:
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 Settings = Annotated[WebSettings, Depends(get_settings)]
 ZoneScope = Annotated[Scope, Depends(get_scope)]
+HttpClient = Annotated[httpx.AsyncClient, Depends(get_http)]
 LandOutlines = Annotated[FeatureCollection[LandProperties], Depends(get_land)]

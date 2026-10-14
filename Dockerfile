@@ -14,7 +14,7 @@ FROM python:3.14-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --no-create-home uatu \
-    && mkdir -p /data/raw /data/sar /data/backups && chown uatu /data/raw /data/sar /data/backups
+    && mkdir -p /data/raw /data/sar /data/backups /data/web-cache && chown uatu /data/raw /data/sar /data/backups /data/web-cache
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 # Alembic reads its config from pyproject.toml.

@@ -405,6 +405,8 @@ div.row:hover { background: none; }
 
 .maplibregl-popup-close-button:hover { background: none; color: var(--ink); }
 
+.popup { max-height: min(48vh, 440px); overflow-y: auto; overscroll-behavior: contain; }
+
 .popup-title { margin: 0 18px 4px 0; font-weight: 600; overflow-wrap: anywhere; }
 
 .popup .kv { grid-template-columns: auto 1fr; gap: 3px 10px; padding: 6px 0 0; font-size: 12px; }
@@ -416,6 +418,14 @@ div.row:hover { background: none; }
 .popup .actions button { color: var(--ink); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
 
 .popup .text { margin: 4px 0 0; color: var(--ink-2); }
+
+.optical { margin-top: 10px; }
+
+.optical-button { color: var(--ink); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; font-size: 12px; }
+
+.optical-img { display: block; width: 100%; border-radius: 6px; }
+
+.optical-caption { margin-top: 4px; color: var(--muted); font-size: 12px; }
 
 .reception { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
 

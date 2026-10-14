@@ -255,6 +255,14 @@ strongly in VV and VH alike, as ships do. It covers the sea only: land comes fro
 browser: restrict it to the dashboard's origin), else [Sentinel-2 cloudless](https://s2maps.eu) by
 EOX (10 m, CC BY-NC-SA 4.0). A "recent radar" layer mosaics the passes of the last week, newest on
 top, so the whole coast shows its latest radar image at once.
+
+Each detection's popup can show **a Sentinel-2 photo of its place**: the closest scene in time,
+within 3 days, with the spot mostly free of cloud (by the scene's own classification), as a 4 km
+chip read straight from the Cloud Optimised GeoTIFFs of Element 84's
+[Earth Search](https://element84.com/earth-search/) catalogue on AWS, without downloading the
+scene. Sentinel-2 passes around 11:00 UTC, hours from the radar: anchored ships, platforms and
+fish farms show where the radar saw them, moving ships do not. Chips are kept in the `webcache`
+volume; "none found" is looked up again after 6 hours, as scenes keep arriving.
 It draws its own base map with MapLibre GL, no third-party tiles: land from the SAR land mask in
 the watched area (its edge dashed), and from [Natural Earth](https://www.naturalearthdata.com)
 (public domain) around it. The radar image, land included, covers the part of the area inside the
@@ -369,3 +377,4 @@ Environment variables (or `.env`):
 | `MIN_FREE_DISK`      | `0.1`                                 | alert below this fraction of free disk     |
 | `WEB_PORT`           | `8000`                                | dashboard port on the host (docker compose) |
 | `MAPTILER_KEY`       | unset                                 | satellite imagery on land; else Sentinel-2 cloudless |
+| `WEB_CACHE_DIR`      | `data/web-cache`                      | optical chips the dashboard fetched (`webcache` volume) |

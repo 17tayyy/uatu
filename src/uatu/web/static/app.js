@@ -694,8 +694,61 @@ function detectionPopup(p, lngLat) {
     kv(rows),
     reception,
     actions.length && h("div", { class: "actions" }, actions),
+    opticalBox(p.id),
   ]);
   if (ais) link(lngLat, ais.geometry.coordinates);
+}
+
+/** A button that looks for a Sentinel-2 photo of the detection's place, and then shows it. */
+function opticalBox(detectionId) {
+  const box = h("div", { class: "optical" });
+  const look = async () => {
+    fill(box, h("div", { class: "optical-caption" }, "Buscando una imagen sin nubes… (unos segundos)"));
+    try {
+      const image = await api(`/detections/${detectionId}/optical`);
+      if (!image) {
+        fill(box, h("div", { class: "optical-caption" }, "No hay imagen óptica sin nubes de ese sitio en ±3 días."));
+        return;
+      }
+      const img = h("img", { class: "optical-img", src: image.url, alt: "Imagen Sentinel-2 del lugar de la detección" });
+      img.addEventListener("load", () => {
+        // Grown: bring the detection near the top of the map, so the popup has room below it.
+        if (popup && !phone.matches) {
+          const room = map.getContainer().clientHeight / 2 - 70;
+          map.easeTo({ center: popup.getLngLat(), offset: [0, -room], duration: 400 });
+        }
+        img.scrollIntoView({ block: "nearest" });
+      });
+      fill(
+        box,
+        img,
+        h("div", { class: "optical-caption" }, opticalCaption(image)),
+        h(
+          "div",
+          { class: "optical-caption" },
+          "El círculo rojo marca dónde lo vio el radar. Un barco en marcha ya estará en otro sitio; uno fondeado, una plataforma o una granja, no.",
+        ),
+      );
+    } catch (error) {
+      fill(box, h("div", { class: "optical-caption" }, `No se pudo buscar: ${error.message}`));
+    }
+  };
+  fill(box, h("button", { class: "optical-button", onclick: look }, "Ver foto óptica (Sentinel-2)"));
+  return box;
+}
+
+function opticalCaption(image) {
+  const minutes = Math.abs(image.minutes_from_radar);
+  const gap = minutes < 48 * 60 ? duration(minutes) : `${Math.round(minutes / 1440)} días`;
+  const side = image.minutes_from_radar >= 0 ? "después" : "antes";
+  const km = (image.size_m / 1000).toLocaleString("es-ES");
+  return [
+    `Sentinel-${image.platform.replace("sentinel-", "").toUpperCase()}`,
+    when(image.acquired_at),
+    `${gap} ${side} del radar`,
+    `nubes ${Math.round(image.cloud * 100)} %`,
+    `${km} × ${km} km`,
+  ].join(" · ");
 }
 
 /** For an unpaired detection: how much AIS was heard around it, against what counts as well received. */
