@@ -220,7 +220,7 @@ async def test_passes(client, tmp_path):
     (overlay / "backscatter.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (overlay / "backscatter.json").write_text("[[-6, 36.5], [-5, 36.5], [-5, 35.5], [-6, 35.5]]")
     detail = await ok(client, f"/api/v1/passes/{SCENE_ID}")
-    assert detail["image"]["url"] == f"/api/v1/passes/{SCENE_ID}/image"
+    assert detail["image"]["url"].startswith(f"/api/v1/passes/{SCENE_ID}/image?v=")
     assert detail["image"]["coordinates"] == [[-6, 36.5], [-5, 36.5], [-5, 35.5], [-6, 35.5]]
     image = await client.get(detail["image"]["url"])
     assert image.status_code == 200
