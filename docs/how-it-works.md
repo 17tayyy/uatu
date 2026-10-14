@@ -164,11 +164,14 @@ coast, at anchor; further out, lying still at sea, which is where ship-to-ship t
 Stops are named after the nearest port of the World Port Index.
 
 **Crossing the Strait.** A passage is placed where a vessel's track crosses the meridian 5°33' W
-between the two coasts. It counts only if the vessel came from west of 5°39' W and went on east of
-5°27' W, or the other way, within a few hours. A bare crossing was not enough: a container ship
+between the two coasts. It counts only if the vessel came from west of Tarifa (5°36' W) and went on
+east of 5°27' W, or the other way, within a few hours. A bare crossing was not enough: a container ship
 manoeuvring off Tanger Med's breakwater crossed it west and back east before berthing, two
 "passages" in three hours. The ferries between Tarifa and Tangier and between Algeciras and
-Tanger Med, dozens a day, never reach both sides.
+Tanger Med, dozens a day, never reach both sides. The western line is Tarifa's because aisstream
+hears little beyond it: a line 3 km further west halved the westbound passages found, to 18
+against 58 eastbound. Even on Tarifa's, westbound ships are heard less (48 against 76 over the
+first two days): counts of passages are a floor, not a census.
 
 ## 10. Lessons from running it
 

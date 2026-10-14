@@ -160,8 +160,9 @@ current. A stop survives a few hours unheard if the vessel is found where it was
 could have taken it: at anchor in the Bay of Algeciras, aisstream may hear it once an hour. What kind of stop it is comes from the vessel's own AIS status ("at anchor",
 "moored") when it gives one, else from where it is. Each stop is named after the nearest port
 ("fondeado frente a Ceuta"). Passages through the Strait's narrows are counted east or west: from
-west of 5°39' W to east of 5°27' W or the other way. The Tarifa–Tangier and Algeciras–Tanger Med
-ferries and the ships manoeuvring off Tanger Med never count. A sanctioned or watchlisted vessel stopping is an event (`listed_stop`): an
+west of Tarifa (5°36' W) to east of 5°27' W or the other way. The Tarifa–Tangier and
+Algeciras–Tanger Med ferries and the ships manoeuvring off Tanger Med never count. Westbound
+passages are undercounted: aisstream hears little west of Tarifa, where they are confirmed. A sanctioned or watchlisted vessel stopping is an event (`listed_stop`): an
 alert if it is alongside in a port and sanctioned or run by a sanctioned company, notable otherwise.
 A vessel's card shows its last 30 days of stops and crossings.
 
