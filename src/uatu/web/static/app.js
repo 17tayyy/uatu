@@ -1606,15 +1606,16 @@ async function renderVessel(mmsi) {
 
 // Where a vessel stopped and when it crossed the Strait: one timeline, newest first.
 const STOP = {
-  berth: { label: "En puerto", color: C.blue },
-  anchorage: { label: "Fondeado", color: C.ink2 },
-  drifting: { label: "Parado mar adentro", color: C.serious },
+  berth: { label: "Puerto", title: "En puerto", color: C.blue },
+  anchorage: { label: "Fondeo", title: "Fondeado", color: C.ink2 },
+  drifting: { label: "Parado", title: "Parado mar adentro", color: C.serious },
 };
 const COUNTRY = { Spain: "España", Morocco: "Marruecos", Algeria: "Argelia", France: "Francia", Italy: "Italia", Tunisia: "Túnez" };
 
 function stopTitle(s) {
-  const where = s.place && s.place_country && s.place_country !== "Spain" ? `${s.place} (${COUNTRY[s.place_country] ?? s.place_country})` : s.place;
-  if (!where) return STOP[s.kind].label;
+  const abroad = s.place_country && !["Spain", s.place].includes(s.place_country); // not "Gibraltar (Gibraltar)"
+  const where = abroad ? `${s.place} (${COUNTRY[s.place_country] ?? s.place_country})` : s.place;
+  if (!where) return STOP[s.kind].title;
   if (s.kind === "berth") return `Puerto de ${where}`;
   if (s.kind === "anchorage") return `Fondeado frente a ${where}`;
   return `Parado mar adentro, a ${Math.round(s.place_km)} km de ${where}`;

@@ -155,9 +155,9 @@ Reference data, refreshed by the worker:
   domain), 3,800 ports worldwide, weekly: to name where vessels stop.
 
 **Where vessels stop, and when they cross the Strait.** Each analysis also finds the vessels that
-stay put for an hour or more, at a berth, at anchor or lying still at sea. A stop survives a few
-hours unheard if the vessel is found where it was: at anchor in the Bay of Algeciras, aisstream may
-hear it once an hour. What kind of stop it is comes from the vessel's own AIS status ("at anchor",
+stay put for an hour or more, at a berth, at anchor or lying still at sea, drifting with the
+current. A stop survives a few hours unheard if the vessel is found where it was, or where drifting
+could have taken it: at anchor in the Bay of Algeciras, aisstream may hear it once an hour. What kind of stop it is comes from the vessel's own AIS status ("at anchor",
 "moored") when it gives one, else from where it is. Each stop is named after the nearest port
 ("fondeado frente a Ceuta"). Crossings of the Strait's narrows, east of Tarifa, are counted east or
 west. The meridian runs between the ferry terminals, so the Tarifa–Tangier and Algeciras–Tanger Med

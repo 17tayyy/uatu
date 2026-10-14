@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from uatu.ais.events import Event, LocalProjection, StaticReport, Track, ais_day
+from uatu.ais.events import KNOT, Event, LocalProjection, StaticReport, Track, ais_day
 from uatu.ais.stops import DEFAULT_STOPS, Ports, Stop, StopParams, Transit
 from uatu.ais.stops import Port as NamedPort
 from uatu.config import BBox
@@ -469,7 +469,9 @@ async def save_stops(
     engine: AsyncEngine, stops: list[Stop], zone: str | None, p: StopParams = DEFAULT_STOPS
 ) -> list[Stop]:
     """Store stops, extending the one a vessel was already found at rather than adding another (each
-    analysis sees a few hours: a stop of days is seen in pieces). The stops, from their first report."""
+    analysis sees a few hours: a stop of days is seen in pieces). A piece is the same stop if it
+    overlaps it in time, or follows it closely where drifting could have taken the vessel. The
+    stops, from their first report."""
     gap = timedelta(seconds=p.max_silence_s)
     kept = []
     async with engine.begin() as conn:
@@ -494,8 +496,7 @@ async def save_stops(
                     .order_by(VesselStop.start_at)
                 )
             ).all()
-            proj = LocalProjection(s.lon, s.lat)
-            same = next((c for c in candidates if np.hypot(*proj.xy(c.lon, c.lat)) <= p.radius_m), None)
+            same = next((c for c in candidates if _same_stop(s, c, p)), None)
             if same is None:
                 await conn.execute(pg_insert(VesselStop).values(mmsi=s.mmsi, start_at=s.start, end_at=s.end, **values))
                 kept.append(s)
@@ -508,6 +509,15 @@ async def save_stops(
             )
             kept.append(replace(s, start=start, end=end))
     return kept
+
+
+def _same_stop(s: Stop, stored: Any, p: StopParams) -> bool:
+    """Whether a stop just found is (a piece of) one stored, as detect_stops would have joined them."""
+    if stored.start_at <= s.end and stored.end_at >= s.start:
+        return True  # a vessel is at one stop at a time
+    middle = (s.start + (s.end - s.start) / 2) - (stored.start_at + (stored.end_at - stored.start_at) / 2)
+    apart = np.hypot(*LocalProjection(s.lon, s.lat).xy(stored.lon, stored.lat))
+    return apart <= max(p.jitter_m, p.drift_sog * KNOT * abs(middle.total_seconds()))  # no faster than drifting
 
 
 async def clear_stops(engine: AsyncEngine, since: datetime) -> None:

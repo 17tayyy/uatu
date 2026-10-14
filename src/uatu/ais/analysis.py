@@ -1,7 +1,7 @@
 """One pass of AIS analysis: run every detector over the recent record and store what they find."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -185,7 +185,9 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
         case "listed_stop":
             who = {"sanctioned": "sancionado", "sanctioned_owner": "con gestor sancionado"}.get(d["listed"], "vigilado")
             title = f"Barco {who} {stop_place(d)}: {name}"
-            message = f"{name} (MMSI {e.mmsi}) lleva {d['hours']} h {stop_place(d)}. Posición {where}."
+            ongoing = e.end is None or e.end > datetime.now(UTC) - timedelta(minutes=30)
+            message = f"{name} (MMSI {e.mmsi}) {'lleva' if ongoing else 'estuvo'} {d['hours']} h {stop_place(d)}."
+            message += f" Posición {where}."
         case "identity_change":
             title = f"Cambio de identidad: {name}"
             message = f"MMSI {e.mmsi} ha cambiado su {d['field']}: {d['before']} → {d['after']}."

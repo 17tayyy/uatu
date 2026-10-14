@@ -153,9 +153,11 @@ area learnt from the record itself, stopping is routine and only informative.
 
 **Where vessels stop.** Behind every sanctioned tanker passing Gibraltar is the question of what
 it does here: does it berth, take on fuel at anchor off Ceuta or in the Bay of Algeciras, or meet
-another ship? A stop is a vessel under 1 knot, staying within 1 km, for an hour or more. It
-survives up to 6 hours unheard if the vessel is found where it was: in the bay, aisstream may hear
-an anchored ship once an hour. Each analysis sees a few hours, so a stop of days is stored in pieces
+another ship? A stop is a vessel under 1 knot for an hour or more that, between two reports, moves
+no faster than a ship drifting with the current (2 knots, beyond a few hundred metres of GPS
+jitter). A fixed radius cut ships waiting off Tanger Med into pieces as they drifted. A stop
+survives up to 6 hours unheard if the vessel is found where it was, or where drifting could have
+taken it: in the bay, aisstream may hear an anchored ship once an hour. Each analysis sees a few hours, so a stop of days is stored in pieces
 and joined. The vessel's own AIS status says what kind of stop it is when it gives one ("at
 anchor", "moored"). Else the place does: by the coast and a port, alongside; within 10 km of the
 coast, at anchor; further out, lying still at sea, which is where ship-to-ship transfers happen.
