@@ -186,6 +186,39 @@ class SarDetection(Base):
     vv_db: Mapped[float] = mapped_column(REAL)
     vh_db: Mapped[float | None] = mapped_column(REAL)
     background_db: Mapped[float | None] = mapped_column(REAL)
+    fixed_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sar_fixed_objects.id", ondelete="SET NULL"), comment="recurring object it belongs to"
+    )
+    suspected_mmsi: Mapped[int | None] = mapped_column(
+        comment="for an unpaired detection: a vessel that had gone silent and would be about here"
+    )
+    suspect_distance_m: Mapped[float | None] = mapped_column(REAL, comment="to that vessel's estimated position")
+    suspect_silent_minutes: Mapped[float | None] = mapped_column(REAL, comment="since its nearest AIS report")
+
+
+class SarFixedObject(Base):
+    """A place where the radar keeps detecting something, pass after pass: platforms, buoys, fish
+    farms, long-term moorings. Rebuilt from all detections; not a vessel to chase."""
+
+    __tablename__ = "sar_fixed_objects"
+    __table_args__ = (Index("ix_sar_fixed_objects_geom", "geom", postgresql_using="gist"),)
+
+    id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+    geom: Mapped[WKBElement] = mapped_column(
+        Geography("POINT", srid=4326, spatial_index=False),
+        Computed("ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography", persisted=True),
+    )
+    passes_seen: Mapped[int] = mapped_column(comment="satellite passes that detected it")
+    passes_covering: Mapped[int] = mapped_column(comment="processed passes whose footprint covers it")
+    persistence: Mapped[float] = mapped_column(REAL, comment="passes_seen / passes_covering")
+    fixed: Mapped[bool] = mapped_column(comment="persistent enough to be a structure, not traffic")
+    detections: Mapped[int]
+    length_m: Mapped[float] = mapped_column(REAL, comment="median detected size")
+    first_seen: Mapped[datetime]
+    last_seen: Mapped[datetime]
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class SarAisCheck(Base):

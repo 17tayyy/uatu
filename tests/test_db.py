@@ -233,3 +233,57 @@ async def test_a_sanctioned_vessels_visit_is_one_event_and_severity_follows_the_
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(AisEvent).where(AisEvent.mmsi == MMSI_A))
+
+
+async def test_fixed_objects_and_the_scene_report(engine):
+    from shapely import box
+
+    from uatu.db.models import SarDetection, SarScene
+    from uatu.sar import store
+
+    footprint = f"SRID=4326;{box(-6.0, 35.5, -5.0, 36.5).wkt}"
+    scene_ids = [uuid.UUID(f"00000000-0000-0000-0000-0000000fe{k:03d}") for k in range(4)]
+
+    def scene(k: int) -> dict:
+        start = T0 - timedelta(days=6 * (3 - k))
+        return {
+            "id": scene_ids[k], "name": f"S1C_TEST_{k}", "platform": "S1C", "datatake": f"TEST{k:02d}",
+            "orbit_direction": "ASCENDING", "relative_orbit": 147, "acquired_from": start,
+            "acquired_to": start + timedelta(seconds=25), "footprint": footprint, "aoi_coverage": 0.5,
+            "status": "processed",
+        }  # fmt: skip
+
+    def detection(k: int, lon: float, lat: float, status: str = "unpaired", **suspect) -> dict:
+        return {
+            "scene_id": scene_ids[k], "seen_at": T0, "lat": lat, "lon": lon, "status": status, "pixels": 20,
+            "length_m": 120.0, "peak_db": 15.0, "vv_db": 10.0,
+            "suspected_mmsi": None, "suspect_silent_minutes": None, **suspect,  # same keys in every row
+        }  # fmt: skip
+
+    buoy = (-5.5, 36.0)  # in 3 of the 4 passes over it: fixed
+    rows = [detection(k, *buoy, status="dark" if k == 3 else "unpaired") for k in range(3)]
+    rows += [detection(2, -5.4, 36.05), detection(3, -5.4, 36.0501)]  # twice: recurring, not fixed
+    rows += [
+        detection(3, -5.30, 36.10, "dark"),  # nobody: unidentified
+        detection(
+            3, -5.25, 36.10, "dark", suspected_mmsi=MMSI_A, suspect_silent_minutes=95.0, suspect_distance_m=900.0
+        ),
+        detection(
+            3, -5.20, 36.10, "dark", suspected_mmsi=MMSI_B, suspect_silent_minutes=12.0, suspect_distance_m=150.0
+        ),
+        detection(3, -5.15, 36.10, "matched"),
+    ]
+    rows[2]["status"] = "dark"  # the buoy, seen in the latest pass: not a candidate
+    rows[2]["scene_id"] = scene_ids[3]
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(insert(SarScene), [scene(k) for k in range(4)])
+            await conn.execute(insert(SarDetection), rows)
+        assert await store.rebuild_fixed_objects(engine, srid=32630) == {"recurring": 2, "fixed": 1}
+
+        report = await store.scene_report(engine, scene_ids[3])
+        assert (report.detections, report.matched, report.at_fixed_objects) == (6, 1, 1)
+        assert sorted(c.kind for c in report.candidates) == ["reception_gap", "unidentified", "went_silent"]
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(SarScene).where(SarScene.id.in_(scene_ids)))

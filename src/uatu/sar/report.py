@@ -3,6 +3,7 @@
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib
 
@@ -13,6 +14,9 @@ import numpy as np
 from uatu.sar.detect import Detection
 from uatu.sar.match import MatchResult
 from uatu.sar.pipeline import SceneOutput
+
+if TYPE_CHECKING:
+    from uatu.sar.store import SceneReport
 
 
 def detections_geojson(detections: list[Detection], result: MatchResult | None, path: Path) -> None:
@@ -96,3 +100,37 @@ def _point(lon: float, lat: float, properties: dict) -> dict:
 
 def _write(path: Path, features: list[dict]) -> None:
     path.write_text(json.dumps({"type": "FeatureCollection", "features": features}, default=str, indent=1))
+
+
+def scene_notification(r: SceneReport) -> tuple[str, str, str, str | None]:
+    """(title, message, priority, link) summarising a processed pass, in Spanish."""
+    interesting = [c for c in r.candidates if c.kind != "reception_gap"]
+    gaps = len(r.candidates) - len(interesting)
+    when = f"{r.name[:3]} {r.acquired:%d/%m %H:%M} UTC"
+    title = f"Pasada {when}: " + (f"{len(interesting)} barcos sin AIS" if interesting else "sin barcos oscuros")
+    lines = [
+        f"{r.detections} barcos detectados ({r.coverage:.0%} de la zona): {r.matched} con AIS,"
+        f" {r.no_coverage} donde no hay cobertura AIS, {r.at_fixed_objects} en objetos fijos."
+    ]
+    if r.candidates:
+        lines.append(f"{len(r.candidates)} sin AIS donde sí hay cobertura; {gaps} explicados por huecos de recepción.")
+    for c in interesting[:6]:
+        where = f"{c.lat:.4f}, {c.lon:.4f}, ~{c.length_m:.0f} m"
+        if c.kind == "went_silent":
+            hours, minutes = divmod(round(c.suspect_silent_minutes or 0), 60)
+            name = c.suspect_name or f"MMSI {c.suspected_mmsi}"
+            sanctioned = f" ⚠ SANCIONADO ({c.suspect_sanctioned})" if c.suspect_sanctioned else ""
+            lines.append(
+                f"• Se calló: {name}{sanctioned}, {hours} h {minutes:02d} min sin emitir,"
+                f" a {(c.suspect_distance_m or 0) / 1000:.1f} km ({where})"
+            )
+        else:
+            lines.append(f"• Sin identificar ({where})")
+    if len(interesting) > 6:
+        lines.append(f"… y {len(interesting) - 6} más")
+    priority = "high" if any(c.suspect_sanctioned for c in interesting) else "default"
+    link = None
+    if interesting:
+        c = interesting[0]
+        link = f"https://www.openstreetmap.org/?mlat={c.lat:.5f}&mlon={c.lon:.5f}#map=12/{c.lat:.4f}/{c.lon:.4f}"
+    return title, "\n".join(lines), priority, link

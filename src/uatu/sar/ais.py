@@ -14,6 +14,7 @@ from uatu.db.models import Position, Vessel
 from uatu.sar.annotation import AcquisitionGeometry
 
 MAX_GAP = timedelta(minutes=10)  # never estimate a position further than this from a real report
+SILENT_WINDOW = timedelta(hours=3)  # how long a vessel may have been silent to be a dark suspect
 _METRES_PER_DEGREE = 111_320.0
 
 
@@ -67,13 +68,47 @@ async def vessels_at_acquisition(
     return found
 
 
-def predict(reports: list[Report], t: datetime) -> tuple[float, float, float | None, float | None, float] | None:
+async def silent_vessels(
+    engine: AsyncEngine, geometry: AcquisitionGeometry, duration_s: float, bbox: BBox, window: timedelta = SILENT_WINDOW
+) -> list[AisVessel]:
+    """Vessels heard within `window` of the acquisition but silent around it, placed where they
+    would be: interpolated across the silence, or dead-reckoned from the last report.
+
+    A ship the radar sees but AIS does not may be one of these, having switched its transponder
+    off (or out of reception). report_gap_s says how long it had been silent.
+    """
+    start = geometry.start - window
+    end = geometry.start + timedelta(seconds=duration_s) + window
+    tracks = await _tracks(engine, start, end, bbox)
+    middle = geometry.start + timedelta(seconds=duration_s / 2)
+    silent = {mmsi: reports for mmsi, reports in tracks.items() if predict(reports, middle) is None}
+    statics = await _statics(engine, list(silent))
+    found = []
+    for mmsi, reports in silent.items():
+        t, estimate = middle, None
+        for _ in range(2):
+            estimate = predict(reports, t, max_gap=window)
+            if estimate is None:
+                break
+            t = geometry.time_at(np.array([estimate[0]]), np.array([estimate[1]]))[0]
+        if estimate is None:
+            continue
+        lon, lat, sog, cog, gap_s = estimate
+        name, ship_type, length_m = statics.get(mmsi, (None, None, None))
+        found.append(AisVessel(mmsi, name, ship_type, length_m, lon, lat, sog, cog, t, gap_s))
+    return found
+
+
+def predict(
+    reports: list[Report], t: datetime, max_gap: timedelta = MAX_GAP
+) -> tuple[float, float, float | None, float | None, float] | None:
     """Position at time t from a vessel's time-ordered reports: interpolated between the reports
-    around t, or dead-reckoned from the nearest one with its speed and course."""
+    around t, or dead-reckoned from the nearest one with its speed and course; None if no report
+    is within max_gap of t."""
     i = bisect_left([r.t for r in reports], t)
     before = reports[i - 1] if i > 0 else None
     after = reports[i] if i < len(reports) else None
-    if before is not None and after is not None and after.t - before.t <= 2 * MAX_GAP:
+    if before is not None and after is not None and after.t - before.t <= 2 * max_gap:
         f = (t - before.t) / (after.t - before.t) if after.t > before.t else 0.0
         nearest = before if f < 0.5 else after
         gap = min(t - before.t, after.t - t).total_seconds()
@@ -87,7 +122,7 @@ def predict(reports: list[Report], t: datetime) -> tuple[float, float, float | N
     candidates = [r for r in (before, after) if r is not None]
     nearest = min(candidates, key=lambda r: abs((t - r.t).total_seconds()))
     dt = (t - nearest.t).total_seconds()
-    if abs(dt) > MAX_GAP.total_seconds():
+    if abs(dt) > max_gap.total_seconds():
         return None
     lon, lat = nearest.lon, nearest.lat
     if nearest.sog is not None and nearest.cog is not None:
