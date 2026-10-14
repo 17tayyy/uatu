@@ -10,6 +10,7 @@ from geoalchemy2.shape import to_shape
 from shapely import Geometry
 from shapely.ops import transform as shapely_transform
 from sqlalchemy import Text, and_, cast, func, literal_column, or_, select, text, true, update
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -91,7 +92,7 @@ async def last_positions(engine: AsyncEngine, since: datetime) -> dict[int, tupl
     stmt = (
         select(Position.mmsi, Position.lat, Position.lon)
         .where(Position.received_at >= since)
-        .distinct(Position.mmsi)
+        .ext(distinct_on(Position.mmsi))
         .order_by(Position.mmsi, Position.received_at.desc())
     )
     async with engine.connect() as conn:

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0d0d0d">
+  <title>Uatu</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+        integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+          integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel" id="panel" aria-label="Panel">
+      <button class="handle" id="handle" aria-label="Expandir panel"><span></span></button>
+      <header class="brand">
+        <span class="wordmark">Uatu</span>
+        <span class="area">Estrecho de Gibraltar</span>
+      </header>
+      <section class="status" id="status" aria-live="polite"></section>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="passes" aria-selected="true">Pasadas</button>
+        <button role="tab" data-tab="events" aria-selected="false">Eventos</button>
+        <button role="tab" data-tab="vessels" aria-selected="false">Barcos</button>
+      </nav>
+      <div class="view" id="view"></div>
+    </aside>
+    <main class="map-wrap">
+      <div id="map" role="region" aria-label="Mapa"></div>
+      <div class="overlay">
+        <div class="card layers" id="layers">
+          <button class="card-title" id="layers-toggle" aria-expanded="true">Capas</button>
+          <div class="card-body" id="layers-body"></div>
+        </div>
+        <div class="card legend" id="legend"></div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

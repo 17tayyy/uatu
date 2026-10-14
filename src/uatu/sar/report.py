@@ -10,6 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 
 from uatu.sar.detect import Detection
 from uatu.sar.match import MatchResult
@@ -91,6 +92,21 @@ def quicklook(output: SceneOutput, result: MatchResult | None, title: str, path:
     ax.set_yticks([])
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
+
+
+def backscatter_overlay(output: SceneOutput, png_path: Path, corners_path: Path) -> None:
+    """The scene's coarse VV backscatter as a grayscale PNG with transparency outside the scene, and the
+    lon/lat of its four corners (top-left, top-right, bottom-right, bottom-left) to lay it on a map."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        db = 10 * np.log10(output.vv)
+    grey = np.nan_to_num(np.clip((db + 25) / 25 * 255, 0, 255))  # -25 dB (calm sea) .. 0 dB (ships, land)
+    alpha = np.where(np.isfinite(db), 255, 0)
+    Image.fromarray(np.dstack([grey, alpha]).astype(np.uint8), mode="LA").save(png_path, optimize=True)
+
+    left, bottom, right, top = output.coarse.bounds
+    lons, lats = output.coarse.to_lonlat(np.array([left, right, right, left]), np.array([top, top, bottom, bottom]))
+    corners = [[round(float(lon), 6), round(float(lat), 6)] for lon, lat in zip(lons, lats, strict=True)]
+    corners_path.write_text(json.dumps(corners))
 
 
 def _point(lon: float, lat: float, properties: dict) -> dict:

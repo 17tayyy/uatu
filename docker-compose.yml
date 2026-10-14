@@ -92,6 +92,34 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  web:
+    <<: *app
+    # The dashboard. It has no authentication: the local network only, never forward this port.
+    command: ["uvicorn", "uatu.web.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      <<: *app-env
+      SAR_DATA_DIR: /data/sar
+    volumes:
+      - sardata:/data/sar:ro  # radar overlays and the land mask, written by the worker
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 400m
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
 volumes:
   pgdata:
   rawdata:

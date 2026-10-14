@@ -121,7 +121,8 @@ async def find_suspects(
 
 
 def write_outputs(analysis: Analysis, out_dir: Path) -> None:
-    """detections.geojson, ais.geojson (when paired) and quicklook.png."""
+    """detections.geojson, ais.geojson (when paired), quicklook.png and the map overlay
+    (backscatter.png + backscatter.json)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     detections = analysis.output.detections
     report.detections_geojson(detections, analysis.result, out_dir / "detections.geojson")
@@ -129,3 +130,4 @@ def write_outputs(analysis: Analysis, out_dir: Path) -> None:
         report.ais_geojson(analysis.result, out_dir / "ais.geojson")
     title = f"{analysis.name[:3]} {analysis.geometry.start:%Y-%m-%d %H:%M} UTC - {len(detections)} ship detections"
     report.quicklook(analysis.output, analysis.result, title, out_dir / "quicklook.png")
+    report.backscatter_overlay(analysis.output, out_dir / "backscatter.png", out_dir / "backscatter.json")

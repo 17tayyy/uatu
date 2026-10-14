@@ -122,6 +122,12 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
         case "shared_imo":
             title = f"IMO duplicado: {d['imo']}"
             message = f"{name} (MMSI {e.mmsi}) y {other} (MMSI {e.other_mmsi}) emiten el mismo IMO {d['imo']}."
+        case "position_jump":
+            title = f"Salto de posición: {name}"
+            message = (
+                f"{name} (MMSI {e.mmsi}) apareció {d['jump_km']} km más allá, a {d['implied_knots']} nudos"
+                f" aparentes: GPS falseado o averiado. Desde {where}."
+            )
         case _:
             title, message = f"{e.kind}: {name}", f"{d} ({where})"
     return title, message, link
