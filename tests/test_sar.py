@@ -107,13 +107,13 @@ def test_sidelobes_of_a_bright_target_are_dropped():
 
 def test_predict_interpolates_between_reports():
     reports = [Report(T0, -5.6, 36.0, 10, 0), Report(T0 + timedelta(minutes=2), -5.6, 36.02, 10, 0)]
-    lon, lat, _, _, gap = predict(reports, T0 + timedelta(seconds=30))
+    lon, lat, _, _, gap, _ = predict(reports, T0 + timedelta(seconds=30))
     assert (lon, round(lat, 4), gap) == (-5.6, 36.005, 30)
 
 
 def test_predict_dead_reckons_from_the_nearest_report():
     reports = [Report(T0, -5.6, 36.0, 10, 0)]  # 10 knots due north
-    lon, lat, _, _, gap = predict(reports, T0 + timedelta(seconds=60))
+    lon, lat, _, _, gap, _ = predict(reports, T0 + timedelta(seconds=60))
     assert lon == -5.6 and gap == 60
     assert abs((lat - 36.0) * 111_320 - 10 * 0.514444 * 60) < 1  # ~309 m
     assert predict(reports, T0 + timedelta(minutes=11)) is None
@@ -245,7 +245,7 @@ def test_silent_vessels_are_placed_across_their_silence():
     reports = [Report(T0, -5.6, 36.0, 10, 0), Report(T0 + td(hours=2), -5.6, 36.2, 10, 0)]
     middle = T0 + td(hours=1)
     assert predict(reports, middle) is None  # no report within 10 min: not placed for pairing
-    lon, lat, _, _, gap = predict(reports, middle, max_gap=td(hours=3))
+    lon, lat, _, _, gap, _ = predict(reports, middle, max_gap=td(hours=3))
     assert (lon, round(lat, 3), gap) == (-5.6, 36.1, 3600)
 
 
@@ -266,3 +266,17 @@ def test_scene_notification_separates_reception_gaps_from_silent_vessels():
     assert "Se calló: SPARTAN ⚠ SANCIONADO (EU-RUS), 1 h 35 min sin emitir" in message
     assert "Sin identificar" in message
     assert priority == "high" and link is not None
+
+
+def test_a_ferry_slowing_into_port_is_paired_on_its_fastest_speed():
+    """CEUTA JET, 2026-10-14: 29 kn at 06:16:48, 7 kn entering Ceuta at 06:30:10, seen at 06:26:55."""
+    from datetime import timedelta as td
+
+    t0 = datetime(2026, 10, 14, 6, 16, 48, tzinfo=UTC)
+    reports = [Report(t0, -5.3492, 35.9796, 29.4, 156), Report(t0 + td(seconds=802), -5.3115, 35.8948, 7.3, 243)]
+    estimate = predict(reports, t0 + td(seconds=607))
+    assert estimate.max_sog == 29.4 and estimate.sog == 7.3
+    vessel = AisVessel(212561000, "CEUTA JET", 60, 60, estimate.lon, estimate.lat, estimate.sog, estimate.cog,
+                       t0, estimate.gap_s, estimate.max_sog)  # fmt: skip
+    [e] = expected_positions([vessel], geometry(heading_deg=193), GRID)
+    assert e.tolerance_m > 1600  # 1 km + a quarter of 195 s at 29 kn, not at 7 kn

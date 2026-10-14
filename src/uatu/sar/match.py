@@ -109,7 +109,8 @@ def expected_positions(
     expected = []
     for i, v in enumerate(vessels):
         shift = 0.0
-        tolerance = base_tolerance_m + drift_fraction * (v.sog or 0.0) * KNOT * v.report_gap_s
+        speed = v.max_sog if v.max_sog is not None else v.sog
+        tolerance = base_tolerance_m + drift_fraction * (speed or 0.0) * KNOT * v.report_gap_s
         if v.sog is not None and v.cog is not None:
             ground_range_rate = v.sog * KNOT * math.cos(math.radians(v.cog - geometry.look_deg))
             range_rate = ground_range_rate * math.sin(math.radians(incidence[i]))
