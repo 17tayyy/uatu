@@ -68,8 +68,9 @@ log = structlog.get_logger(component="worker")
 
 # Two tasks at a time (a 4 GB container): two scenes take ~1.7 GB of RAM, or one scene and a
 # periodic task (health, AIS analysis), which then never waits for a download. Historical scenes
-# go on the "backfill" lane, consumed only when nothing else is waiting. No prefetching, so that
-# a task is not held back behind one already taken off the queue (a download can take 12 min).
+# go on the "backfill" lane, consumed only when nothing else is waiting. ArdiQ's prefetch counts
+# the tasks running too: equal to concurrency, both run and none waits in memory behind a long
+# download (12 min) instead of being picked up by a free slot.
 # Tasks run on one event loop: the locks below keep two scenes of the same frame (two zones)
 # from downloading it twice, and a pass from being announced twice.
 app = Ardiq(
@@ -78,7 +79,7 @@ app = Ardiq(
     priorities=["backfill", "default"],
     default_priority="default",
     concurrency=2,
-    prefetch=1,
+    prefetch=2,
 )
 _downloading: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)  # by product id
 _announcing = asyncio.Lock()
