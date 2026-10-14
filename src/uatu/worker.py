@@ -148,8 +148,8 @@ async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
             await reference.refresh_infrastructure(engine, http)
         if not ports:
             await reference.refresh_ports(engine, http)
-    except httpx.HTTPError as e:  # the scheduled refresh will try again
-        log.warning("reference_load_failed", error=repr(e))
+    except Exception:  # never keep the worker from starting: the scheduled refresh will try again
+        log.exception("reference_load_failed")
 
 
 # --- SAR -------------------------------------------------------------------------------------------
