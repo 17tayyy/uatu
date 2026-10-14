@@ -66,6 +66,7 @@ const state = {
   status: null,
   passes: null,
   pass: null, // the pass drawn on the map
+  passNote: null, // why none is, when that needs saying
   live: EMPTY,
   events: EMPTY,
   eventFilter: { minSeverity: 2, hours: 48 },
@@ -296,7 +297,7 @@ function addLayers() {
   ]) {
     map.addImage(name, image, { pixelRatio: 2 });
   }
-  for (const id of ["land", "outside", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "selected"]) {
+  for (const id of ["land", "outside", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "link", "selected"]) {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
@@ -368,11 +369,17 @@ function addLayers() {
       "circle-radius": [
         "interpolate", ["linear"], ["zoom"],
         8, ["interpolate", ["linear"], ["get", "length_m"], 0, 2.5, 300, 5],
-        12, ["interpolate", ["linear"], ["get", "length_m"], 0, 4, 300, 9],
+        12, ["interpolate", ["linear"], ["get", "length_m"], 0, 7, 300, 12],
       ],
+      // Close in, a ring around the ship's echo in the radar image rather than a dot hiding it.
       "circle-color": kindColor,
-      "circle-stroke-width": ["match", ["get", "kind"], "fixed", 1, 1.5],
-      "circle-stroke-color": ["match", ["get", "kind"], "fixed", C.muted, C.page],
+      "circle-opacity": ["interpolate", ["linear"], ["zoom"], 9.5, 1, 10.5, 0.12],
+      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 9.5, 1.5, 10.5, 2],
+      "circle-stroke-color": [
+        "step", ["zoom"],
+        ["match", ["get", "kind"], "fixed", C.muted, C.page],
+        10, ["match", ["get", "kind"], "fixed", C.muted, kindColor],
+      ],
     },
   });
   map.addLayer({
@@ -417,6 +424,21 @@ function addLayers() {
       "icon-ignore-placement": true,
       "symbol-sort-key": ["get", "severity"],
     },
+  });
+  // A detection and where its vessel was by AIS at the same moment.
+  map.addLayer({
+    id: "link",
+    type: "line",
+    source: "link",
+    filter: ["==", ["geometry-type"], "LineString"],
+    paint: { "line-color": C.ink, "line-width": 1.5, "line-dasharray": [2, 2] },
+  });
+  map.addLayer({
+    id: "link-end",
+    type: "circle",
+    source: "link",
+    filter: ["==", ["geometry-type"], "Point"],
+    paint: { "circle-radius": 6, "circle-color": "rgba(0,0,0,0)", "circle-stroke-width": 1.5, "circle-stroke-color": C.ink },
   });
   map.addLayer({
     id: "selected",
@@ -471,6 +493,32 @@ function outsideOf(a) {
 
 function select(lngLat) {
   setData("selected", lngLat ? { type: "Point", coordinates: lngLat } : EMPTY);
+  if (!lngLat) setData("link", EMPTY);
+}
+
+/** A dashed line from a detection to where its vessel was by AIS at the time of the pass. */
+function link(from, to) {
+  setData("link", {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", geometry: { type: "LineString", coordinates: [from, to] }, properties: {} },
+      { type: "Feature", geometry: { type: "Point", coordinates: to }, properties: {} },
+    ],
+  });
+}
+
+/** Whether a lon/lat point falls inside a GeoJSON Polygon or MultiPolygon (outer rings). */
+function contains(geometry, [x, y]) {
+  const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+  return polygons.some(([ring]) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  });
 }
 
 function bounds(coordinates) {
@@ -531,6 +579,7 @@ function detectionPopup(p, lngLat) {
     ["VH", p.vh_db != null ? `${p.vh_db} dB` : null],
   ];
   const actions = [];
+  const ais = p.mmsi ? byId.passAis.get(p.mmsi) : null;
   if (p.mmsi) {
     rows.push(["Barco AIS", p.vessel_name ?? `MMSI ${p.mmsi}`]);
     if (p.distance_m != null) rows.push(["Distancia", metres(p.distance_m)]);
@@ -553,12 +602,14 @@ function detectionPopup(p, lngLat) {
     tag("circle", kind.color, kind.label),
     h("p", { class: "popup-title" }, "Detección radar"),
     text && h("p", { class: "text" }, text),
+    ais && h("p", { class: "text" }, "La línea discontinua lleva a donde estaba ese barco según su AIS."),
     kv(rows),
     actions.length && h("div", { class: "actions" }, actions),
   ]);
+  if (ais) link(lngLat, ais.geometry.coordinates);
 }
 
-function eventPopup(p, lngLat) {
+function eventPopup(p, lngLat, pass) {
   const sev = SEVERITY[p.severity] ?? SEVERITY[1];
   openPopup(lngLat, [
     tag("diamond", sev.color, sev.label),
@@ -567,12 +618,37 @@ function eventPopup(p, lngLat) {
     kv([
       ["Desde", when(p.start_at)],
       ["Hasta", p.end_at ? when(p.end_at) : "sigue"],
+      ["Satélite", pass ? `pasó ${when(pass.acquired_at)}` : "no pasó por aquí durante el evento"],
     ]),
-    h("div", { class: "actions" }, vesselButton(p.mmsi)),
+    h(
+      "div",
+      { class: "actions" },
+      vesselButton(p.mmsi),
+      pass && h("button", { onclick: () => navigate(`passes/${pass.id}`) }, "Ver pasada"),
+    ),
   ]);
 }
 
+/** The pass that imaged an event's place while it was going on (give or take half an hour), if any. */
+function passForEvent(p, lngLat) {
+  const start = new Date(p.start_at).getTime() - 30 * 60_000;
+  const end = (p.end_at ? new Date(p.end_at).getTime() : Date.now()) + 30 * 60_000;
+  return (state.passes ?? []).find((pass) => {
+    const t = new Date(pass.acquired_at).getTime();
+    return t >= start && t <= end && contains(pass.footprint, lngLat);
+  });
+}
+
+/** An event, with the map showing the pass of that moment, or no radar at all if none passed. */
+async function showEvent(p, lngLat) {
+  const pass = passForEvent(p, lngLat);
+  if (pass) await loadPass(pass.id).catch(() => {});
+  else clearPass("Sin imagen radar: ningún satélite pasó durante este evento");
+  eventPopup(p, lngLat, pass);
+}
+
 function passAisPopup(p, lngLat) {
+  const detection = [...byId.detections.values()].find((d) => d.mmsi === p.mmsi);
   openPopup(lngLat, [
     tag("ring", C.ink2, p.status === "detected" ? "Visto por el radar" : "No visto por el radar"),
     h("p", { class: "popup-title" }, p.name ?? `MMSI ${p.mmsi}`),
@@ -583,6 +659,7 @@ function passAisPopup(p, lngLat) {
     ]),
     h("div", { class: "actions" }, vesselButton(p.mmsi)),
   ]);
+  if (detection) link(lngLat, byId.detectionFeatures.get(detection.id).geometry.coordinates);
 }
 
 const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: "hover-popup", offset: 10 });
@@ -596,13 +673,24 @@ function wireMapEvents() {
       hover.remove();
     });
   }
+  const tooltip = (e, text) => hover.setLngLat(e.lngLat).setText(text).addTo(map);
   for (const id of ["vessels-moving", "vessels-stopped"]) {
     map.on("mousemove", id, (e) => {
       const p = e.features[0].properties;
       const speed = p.sog != null && p.sog !== "null" ? ` · ${p.sog} nudos` : "";
-      hover.setLngLat(e.lngLat).setText(`${p.name && p.name !== "null" ? p.name : `MMSI ${p.mmsi}`}${speed}`).addTo(map);
+      tooltip(e, `${p.name && p.name !== "null" ? p.name : `MMSI ${p.mmsi}`}${speed} · ahora`);
     });
   }
+  map.on("mousemove", "detections", (e) => {
+    const p = parseProperties(e.features[0].properties);
+    const who = p.mmsi ? (p.vessel_name ?? `MMSI ${p.mmsi}`) : p.suspected_mmsi ? `¿${p.suspect_name ?? p.suspected_mmsi}?` : null;
+    tooltip(e, [(KIND[p.kind] ?? KIND.unpaired).label, who, p.length_m && `${p.length_m} m`].filter(Boolean).join(" · "));
+  });
+  map.on("mousemove", "pass-ais", (e) => {
+    const p = parseProperties(e.features[0].properties);
+    tooltip(e, `${p.name ?? `MMSI ${p.mmsi}`} · AIS a la hora de la pasada`);
+  });
+  map.on("mousemove", "events", (e) => tooltip(e, parseProperties(e.features[0].properties).title));
   map.on("click", (e) => {
     const [feature] = map.queryRenderedFeatures(e.point, { layers: clickable.filter((id) => map.getLayer(id)) });
     if (!feature) return;
@@ -615,7 +703,7 @@ function wireMapEvents() {
         navigate(`vessels/${p.mmsi}`);
         break;
       case "events":
-        eventPopup(p, lngLat);
+        showEvent(p, lngLat);
         break;
       case "detections":
         detectionPopup(p, lngLat);
@@ -629,12 +717,12 @@ function wireMapEvents() {
 
 // MapLibre hands back feature properties flattened (nested objects as JSON strings); the
 // originals are kept by id instead.
-const byId = { detections: new Map(), events: new Map(), passAis: new Map() };
+const byId = { detections: new Map(), detectionFeatures: new Map(), events: new Map(), passAis: new Map() };
 
 function parseProperties(p) {
   if ("kind" in p && "seen_at" in p) return byId.detections.get(p.id) ?? p;
   if ("severity" in p) return byId.events.get(p.id) ?? p;
-  if ("status" in p && byId.passAis.has(p.mmsi)) return byId.passAis.get(p.mmsi);
+  if ("status" in p && byId.passAis.has(p.mmsi)) return byId.passAis.get(p.mmsi).properties;
   return p;
 }
 
@@ -749,6 +837,8 @@ async function render() {
     button.setAttribute("aria-selected", String(button.dataset.tab === route.tab));
   }
   if (!(route.tab === "vessels" && route.id)) clearVessel();
+  applyFocus();
+  renderMapContext();
   view.scrollTop = 0;
   try {
     if (route.tab === "passes") await (route.id ? renderPass(route.id) : renderPasses());
@@ -807,14 +897,58 @@ async function loadPass(id) {
   if (state.pass?.id === id) return state.pass;
   const pass = await api(`/passes/${id}`);
   state.pass = pass;
+  state.passNote = null;
   byId.detections = new Map(pass.detections_geojson.features.map((f) => [f.properties.id, f.properties]));
-  byId.passAis = new Map(pass.ais_geojson.features.map((f) => [f.properties.mmsi, f.properties]));
+  byId.detectionFeatures = new Map(pass.detections_geojson.features.map((f) => [f.properties.id, f]));
+  byId.passAis = new Map(pass.ais_geojson.features.map((f) => [f.properties.mmsi, f]));
   setData("footprint", { type: "Feature", geometry: pass.footprint, properties: {} });
   setData("detections", pass.detections_geojson);
   setData("pass-ais", pass.ais_geojson);
   showRadarImage(pass);
   renderLegend();
+  renderMapContext();
   return pass;
+}
+
+/** Take the pass off the map, saying why. */
+function clearPass(note) {
+  state.pass = null;
+  state.passNote = note;
+  byId.detections = new Map();
+  byId.detectionFeatures = new Map();
+  byId.passAis = new Map();
+  for (const source of ["footprint", "detections", "pass-ais", "link"]) setData(source, EMPTY);
+  showRadarImage(null);
+  renderLegend();
+  renderMapContext();
+}
+
+/** The chip over the map saying which moment the radar layers show. */
+function renderMapContext() {
+  const el = document.getElementById("map-context");
+  const pass = state.pass;
+  el.hidden = !pass && !state.passNote;
+  if (pass) {
+    const onIt = route.tab === "passes" && route.id === pass.id;
+    fill(
+      el,
+      svg("circle", C.blue),
+      h("span", null, `Radar: pasada de ${when(pass.acquired_at)}`),
+      !onIt && h("button", { onclick: () => navigate(`passes/${pass.id}`) }, "Ver"),
+    );
+  } else if (state.passNote) {
+    fill(el, h("span", null, state.passNote));
+  }
+}
+
+/** On a pass, what is happening now (live vessels, recent events) steps back. */
+function applyFocus() {
+  if (!map.getLayer("events")) return;
+  const opacity = route.tab === "passes" && route.id ? 0.2 : 1;
+  map.setPaintProperty("vessels-moving", "icon-opacity", opacity);
+  map.setPaintProperty("vessels-stopped", "circle-opacity", opacity);
+  map.setPaintProperty("vessels-stopped", "circle-stroke-opacity", opacity);
+  map.setPaintProperty("events", "icon-opacity", opacity);
 }
 
 function detectionRow(f) {
@@ -916,7 +1050,7 @@ function eventRow(f) {
         class: "row",
         onclick: () => {
           flyTo(f.geometry.coordinates, 10);
-          eventPopup(p, f.geometry.coordinates);
+          showEvent(p, f.geometry.coordinates);
         },
       },
       h("div", { class: "row-top" }, tag("diamond", sev.color, sev.label), h("span", { class: "grow" }), h("span", { class: "row-time" }, when(p.start_at))),
@@ -1190,6 +1324,8 @@ async function start() {
     attribution?.classList.remove("maplibregl-compact-show");
   }
 
+  // The passes, to find the one an event happened under from any view.
+  state.passes = await api("/passes?limit=60").catch(() => null);
   await refresh();
   // Show the latest pass on the map from the start, without leaving the current view.
   if (state.status?.latest_pass && !(parseRoute().tab === "passes" && parseRoute().id)) {
