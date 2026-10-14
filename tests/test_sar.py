@@ -6,7 +6,7 @@ from affine import Affine
 from rasterio.crs import CRS
 from rasterio.windows import Window
 
-from uatu.sar.ais import AisVessel, Report, predict
+from uatu.sar.ais import AisVessel, Coverage, Report, predict
 from uatu.sar.annotation import AcquisitionGeometry
 from uatu.sar.catalog import _scene, group_passes
 from uatu.sar.detect import CfarParams, Detection, detect, suppress_sidelobes
@@ -188,10 +188,17 @@ def test_tolerance_grows_with_speed_and_report_age():
 def test_unpaired_detections_without_ais_coverage_are_not_dark():
     lonely, busy = det(282_000, 3_988_000, 10), det(283_000, 3_988_000, 10)
     result = match([lonely, busy], [], np.ones(GRID.shape, dtype=bool), GRID)
-    split = split_by_coverage(result, ais_nearby=[0, 40], min_vessels=5)
+    split = split_by_coverage(result, [Coverage(0, 0), Coverage(40, 400)], min_vessels=3, min_reports_per_vessel=3)
     assert split.dark == [busy]
     assert split.no_coverage == [lonely]
     assert split.ais_nearby[lonely] == 0
+
+
+def test_vessels_heard_only_now_and_then_are_no_coverage():
+    behind_the_rock, lane = det(282_000, 3_988_000, 10), det(283_000, 3_988_000, 10)
+    result = match([behind_the_rock, lane], [], np.ones(GRID.shape, dtype=bool), GRID)
+    split = split_by_coverage(result, [Coverage(6, 7), Coverage(16, 299)], min_vessels=3, min_reports_per_vessel=3)
+    assert (split.dark, split.no_coverage) == ([lane], [behind_the_rock])
 
 
 def product(name: str, start: str) -> dict:

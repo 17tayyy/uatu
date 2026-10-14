@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.config import BBox
 from uatu.sar import report
-from uatu.sar.ais import AisVessel, silent_vessels, vessels_at_acquisition, vessels_nearby
+from uatu.sar.ais import AisVessel, coverage_around, silent_vessels, vessels_at_acquisition
 from uatu.sar.annotation import AcquisitionGeometry, read_geometry
 from uatu.sar.detect import CfarParams, Detection
 from uatu.sar.match import MatchResult, expected_positions, match, split_by_coverage
@@ -23,10 +23,12 @@ class PairingParams:
     base_tolerance_m: float = 1000.0  # detection-AIS distance tolerated for a vessel with fresh AIS
     drift_fraction: float = 0.25  # of the distance travelled since the nearest AIS report, added on top
     # An unpaired detection is dark only if AIS was being received right there: this many other
-    # vessels heard within coverage_radius_m and ±coverage_window. Measured locally because coverage
-    # has holes at the scale of a bay: aisstream.io hears the strait's lanes but almost nothing in
-    # the anchorages behind the Rock of Gibraltar, 3-10 km away.
+    # vessels heard within coverage_radius_m and ±coverage_window, each heard this many times on
+    # average. Measured locally because coverage has holes at the scale of a bay: aisstream.io
+    # hears vessels in the strait's lanes 10-20 times in 4 h, and those in the anchorages behind
+    # the Rock of Gibraltar about once.
     min_ais_nearby: int = 3
+    min_reports_per_vessel: float = 3.0
     coverage_radius_m: float = 3_000.0
     coverage_window: timedelta = timedelta(hours=2)
     doppler_sign: float = 1.0
@@ -84,10 +86,10 @@ async def analyse(
     )
     result = match(output.detections, expected, output.searched, output.coarse)
     middle = geometry.start + timedelta(seconds=geometry.duration_s / 2)
-    nearby = await vessels_nearby(
+    nearby = await coverage_around(
         engine, [(d.lon, d.lat) for d in result.dark], middle, pairing.coverage_radius_m, pairing.coverage_window
     )
-    result = split_by_coverage(result, nearby, pairing.min_ais_nearby)
+    result = split_by_coverage(result, nearby, pairing.min_ais_nearby, pairing.min_reports_per_vessel)
     suspects = await find_suspects(engine, result, output, geometry, grid, bbox, pairing)
     return Analysis(name, geometry, output, result, len(vessels), suspects)
 
