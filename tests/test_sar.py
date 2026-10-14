@@ -324,3 +324,18 @@ def test_overlay_lands_where_web_maps_put_it(tmp_path):
     map_lat = math.degrees(2 * math.atan(math.exp(map_lat_y)) - math.pi / 2)
     metres = math.hypot((map_lon - lon[0]) * 111_320 * math.cos(math.radians(lat[0])), (map_lat - lat[0]) * 110_574)
     assert metres < 80  # within one pixel
+
+
+def test_a_frame_is_worth_processing_for_the_sea_it_covers_not_the_land():
+    from shapely import wkt
+
+    from uatu.config import ZONES
+    from uatu.zones import sea_of
+
+    catalonia = ZONES["cataluna"]
+    sea = sea_of(catalonia)
+    assert 0.35 < sea.area / bbox_polygon(catalonia.bbox).area < 0.5  # half the box is Catalonia itself
+    # A frame of 19 July: a third of the zone's box, nearly all of it inland Catalonia and the Pyrenees.
+    inland = wkt.loads("POLYGON((2.7414 41.4944,3.1398 42.9945,-0.0919 43.4055,-0.4139 41.9061,2.7414 41.4944))")
+    assert inland.intersection(bbox_polygon(catalonia.bbox)).area / bbox_polygon(catalonia.bbox).area > 0.3
+    assert inland.intersection(sea).area / sea.area < 0.1

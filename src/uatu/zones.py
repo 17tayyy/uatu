@@ -1,24 +1,38 @@
 """A zone's geography for the analyses: its radar grid, where land is, how far the coast."""
 
+import json
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
-from shapely import Polygon
+from shapely import Polygon, unary_union
+from shapely.geometry import shape
+from shapely.geometry.base import BaseGeometry
 
 from uatu.ais.coast import CoastDistance
 from uatu.config import Zone, bbox_polygon
 from uatu.sar.raster import Grid, land_cache
 
 SAR_RESOLUTION_M = 10.0
+# Natural Earth 10 m land (public domain), cut to Iberia and northern Morocco, simplified to ~200 m.
+NATURAL_EARTH_LAND = Path(__file__).parent / "data" / "natural_earth_land.geojson"
 
 
 @dataclass(frozen=True)
 class Geography:
     zone: Zone
     area: Polygon  # lon/lat
+    sea: BaseGeometry  # lon/lat: the area without its land, roughly (what a frame is worth processing for)
     grid: Grid  # the radar's, in the zone's UTM zone
     land: Path  # land mask on the grid, cached
     coast: CoastDistance
+
+
+@cache
+def sea_of(zone: Zone) -> BaseGeometry:
+    """The zone's box without land, from Natural Earth: coarse, but enough to tell how much sea a frame covers."""
+    land = unary_union([shape(f["geometry"]) for f in json.loads(NATURAL_EARTH_LAND.read_text())["features"]])
+    return bbox_polygon(zone.bbox).difference(land)
 
 
 def grid_of(zone: Zone) -> Grid:
@@ -34,4 +48,4 @@ def geography(zone: Zone, cache_dir: Path) -> Geography:
     """Blocking: the first time, builds the land mask from ESA WorldCover (about a minute per zone)."""
     grid = grid_of(zone)
     land = land_cache(grid, cache_dir)
-    return Geography(zone, bbox_polygon(zone.bbox), grid, land, CoastDistance(grid, land, cache_dir))
+    return Geography(zone, bbox_polygon(zone.bbox), sea_of(zone), grid, land, CoastDistance(grid, land, cache_dir))

@@ -286,7 +286,7 @@ Environment variables (or `.env`):
 | `REDIS_URL`          | `redis://localhost:6379`              | ArdiQ broker, set by docker compose        |
 | `SAR_DISCOVER_MINUTES` | `10`                                | how often the worker looks for new scenes  |
 | `SAR_LOOKBACK_DAYS`  | `3`                                   | how far back it looks                      |
-| `SAR_MIN_COVERAGE`   | `0.1`                                 | skip frames covering less of the area      |
+| `SAR_MIN_COVERAGE`   | `0.1`                                 | skip frames covering less of the zone's sea |
 | `SAR_KEEP_SCENES`    | `false`                               | keep products (~1-2 GB each) after processing |
 | `NTFY_URL`           | unset                                 | `https://ntfy.sh/<unguessable topic>` for alerts |
 | `HEALTHCHECK_URL`    | unset                                 | dead man's switch ping URL                 |

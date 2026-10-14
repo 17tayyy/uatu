@@ -187,6 +187,11 @@ async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analy
     return summary
 
 
+async def mark_skipped(engine: AsyncEngine, scene_id: uuid.UUID, reason: str) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(update(SarScene).where(SarScene.id == scene_id).values(status="skipped", error=reason))
+
+
 async def mark_failed(engine: AsyncEngine, scene_id: uuid.UUID, error: str) -> None:
     async with engine.begin() as conn:
         await conn.execute(update(SarScene).where(SarScene.id == scene_id).values(status="failed", error=error))

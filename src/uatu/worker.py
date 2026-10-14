@@ -172,10 +172,11 @@ async def discover() -> int:
 
 
 async def _queue(geo: Geography, start: datetime, end: datetime) -> list[store.ZoneScene]:
-    """Record the frames over the zone acquired between start and end that are worth it and new."""
+    """Record the frames over the zone acquired between start and end that are worth it and new: those
+    that cover enough of its sea (much of a zone's box can be land)."""
     scenes = await search(app.state.http, geo.area, start, end)
-    candidates = worth_processing(scenes, geo.area, settings.sar_min_coverage)
-    coverage = {s.id: s.coverage(geo.area) for s in candidates}
+    candidates = worth_processing(scenes, geo.sea, settings.sar_min_coverage)
+    coverage = {s.id: s.coverage(geo.sea) for s in candidates}
     return await store.queue_new(app.state.engine, candidates, coverage, geo.zone.key)
 
 
@@ -212,6 +213,10 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     if zone is None:
         raise RuntimeError(f"zone {zs.zone!r} is not analysed (ANALYSIS_ZONES)")
     geo, scene = zone.geography, zs.scene
+    if scene.coverage(geo.sea) < settings.sar_min_coverage:  # queued before coverage meant sea
+        await store.mark_skipped(state.engine, zs.id, "covers too little of the zone's sea")
+        log.info("scene_skipped", scene=scene.name, zone=zs.zone, sea_coverage=round(scene.coverage(geo.sea), 3))
+        return {"skipped": 1}
     recording_since = await store.recording_start(state.engine, zs.zone)
     historical = recording_since is None or scene.start < recording_since
     log.info("scene_started", scene=scene.name, zone=zs.zone, historical=historical)

@@ -25,14 +25,12 @@ from uatu.db.models import Infrastructure
 from uatu.sar.raster import Grid
 from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, MapArea
 from uatu.web.schemas import Feature, FeatureCollection, Geometry
+from uatu.zones import NATURAL_EARTH_LAND
 
 
 def area(bbox: BBox) -> MapArea:
     lat_min, lon_min, lat_max, lon_max = bbox
     return MapArea(west=lon_min, south=lat_min, east=lon_max, north=lat_max)
-
-
-NATURAL_EARTH_LAND = Path(__file__).parent / "natural_earth_land.geojson"
 
 
 def land(masks: list[tuple[Grid, Path, BBox]]) -> FeatureCollection[LandProperties]:
