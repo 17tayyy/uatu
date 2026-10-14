@@ -14,7 +14,7 @@ from sqlalchemy import Select, and_, case, cast, func, not_, or_, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from uatu.config import ZONES, bbox_polygon
+from uatu.config import ZONES
 from uatu.db.models import RecordedZone, SarAisCheck, SarDetection, SarFixedObject, SarScene, Vessel
 from uatu.sar.analysis import DEFAULT_PAIRING
 from uatu.sar.store import RECEPTION_GAP_MINUTES
@@ -29,6 +29,7 @@ from uatu.web.passes.schemas import (
     ReceptionRule,
 )
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
+from uatu.zones import sea_of
 
 PASS_ID_PATTERN = r"^S1[A-Z]-[0-9A-F]{6}-[a-z]{3,16}$"  # platform-datatake-zone, e.g. S1C-013AD6-estrecho
 _AT_FIXED = func.coalesce(
@@ -104,11 +105,11 @@ def _overlay_dir(data_dir: Path, zone: str, scene_name: str) -> Path:
 
 
 def _coverage(footprint: Geometry, zone: str) -> float:
-    """Share of the zone's lon/lat box that the pass imaged, like each frame's own coverage."""
+    """Share of the zone's sea that the pass imaged, as when deciding to process its frames."""
     if zone not in ZONES:
         return 0.0
-    area = bbox_polygon(ZONES[zone].bbox)
-    return round(min(shape(footprint.model_dump()).intersection(area).area / area.area, 1.0), 2)
+    sea = sea_of(ZONES[zone])
+    return round(min(shape(footprint.model_dump()).intersection(sea).area / sea.area, 1.0), 2)
 
 
 def _summary(row: Any, data_dir: Path) -> PassSummary:

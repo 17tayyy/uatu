@@ -135,7 +135,7 @@ async def rows():
                     "status": "processed",
                 },
                 frame
-                | {  # overlaps the first by 0.2°: together 1.2° x 1° of the 2° x 1.2° area, 50%
+                | {  # overlaps the first by 0.2°: together 45% of the Strait's sea
                     "id": SCENE2_ID,
                     "product_id": SCENE2_ID,
                     "name": SCENE2_NAME,
@@ -263,7 +263,7 @@ async def test_passes(client, tmp_path):
     passes = await ok(client, "/api/v1/passes")
     ours = next(p for p in passes if p["id"] == PASS_ID)
     expected = {
-        "frames": 2, "detections": 3, "matched": 1, "no_coverage": 1, "fixed": 0, "candidates": 1, "coverage": 0.5,
+        "frames": 2, "detections": 3, "matched": 1, "no_coverage": 1, "fixed": 0, "candidates": 1, "coverage": 0.45,
     }  # fmt: skip
     assert {k: ours[k] for k in expected} == expected
     assert ours["has_image"] is False

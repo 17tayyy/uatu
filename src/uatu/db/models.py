@@ -163,8 +163,8 @@ class SarScene(Base):
     acquired_from: Mapped[datetime]
     acquired_to: Mapped[datetime]
     footprint: Mapped[WKBElement] = mapped_column(Geography("GEOMETRY", srid=4326, spatial_index=False))
-    aoi_coverage: Mapped[float] = mapped_column(REAL, comment="fraction of the area of interest in the frame")
-    status: Mapped[str] = mapped_column(comment="queued | processed | failed")
+    aoi_coverage: Mapped[float] = mapped_column(REAL, comment="fraction of the zone's sea in the frame")
+    status: Mapped[str] = mapped_column(comment="queued | processed | failed | skipped")
     error: Mapped[str | None]
     discovered_at: Mapped[datetime] = mapped_column(server_default=func.now())
     processed_at: Mapped[datetime | None]
