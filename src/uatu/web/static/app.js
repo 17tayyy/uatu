@@ -1805,7 +1805,6 @@ async function start() {
   watchMapLoading();
   renderLayers();
   const [zones, land, satellite] = await Promise.all([api("/zones"), api("/map/land"), api("/map/satellite")]);
-  addSatellite(satellite);
   state.zones = zones.zones;
   state.wholeCoast = zones.whole_coast;
   if (state.zone !== ALL && !state.zones.some((z) => z.key === state.zone)) state.zone = ALL;
@@ -1815,6 +1814,7 @@ async function start() {
   setData("land", land);
   renderZoneSelect();
   await showZone({ fit: !parseRoute().id });
+  addSatellite(satellite); // once framed: tiles for the view it starts from would be thrown away
   applyLayerVisibility();
   if (phone.matches) {
     const attribution = document.querySelector(".maplibregl-ctrl-attrib");
