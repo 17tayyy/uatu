@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BeforeValidator, field_validator
+from pydantic import AfterValidator, BeforeValidator, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from shapely import Polygon, box
 
@@ -71,6 +71,17 @@ def _check_zones(keys: list[str]) -> list[str]:
 
 # Zones by key, written in env vars as "estrecho,cataluna".
 ZonesSetting = Annotated[list[str], NoDecode, BeforeValidator(_parse_zones), AfterValidator(_check_zones)]
+
+
+class ZoneSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
+
+    # The zones analysed (AIS events, radar passes, dashboard): new ones are calibrated one at a time.
+    analysis_zones: ZonesSetting = Field(default_factory=lambda: list(ZONES))
+
+    @property
+    def zones(self) -> list[Zone]:
+        return [ZONES[key] for key in self.analysis_zones]
 
 
 def bbox_polygon(bbox: BBox) -> Polygon:

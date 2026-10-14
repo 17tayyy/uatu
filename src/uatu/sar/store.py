@@ -11,8 +11,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.orm import aliased
 
+from uatu.config import ZONES
 from uatu.db.models import (
-    IngestSession,
+    RecordedZone,
     SanctionedVessel,
     SarAisCheck,
     SarDetection,
@@ -24,14 +25,28 @@ from uatu.sar.analysis import Analysis
 from uatu.sar.catalog import Scene, frame_of
 
 
-async def ais_recording_start(engine: AsyncEngine) -> datetime | None:
-    """When the recorder first connected: scenes acquired before have no AIS to pair with."""
+@dataclass(frozen=True)
+class ZoneScene:
+    """A frame to analyse for a zone."""
+
+    id: uuid.UUID  # the scene's: see scene_id
+    zone: str
+    scene: Scene  # its id is the product's, to download it
+
+
+def scene_id(product_id: str, zone: str) -> uuid.UUID:
+    """A frame's id in a zone: fixed, so that queueing it again never duplicates it."""
+    return uuid.uuid5(uuid.UUID(product_id), zone)
+
+
+async def recording_start(engine: AsyncEngine, zone: str) -> datetime | None:
+    """Since when AIS is recorded in the zone: scenes acquired before have none to pair with."""
     async with engine.connect() as conn:
-        return await conn.scalar(select(func.min(IngestSession.connected_at)))
+        return await conn.scalar(select(RecordedZone.since).where(RecordedZone.key == zone))
 
 
-async def queue_new(engine: AsyncEngine, scenes: list[Scene], coverage: dict[str, float]) -> list[Scene]:
-    """Record the scenes not seen before as queued; return those.
+async def queue_new(engine: AsyncEngine, scenes: list[Scene], coverage: dict[str, float], zone: str) -> list[ZoneScene]:
+    """Record the frames not seen before over the zone as queued; return those.
 
     A frame can be published twice, as a standard product and later as a COG one with another id:
     a frame already recorded under either is not new.
@@ -39,14 +54,16 @@ async def queue_new(engine: AsyncEngine, scenes: list[Scene], coverage: dict[str
     if not scenes:
         return []
     async with engine.connect() as conn:
-        names = (await conn.scalars(select(SarScene.name))).all()
+        names = (await conn.scalars(select(SarScene.name).where(SarScene.zone == zone))).all()
     known = {frame_of(name) for name in names}
     scenes = [s for s in scenes if s.frame not in known]
     if not scenes:
         return []
     rows = [
         {
-            "id": uuid.UUID(s.id),
+            "id": scene_id(s.id, zone),
+            "product_id": uuid.UUID(s.id),
+            "zone": zone,
             "name": s.name,
             "platform": s.platform,
             "datatake": s.datatake,
@@ -60,23 +77,34 @@ async def queue_new(engine: AsyncEngine, scenes: list[Scene], coverage: dict[str
         }
         for s in scenes
     ]
-    stmt = pg_insert(SarScene).on_conflict_do_nothing(index_elements=[SarScene.id]).returning(SarScene.id)
+    stmt = pg_insert(SarScene).on_conflict_do_nothing().returning(SarScene.id)
     async with engine.begin() as conn:
-        inserted = {str(i) for i in (await conn.scalars(stmt, rows)).all()}
-    return [s for s in scenes if s.id in inserted]
+        inserted = set((await conn.scalars(stmt, rows)).all())
+    return [ZoneScene(scene_id(s.id, zone), zone, s) for s in scenes if scene_id(s.id, zone) in inserted]
 
 
-async def queued(engine: AsyncEngine, discovered_before: datetime | None = None) -> list[Scene]:
+async def queued(engine: AsyncEngine, discovered_before: datetime | None = None) -> list[ZoneScene]:
     stmt = select(SarScene).where(SarScene.status == "queued")
     if discovered_before is not None:
         stmt = stmt.where(SarScene.discovered_at < discovered_before)
     async with engine.connect() as conn:
-        return [_scene(r) for r in (await conn.execute(stmt)).all()]
+        return [_zone_scene(r) for r in (await conn.execute(stmt)).all()]
 
 
-async def load(engine: AsyncEngine, scene_id: uuid.UUID) -> Scene:
+async def load(engine: AsyncEngine, scene_id: uuid.UUID) -> ZoneScene:
     async with engine.connect() as conn:
-        return _scene((await conn.execute(select(SarScene).where(SarScene.id == scene_id))).one())
+        return _zone_scene((await conn.execute(select(SarScene).where(SarScene.id == scene_id))).one())
+
+
+async def product_still_needed(engine: AsyncEngine, scene: ZoneScene) -> bool:
+    """Whether the frame is still queued for another zone: then keep the download for it."""
+    async with engine.connect() as conn:
+        others = await conn.scalar(
+            select(func.count()).where(
+                SarScene.product_id == uuid.UUID(scene.scene.id), SarScene.id != scene.id, SarScene.status == "queued"
+            )
+        )
+    return bool(others)
 
 
 async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analysis) -> dict[str, int]:
@@ -164,9 +192,13 @@ async def mark_failed(engine: AsyncEngine, scene_id: uuid.UUID, error: str) -> N
         await conn.execute(update(SarScene).where(SarScene.id == scene_id).values(status="failed", error=error))
 
 
+def _zone_scene(row: Any) -> ZoneScene:
+    return ZoneScene(row.id, row.zone, _scene(row))
+
+
 def _scene(row: Any) -> Scene:
     return Scene(
-        id=str(row.id),
+        id=str(row.product_id),
         name=row.name,
         start=row.acquired_from,
         end=row.acquired_to,
@@ -306,6 +338,7 @@ class SceneReport:
     at_fixed_objects: int
     candidates: list[Candidate]  # dark: AIS received around, none paired, not a fixed object
     frames: int = 1
+    zone: str = ""  # its name, for people
 
 
 async def pass_report(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> SceneReport:
@@ -336,7 +369,9 @@ async def pass_report(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> SceneR
         func.count().filter(SarDetection.status == "no_coverage"),
         func.count().filter(func.coalesce(at_fixed, False)),
     ).where(in_frames)
-    frames = select(SarScene.name, SarScene.acquired_from, SarScene.aoi_coverage).where(SarScene.id.in_(scene_ids))
+    frames = select(SarScene.name, SarScene.acquired_from, SarScene.aoi_coverage, SarScene.zone).where(
+        SarScene.id.in_(scene_ids)
+    )
     async with engine.connect() as conn:
         scenes = sorted((await conn.execute(frames)).all(), key=lambda f: f.acquired_from)
         total, matched, no_coverage, fixed_count = (await conn.execute(counts)).one()
@@ -344,7 +379,7 @@ async def pass_report(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> SceneR
     coverage = min(sum(f.aoi_coverage for f in scenes), 1.0)  # frames of a pass barely overlap
     return SceneReport(
         scenes[0].name, scenes[0].acquired_from, coverage, total, matched, no_coverage, fixed_count, candidates,
-        frames=len(scenes),
+        frames=len(scenes), zone=ZONES[scenes[0].zone].name if scenes[0].zone in ZONES else scenes[0].zone,
     )  # fmt: skip
 
 
@@ -365,14 +400,17 @@ async def pass_announcement(engine: AsyncEngine, scene_id: uuid.UUID) -> Announc
     """
     this = aliased(SarScene)
     stmt = (
-        select(SarScene.id, SarScene.acquired_from, SarScene.status, SarScene.notified_at)
-        .join(this, and_(this.platform == SarScene.platform, this.datatake == SarScene.datatake))
+        select(SarScene.id, SarScene.acquired_from, SarScene.status, SarScene.notified_at, SarScene.zone)
+        .join(
+            this,
+            and_(this.platform == SarScene.platform, this.datatake == SarScene.datatake, this.zone == SarScene.zone),
+        )
         .where(this.id == scene_id)
         .order_by(SarScene.acquired_from)
     )
     async with engine.connect() as conn:
         frames = (await conn.execute(stmt)).all()
-    recording_since = await ais_recording_start(engine)
+    recording_since = await recording_start(engine, frames[0].zone) if frames else None
     if not frames or recording_since is None or frames[0].acquired_from < recording_since:
         return None  # historical: nothing to announce
     if any(f.status == "queued" for f in frames):
@@ -391,17 +429,19 @@ async def mark_notified(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> None
 
 
 async def recent_live_passes(engine: AsyncEngine, since: datetime) -> list[list[uuid.UUID]]:
-    """The frames of each pass acquired since `since` while AIS was being recorded, oldest first."""
-    passes: dict[tuple[str, str], list[uuid.UUID]] = {}
-    recording_since = await ais_recording_start(engine)
-    if recording_since is None:
-        return []
+    """The frames of each pass acquired since `since` while AIS was recorded in its zone, oldest first."""
+    passes: dict[tuple[str, str, str], list[uuid.UUID]] = {}
     stmt = (
-        select(SarScene.platform, SarScene.datatake, SarScene.id)
-        .where(SarScene.status == "processed", SarScene.acquired_from >= max(since, recording_since))
+        select(SarScene.platform, SarScene.datatake, SarScene.zone, SarScene.id)
+        .join(RecordedZone, RecordedZone.key == SarScene.zone)
+        .where(
+            SarScene.status == "processed",
+            SarScene.acquired_from >= since,
+            SarScene.acquired_from >= RecordedZone.since,
+        )
         .order_by(SarScene.acquired_from)
     )
     async with engine.connect() as conn:
-        for platform, datatake, scene_id in await conn.execute(stmt):
-            passes.setdefault((platform, datatake), []).append(scene_id)
+        for platform, datatake, zone, scene_id in await conn.execute(stmt):
+            passes.setdefault((platform, datatake, zone), []).append(scene_id)
     return list(passes.values())

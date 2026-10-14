@@ -4,12 +4,15 @@ import asyncio
 import signal
 import sys
 from dataclasses import asdict
+from datetime import UTC, datetime
 
 import structlog
 from pydantic import ValidationError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu import db
+from uatu.db.models import RecordedZone
 from uatu.log import configure_logging
 from uatu.recorder.config import RecorderSettings
 from uatu.recorder.state import Stats, report_stats
@@ -29,9 +32,17 @@ async def run(settings: RecorderSettings) -> int:
     try:
         revision = await db.wait_until_ready(engine)
         log.info("db_ready", schema_revision=revision)
+        await register_zones(engine, settings.zones)
         return await record(settings, engine)
     finally:
         await engine.dispose()
+
+
+async def register_zones(engine: AsyncEngine, keys: list[str]) -> None:
+    """Note since when each zone is recorded: radar passes before that have no AIS to pair with."""
+    rows = [{"key": key, "since": datetime.now(UTC)} for key in keys]
+    async with engine.begin() as conn:
+        await conn.execute(pg_insert(RecordedZone).on_conflict_do_nothing(index_elements=[RecordedZone.key]), rows)
 
 
 async def record(settings: RecorderSettings, engine: AsyncEngine) -> int:

@@ -1,11 +1,14 @@
 """Uatu's background worker, on ArdiQ.
 
+Everything works zone by zone (ANALYSIS_ZONES, see uatu.config.ZONES).
+
 SAR
-    sar.discover        every SAR_DISCOVER_MINUTES (10): Sentinel-1 frames over the area acquired
-                        since AIS recording began; records the new ones and queues them.
-    sar.process_scene   download, detect ships, pair them with the AIS recorded at the time, store.
-    sar.backfill        on demand: queue the passes of the N days before AIS recording began, on a
-                        low-priority lane, to learn the area (fixed objects) from history.
+    sar.discover        every SAR_DISCOVER_MINUTES (10): Sentinel-1 frames over each zone acquired
+                        since AIS recording began there; records the new ones and queues them.
+    sar.process_scene   download, detect ships on the zone's grid, pair them with the AIS recorded
+                        at the time, store. A frame over two zones is downloaded once.
+    sar.backfill        on demand: queue a zone's passes of the N days before AIS recording began
+                        there, on a low-priority lane, to learn it (fixed objects) from history.
 Operations
     ops.backup          daily at 03:00 UTC: pg_dump of the database, the BACKUP_KEEP newest kept.
     ops.health          every 5 minutes: AIS still arriving, disk space, backups recent. Alerts on
@@ -23,6 +26,7 @@ AIS
 import asyncio
 import uuid
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -35,22 +39,20 @@ from uatu import db, ops
 from uatu.ais import analysis as ais_analysis
 from uatu.ais import reference
 from uatu.ais import store as ais_store
-from uatu.ais.bathymetry import load_bathymetry
-from uatu.ais.coast import CoastDistance
-from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, bbox_polygon
+from uatu.ais.bathymetry import Bathymetry, load_bathymetry
+from uatu.config import BBox, ZoneSettings
 from uatu.log import configure_logging
 from uatu.sar import store
 from uatu.sar.analysis import analyse, write_outputs
-from uatu.sar.catalog import Scene, search, worth_processing
+from uatu.sar.catalog import search, worth_processing
 from uatu.sar.config import SarSettings
 from uatu.sar.detect import CfarParams
 from uatu.sar.download import CdseAuth, download
-from uatu.sar.raster import Grid, land_cache
 from uatu.sar.report import scene_notification
+from uatu.zones import Geography, geography
 
 
-class WorkerSettings(SarSettings):
-    ais_bbox: BBoxSetting = STRAIT_OF_GIBRALTAR  # the area the recorder records
+class WorkerSettings(SarSettings, ZoneSettings):
     backup_dir: Path = Path("data/backups")
     backup_keep: int = Field(14, gt=0)
     ntfy_url: str | None = None  # https://ntfy.sh/<an unguessable topic>, to get alerts on a phone
@@ -75,7 +77,6 @@ app = Ardiq(
     concurrency=1,
     prefetch=1,
 )
-AOI = bbox_polygon(settings.sar_bbox)
 LOST_AFTER = timedelta(hours=2)
 # Tasks that run every few minutes: one failure (a network blip, a service down for a while)
 # fixes itself on the next run, so they alert only when failing this many times in a row.
@@ -95,28 +96,37 @@ async def lifespan():
             auth = CdseAuth(http, settings.cdse_username, settings.cdse_password.get_secret_value())
         else:
             log.warning("cdse_credentials_missing", hint="set CDSE_USERNAME and CDSE_PASSWORD to download scenes")
-        grid = Grid.covering(AOI, 10.0)
-        land = await asyncio.to_thread(land_cache, grid, settings.sar_data_dir / "cache")
-        coast = await asyncio.to_thread(CoastDistance, grid, land, settings.sar_data_dir / "cache")
-        bathymetry = None
-        try:
-            bathymetry = await load_bathymetry(http, settings.ais_bbox, settings.sar_data_dir / "cache")
-        except httpx.HTTPError as e:  # without it, every vessel over a cable is an alert
-            log.warning("bathymetry_unavailable", error=repr(e))
+        cache = settings.sar_data_dir / "cache"
+        zones = {}
+        for zone in settings.zones:
+            geo = await asyncio.to_thread(geography, zone, cache)
+            zones[zone.key] = ZoneState(geo, await _bathymetry(http, zone.bbox, cache))
         await _load_reference_if_missing(engine, http)
-        log.info("worker_ready", grid=f"{grid.width}x{grid.height}", alerts=settings.ntfy_url is not None)
-        await alerter.notify("Uatu worker started", f"Watching {settings.sar_bbox}", "low")
+        log.info("worker_ready", zones=list(zones), alerts=settings.ntfy_url is not None)
+        names = ", ".join(z.geography.zone.name for z in zones.values())
+        await alerter.notify("Uatu worker started", f"Vigilando: {names}", "low")
         yield {
             "failures": {},  # consecutive failures of periodic tasks
             "engine": engine,
             "http": http,
             "alerter": alerter,
             "auth": auth,
-            "grid": grid,
-            "land": land,
-            "coast": coast,
-            "bathymetry": bathymetry,
+            "zones": zones,
         }
+
+
+@dataclass(frozen=True)
+class ZoneState:
+    geography: Geography
+    bathymetry: Bathymetry | None
+
+
+async def _bathymetry(http: httpx.AsyncClient, bbox: BBox, cache: Path) -> Bathymetry | None:
+    try:
+        return await load_bathymetry(http, bbox, cache)
+    except httpx.HTTPError as e:  # without it, every vessel over a cable is an alert
+        log.warning("bathymetry_unavailable", bbox=bbox, error=repr(e))
+        return None
 
 
 async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
@@ -138,46 +148,57 @@ async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
 async def discover() -> int:
     """Record and queue new scenes, and re-queue any whose task was lost."""
     engine = app.state.engine
-    recording_since = await store.ais_recording_start(engine)
-    if recording_since is None:
-        log.info("discover_skipped", reason="no AIS recorded yet")
-        return 0
     now = datetime.now(UTC)
-    since = max(now - timedelta(days=settings.sar_lookback_days), recording_since)
-    # The catalogue can omit products for a few minutes after publishing them: a frame
-    # missed now is simply found on a later run.
-    scenes = await search(app.state.http, AOI, since, now)
-    candidates = worth_processing(scenes, AOI, settings.sar_min_coverage)
-    new = await store.queue_new(engine, candidates, {s.id: s.coverage(AOI) for s in candidates})
+    found = 0
+    for key, state in app.state.zones.items():
+        recording_since = await store.recording_start(engine, key)
+        if recording_since is None:
+            log.info("discover_skipped", zone=key, reason="no AIS recorded there yet")
+            continue
+        since = max(now - timedelta(days=settings.sar_lookback_days), recording_since)
+        # The catalogue can omit products for a few minutes after publishing them: a frame
+        # missed now is simply found on a later run.
+        new = await _queue(state.geography, since, now)
+        for scene in new:
+            await _enqueue_scene(scene, recording_since)
+        found += len(new)
     # Processing takes minutes and retries within the hour: still queued after that, the task
     # was lost (e.g. Redis wiped). Its id is fixed, so re-queueing never duplicates it.
     lost = await store.queued(engine, discovered_before=now - LOST_AFTER)
-    for scene in [*new, *lost]:
-        await _enqueue_scene(scene, recording_since)
-    log.info("discovered", catalogue=len(scenes), new=len(new), requeued=len(lost))
-    return len(new)
+    for scene in lost:
+        await _enqueue_scene(scene, await store.recording_start(engine, scene.zone))
+    log.info("discovered", new=found, requeued=len(lost))
+    return found
 
 
-async def _enqueue_scene(scene: Scene, recording_since: datetime) -> None:
+async def _queue(geo: Geography, start: datetime, end: datetime) -> list[store.ZoneScene]:
+    """Record the frames over the zone acquired between start and end that are worth it and new."""
+    scenes = await search(app.state.http, geo.area, start, end)
+    candidates = worth_processing(scenes, geo.area, settings.sar_min_coverage)
+    coverage = {s.id: s.coverage(geo.area) for s in candidates}
+    return await store.queue_new(app.state.engine, candidates, coverage, geo.zone.key)
+
+
+async def _enqueue_scene(scene: store.ZoneScene, recording_since: datetime | None) -> None:
     """Queue a scene by a fixed id (re-queueing never duplicates); historical ones on the backfill lane."""
-    lane = "backfill" if scene.start < recording_since else "default"
-    await process_scene.options(task_id=f"sar-scene:{scene.id}", priority=lane).enqueue(scene.id)
+    lane = "backfill" if recording_since is None or scene.scene.start < recording_since else "default"
+    await process_scene.options(task_id=f"sar-scene:{scene.id}", priority=lane).enqueue(str(scene.id))
 
 
-@app.task(name="sar.backfill", max_retries=0, timeout=600)
-async def backfill(days: float) -> int:
-    """Queue the passes of the `days` before AIS recording began. Without AIS they are not paired,
-    but their detections teach Uatu which objects in the area never move."""
-    engine = app.state.engine
-    recording_since = await store.ais_recording_start(engine)
+@app.task(name="sar.backfill", max_retries=0, timeout=900)
+async def backfill(days: float, zone: str) -> int:
+    """Queue a zone's passes of the `days` before AIS recording began there. Without AIS they are not
+    paired, but their detections teach Uatu which objects in the zone never move."""
+    state = app.state.zones.get(zone)
+    if state is None:
+        raise RuntimeError(f"zone {zone!r} is not analysed (ANALYSIS_ZONES)")
+    recording_since = await store.recording_start(app.state.engine, zone)
     if recording_since is None:
-        raise RuntimeError("no AIS recorded yet: nothing to set the backfill against")
-    scenes = await search(app.state.http, AOI, recording_since - timedelta(days=days), recording_since)
-    candidates = worth_processing(scenes, AOI, settings.sar_min_coverage)
-    new = await store.queue_new(engine, candidates, {s.id: s.coverage(AOI) for s in candidates})
+        raise RuntimeError(f"no AIS recorded in {zone!r} yet: nothing to set the backfill against")
+    new = await _queue(state.geography, recording_since - timedelta(days=days), recording_since)
     for scene in new:
         await _enqueue_scene(scene, recording_since)
-    log.info("backfill_queued", days=days, catalogue=len(scenes), queued=len(new))
+    log.info("backfill_queued", zone=zone, days=days, queued=len(new))
     return len(new)
 
 
@@ -186,19 +207,23 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     state = app.state
     if state.auth is None:
         raise RuntimeError("CDSE credentials not configured")
-    scene = await store.load(state.engine, uuid.UUID(scene_id))
-    recording_since = await store.ais_recording_start(state.engine)
+    zs = await store.load(state.engine, uuid.UUID(scene_id))
+    zone = state.zones.get(zs.zone)
+    if zone is None:
+        raise RuntimeError(f"zone {zs.zone!r} is not analysed (ANALYSIS_ZONES)")
+    geo, scene = zone.geography, zs.scene
+    recording_since = await store.recording_start(state.engine, zs.zone)
     historical = recording_since is None or scene.start < recording_since
-    log.info("scene_started", scene=scene.name, historical=historical)
+    log.info("scene_started", scene=scene.name, zone=zs.zone, historical=historical)
     path = await download(state.http, state.auth, scene, settings.sar_data_dir)
     engine = None if historical else state.engine  # no AIS to pair with
-    analysis = await analyse(path, state.grid, state.land, CfarParams(), engine, settings.sar_bbox)
-    await asyncio.to_thread(write_outputs, analysis, settings.sar_data_dir / analysis.name)
-    summary = await store.save_results(state.engine, uuid.UUID(scene_id), analysis)
-    if not settings.sar_keep_scenes:
+    analysis = await analyse(path, geo.grid, geo.land, CfarParams(), engine, geo.zone.bbox)
+    await asyncio.to_thread(write_outputs, analysis, settings.sar_data_dir / zs.zone / analysis.name)
+    summary = await store.save_results(state.engine, zs.id, analysis)
+    if not settings.sar_keep_scenes and not await store.product_still_needed(state.engine, zs):
         path.unlink(missing_ok=True)
-    objects = await store.rebuild_fixed_objects(state.engine, srid=state.grid.crs.to_epsg())
-    log.info("scene_processed", scene=scene.name, historical=historical, **summary, **objects)
+    objects = await store.rebuild_fixed_objects(state.engine, srid=geo.grid.crs.to_epsg())
+    log.info("scene_processed", scene=scene.name, zone=zs.zone, historical=historical, **summary, **objects)
     if not historical:
         await announce_pass(uuid.UUID(scene_id))
     return summary
@@ -225,7 +250,8 @@ async def announce_pass(scene_id: uuid.UUID) -> None:
 async def analyse_ais() -> dict[str, int]:
     state = app.state
     now = datetime.now(UTC)
-    outcome = await ais_analysis.analyse(state.engine, now, settings.ais_bbox, state.coast, bathymetry=state.bathymetry)
+    areas = [ais_analysis.Area(z.geography.zone.bbox, z.geography.coast, z.bathymetry) for z in state.zones.values()]
+    outcome = await ais_analysis.analyse(state.engine, now, areas)
     urgent = [e for e in outcome.new if e.severity >= 3 and ais_analysis.worth_alerting(e, now)]
     if urgent:
         mmsis = {e.mmsi for e in urgent} | {e.other_mmsi for e in urgent if e.other_mmsi}

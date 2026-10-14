@@ -160,7 +160,8 @@ def scene_notification(r: SceneReport, late: bool = False) -> tuple[str, str, st
     """
     interesting = [c for c in r.candidates if c.kind != "reception_gap"]
     gaps = len(r.candidates) - len(interesting)
-    when = f"{r.name[:3]} {r.acquired:%d/%m %H:%M} UTC" + (" (toma tardía)" if late else "")
+    when = f"{r.name[:3]} {r.acquired:%d/%m %H:%M} UTC" + (f" · {r.zone}" if r.zone else "")
+    when += " (toma tardía)" if late else ""
     headline = f"{_count(len(interesting), 'barco')} sin AIS" if interesting else "sin barcos oscuros"
     title = f"Pasada {when}: {headline}"
     frames = f", {r.frames} tomas" if r.frames > 1 else ""
