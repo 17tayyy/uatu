@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 log = structlog.get_logger(component="db")
 
 
-def create_engine(url: str) -> AsyncEngine:
-    return create_async_engine(url, pool_size=2, max_overflow=0, pool_pre_ping=True)
+def create_engine(url: str, *, pool_size: int = 2, statement_timeout_ms: int | None = None) -> AsyncEngine:
+    connect_args = {}
+    if statement_timeout_ms is not None:
+        connect_args["server_settings"] = {"statement_timeout": str(statement_timeout_ms)}
+    return create_async_engine(url, pool_size=pool_size, max_overflow=0, pool_pre_ping=True, connect_args=connect_args)
 
 
 def is_transient(error: BaseException) -> bool:

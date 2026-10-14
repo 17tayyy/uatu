@@ -159,6 +159,29 @@ WHERE d.status = 'dark' AND f.fixed IS NOT TRUE
 ORDER BY d.seen_at DESC;
 ```
 
+## Dashboard
+
+A map and a side panel at `http://<host>:8000` (the `web` service), in Spanish:
+
+- **Pasadas**: every Sentinel-1 pass since AIS recording began, with the radar image laid on
+  the map and each detection coloured by what AIS says about it (paired, where AIS is barely
+  received, a fixed object, or a candidate with no AIS). Candidates come first, with the vessel
+  that went silent and could be there.
+- **Eventos**: the AIS events (gaps, encounters, loitering, vessels over cables, sanctioned
+  vessels...) of the last 24 h to 7 days.
+- **Barcos**: the vessels heard in the last hour (sanctioned ones first), search by name or
+  MMSI, and a vessel's card: track, events, sanctions and the passes that saw it.
+- Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute.
+
+It draws its own base map (land from the SAR land mask, no third-party tiles) with MapLibre GL.
+The API behind it is read-only, under `/api/v1` (documented at `/docs`).
+
+**It has no authentication: keep it on the local network, never forward the port.**
+
+Scenes processed before the dashboard existed have no radar overlay
+(`backscatter.png` + `backscatter.json` in the scene's output folder); the worker writes it for
+every new pass.
+
 ## Operations
 
 The worker also keeps the system healthy:
@@ -213,6 +236,7 @@ uv sync
 docker compose up -d db
 uv run alembic upgrade head
 LOG_FORMAT=console uv run uatu-recorder
+LOG_FORMAT=console uv run fastapi dev                  # the dashboard, on http://127.0.0.1:8000
 
 uv run pytest                                          # unit tests
 # Integration tests need a migrated database of their own (they assume nothing else in it):
@@ -255,3 +279,4 @@ Environment variables (or `.env`):
 | `BACKUP_DIR` / `BACKUP_KEEP` | `data/backups` / `14`         | `/data/backups` volume in docker compose   |
 | `AIS_STALE_MINUTES`  | `15`                                  | alert when no AIS arrives for this long    |
 | `MIN_FREE_DISK`      | `0.1`                                 | alert below this fraction of free disk     |
+| `WEB_PORT`           | `8000`                                | dashboard port on the host (docker compose) |

@@ -1,0 +1,196 @@
+"""Vessels heard on AIS: who is out there now, and everything known about one of them."""
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from uatu.ais.analysis import describe
+from uatu.ais.events import Event
+from uatu.db.models import AisEvent, Position, SanctionedVessel, SarDetection, Vessel
+from uatu.web.errors import NotFoundError
+from uatu.web.events.schemas import EventProperties
+from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
+from uatu.web.vessels.labels import flag, ship_type
+from uatu.web.vessels.schemas import (
+    LiveVesselProperties,
+    RadarSighting,
+    Sanction,
+    VesselDetail,
+    VesselSummary,
+)
+
+
+def _latest_positions(since: datetime) -> Any:
+    return (
+        select(Position)
+        .where(Position.received_at >= since)
+        .ext(distinct_on(Position.mmsi))
+        .order_by(Position.mmsi, Position.received_at.desc())
+        .subquery()
+    )
+
+
+def _live(row: Any) -> Feature[LiveVesselProperties]:
+    return Feature(
+        geometry=point(row.lon, row.lat),
+        properties=LiveVesselProperties(
+            mmsi=row.mmsi,
+            name=row.name,
+            ship_type=ship_type(row.ship_type),
+            length_m=row.length_m,
+            flag=flag(row.mmsi),
+            sog=row.sog,
+            cog=row.cog,
+            heading=row.heading,
+            received_at=row.received_at,
+            sanctioned=row.programs is not None,
+        ),
+    )
+
+
+async def live_vessels(db: AsyncSession, minutes: float, limit: int) -> FeatureCollection[LiveVesselProperties]:
+    """The last position of every vessel heard in the last `minutes`."""
+    latest = _latest_positions(datetime.now(UTC) - timedelta(minutes=minutes))
+    position = (latest.c.mmsi, latest.c.lat, latest.c.lon, latest.c.sog, latest.c.cog, latest.c.heading)
+    vessel = (Vessel.name, Vessel.ship_type, Vessel.length_m, SanctionedVessel.programs)
+    columns = (*position, latest.c.received_at, *vessel)
+    rows = await db.execute(
+        select(*columns)
+        .outerjoin(Vessel, Vessel.mmsi == latest.c.mmsi)
+        .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
+        .order_by(latest.c.mmsi)
+        .limit(limit)
+    )
+    return FeatureCollection(features=[_live(r) for r in rows])
+
+
+async def search_vessels(db: AsyncSession, query: str, limit: int) -> list[VesselSummary]:
+    """Vessels whose name contains the query, or whose MMSI starts with it."""
+    last_seen = (
+        select(func.max(Position.received_at)).where(Position.mmsi == Vessel.mmsi).correlate(Vessel).scalar_subquery()
+    )
+    pattern = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    rows = await db.execute(
+        select(Vessel.mmsi, Vessel.name, Vessel.ship_type, last_seen.label("last_seen_at"))
+        .where(or_(Vessel.name.ilike(f"%{pattern}%"), cast(Vessel.mmsi, Text).like(f"{pattern}%")))
+        .order_by(Vessel.name, Vessel.mmsi)
+        .limit(limit)
+    )
+    return [
+        VesselSummary(
+            mmsi=r.mmsi, name=r.name, ship_type=ship_type(r.ship_type), flag=flag(r.mmsi), last_seen_at=r.last_seen_at
+        )
+        for r in rows
+    ]
+
+
+async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselDetail:
+    vessel = await db.scalar(select(Vessel).where(Vessel.mmsi == mmsi))
+    heard = await db.scalar(select(func.count()).where(Position.mmsi == mmsi))
+    if vessel is None and not heard:
+        raise NotFoundError("Vessel")
+
+    sanction = None
+    if vessel is not None and vessel.imo is not None:
+        listed = await db.scalar(select(SanctionedVessel).where(SanctionedVessel.imo == vessel.imo))
+        if listed is not None:
+            sanction = Sanction(listed_as=listed.name, programs=listed.programs)
+
+    since = datetime.now(UTC) - timedelta(hours=track_hours)
+    fixes = (
+        await db.execute(
+            select(Position.lon, Position.lat, Position.sog, Position.cog, Position.heading, Position.received_at)
+            .where(Position.mmsi == mmsi, Position.received_at >= since)
+            .order_by(Position.received_at)
+        )
+    ).all()
+    last = (
+        await db.execute(select(Position).where(Position.mmsi == mmsi).order_by(Position.received_at.desc()).limit(1))
+    ).scalar()
+
+    last_position = None
+    if last is not None:
+        last_position = Feature(
+            geometry=point(last.lon, last.lat),
+            properties=LiveVesselProperties(
+                mmsi=mmsi,
+                name=vessel.name if vessel else None,
+                ship_type=ship_type(vessel.ship_type) if vessel else None,
+                length_m=vessel.length_m if vessel else None,
+                flag=flag(mmsi),
+                sog=last.sog,
+                cog=last.cog,
+                heading=last.heading,
+                received_at=last.received_at,
+                sanctioned=sanction is not None,
+            ),
+        )
+
+    events = (
+        await db.scalars(
+            select(AisEvent)
+            .where(or_(AisEvent.mmsi == mmsi, AisEvent.other_mmsi == mmsi))
+            .order_by(AisEvent.start_at.desc(), AisEvent.id.desc())
+            .limit(50)
+        )
+    ).all()
+    names = {mmsi: vessel.name} if vessel and vessel.name else {}
+    sightings = (
+        await db.execute(
+            select(SarDetection)
+            .where(or_(SarDetection.mmsi == mmsi, SarDetection.suspected_mmsi == mmsi))
+            .order_by(SarDetection.seen_at.desc(), SarDetection.id.desc())
+            .limit(50)
+        )
+    ).scalars()
+
+    return VesselDetail(
+        mmsi=mmsi,
+        name=vessel.name if vessel else None,
+        callsign=vessel.callsign if vessel else None,
+        imo=vessel.imo if vessel else None,
+        ship_type=ship_type(vessel.ship_type) if vessel else None,
+        flag=flag(mmsi),
+        length_m=vessel.length_m if vessel else None,
+        beam_m=vessel.beam_m if vessel else None,
+        destination=vessel.destination if vessel else None,
+        sanction=sanction,
+        last_position=last_position,
+        track=Geometry(type="LineString", coordinates=[[round(f.lon, 5), round(f.lat, 5)] for f in fixes])
+        if len(fixes) > 1
+        else None,
+        events=[_event(e, names) for e in events],
+        radar_sightings=[
+            RadarSighting(
+                pass_id=str(d.scene_id),
+                seen_at=d.seen_at,
+                lat=d.lat,
+                lon=d.lon,
+                as_suspect=d.mmsi != mmsi,
+                distance_m=d.distance_m if d.mmsi == mmsi else d.suspect_distance_m,
+            )
+            for d in sightings
+        ],
+    )
+
+
+def _event(e: AisEvent, names: dict[int, str]) -> EventProperties:
+    title, message, _ = describe(
+        Event(e.kind, e.severity, e.mmsi, e.start_at, e.lat, e.lon, e.details, e.end_at, e.other_mmsi), names
+    )
+    return EventProperties(
+        id=e.id,
+        kind=e.kind,
+        severity=e.severity,
+        mmsi=e.mmsi,
+        vessel_name=names.get(e.mmsi),
+        other_mmsi=e.other_mmsi,
+        start_at=e.start_at,
+        end_at=e.end_at,
+        title=title,
+        message=message,
+        details=e.details,
+    )
