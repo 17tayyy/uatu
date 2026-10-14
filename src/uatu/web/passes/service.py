@@ -281,8 +281,19 @@ def _tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
     return left, top - size, left + size, top
 
 
-def radar_tile(radar: Path, z: int, x: int, y: int) -> bytes | None:
-    """The 256 px PNG (grey and transparency) of a frame's radar image over one map tile; None if it has none."""
+def tile_lonlat_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    """A web map tile's west, south, east, north in degrees."""
+    left, bottom, right, top = _tile_bounds(z, x, y)
+    half = math.pi * 6378137.0
+
+    def lat(m: float) -> float:
+        return math.degrees(2 * math.atan(math.exp(m / 6378137.0)) - math.pi / 2)
+
+    return left / half * 180, lat(bottom), right / half * 180, lat(top)
+
+
+def read_radar_tile(radar: Path, z: int, x: int, y: int) -> tuple[np.ndarray, np.ndarray] | None:
+    """A frame's radar image over one map tile, as grey levels and transparency; None if it has none there."""
     left, bottom, right, top = _tile_bounds(z, x, y)
     with rasterio.open(radar) as src:
         b = src.bounds
@@ -292,10 +303,16 @@ def radar_tile(radar: Path, z: int, x: int, y: int) -> bytes | None:
         shape = (TILE_PX, TILE_PX)
         grey = src.read(1, window=window, out_shape=shape, boundless=True, fill_value=0, resampling=Resampling.bilinear)
         mask = src.read_masks(1, window=window, out_shape=shape, boundless=True, resampling=Resampling.nearest)
-    if not mask.any():
+    return (grey, mask) if mask.any() else None
+
+
+def radar_tile(radar: Path, z: int, x: int, y: int) -> bytes | None:
+    """The 256 px PNG (grey and transparency) of a frame's radar image over one map tile; None if it has none."""
+    read = read_radar_tile(radar, z, x, y)
+    if read is None:
         return None
     out = io.BytesIO()
-    Image.fromarray(np.dstack([grey, mask]), mode="LA").save(out, format="PNG", compress_level=3)
+    Image.fromarray(np.dstack(read), mode="LA").save(out, format="PNG", compress_level=3)
     return out.getvalue()
 
 
