@@ -9,7 +9,7 @@ import numpy as np
 from geoalchemy2.shape import to_shape
 from shapely import Geometry
 from shapely.ops import transform as shapely_transform
-from sqlalchemy import Text, and_, cast, func, literal_column, or_, select, true, update
+from sqlalchemy import Text, and_, cast, func, literal_column, or_, select, text, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -46,6 +46,32 @@ async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox
         t, lat, lon, sog, cog = (np.array(column, dtype=float) for column in zip(*rows, strict=True))
         result.append(Track(mmsi, t, lat, lon, sog, cog))
     return result
+
+
+async def stopped_places(
+    engine: AsyncEngine, since: datetime, cell_deg: float = 0.01
+) -> list[tuple[int, float, float]]:
+    """(mmsi, lon, lat) of each ~1 km cell where a vessel sat stopped (< 1 kn, 3+ reports) since `since`."""
+    lon_cell, lat_cell = func.round(Position.lon / cell_deg), func.round(Position.lat / cell_deg)
+    stmt = (
+        select(Position.mmsi, lon_cell * cell_deg, lat_cell * cell_deg)
+        .where(Position.received_at >= since, Position.sog <= 1.0)
+        .group_by(Position.mmsi, lon_cell, lat_cell)
+        .having(func.count() >= 3)
+    )
+    async with engine.connect() as conn:
+        return [(mmsi, float(lon), float(lat)) for mmsi, lon, lat in await conn.execute(stmt)]
+
+
+async def recording_gaps(
+    engine: AsyncEngine, since: datetime, min_duration: timedelta
+) -> list[tuple[datetime, datetime]]:
+    """Periods since `since` when the recorder received nothing (Uatu or its connection down)."""
+    stmt = text(
+        "SELECT gap_start, gap_end FROM ingest_gaps WHERE gap_end >= :since AND duration >= :min ORDER BY gap_start"
+    )
+    async with engine.connect() as conn:
+        return [(a, b) for a, b in await conn.execute(stmt, {"since": since, "min": min_duration})]
 
 
 async def static_reports(engine: AsyncEngine, since: datetime) -> list[StaticReport]:

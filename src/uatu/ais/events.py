@@ -64,6 +64,7 @@ class Params:
     # Gibraltar drift kilometres apart: 8 km and 4 vessels found that area on the first day's data.
     crowd_radius_m: float = 8_000
     crowd_min_vessels: int = 4
+    crowd_history_days: float = 7  # how much of the record teaches where vessels wait
     offshore_m: float = 5_000  # farther than this: open sea
     encounter_distance_m: float = 500
     encounter_max_sog: float = 2.0
@@ -360,21 +361,26 @@ def _span_event(kind: str, severity: int, tr: Track, first: int, last: int, deta
     )
 
 
+def stopped_points(tracks: Sequence[Track], max_sog: float = 1.0) -> list[tuple[int, float, float]]:
+    """(mmsi, lon, lat): the median position of each vessel that sat stopped in these tracks."""
+    points = []
+    for tr in tracks:
+        still = tr.sog <= max_sog
+        if still.sum() >= 3:
+            points.append((tr.mmsi, float(np.median(tr.lon[still])), float(np.median(tr.lat[still]))))
+    return points
+
+
 def downgrade_in_crowds(
-    events: list[Event], tracks: Sequence[Track], proj: LocalProjection, p: Params = DEFAULT_PARAMS
+    events: list[Event], stopped: Sequence[tuple[int, float, float]], proj: LocalProjection, p: Params = DEFAULT_PARAMS
 ) -> list[Event]:
     """Lower to informative what happens where many vessels sit stopped: an anchorage or a
     waiting area, where stopping, meeting and lying over a cable are routine.
 
-    Found from the data itself: each vessel that was stopped contributes its median stopped
-    position; no anchorage charts needed.
+    stopped: (mmsi, lon, lat) of places where vessels sat stopped, learnt from the AIS record
+    itself, so no anchorage charts are needed. The longer the record, the better it knows them.
     """
-    stopped = []
-    for tr in tracks:
-        still = tr.sog <= 1.0
-        if still.sum() >= 3:
-            stopped.append((tr.mmsi, float(np.median(tr.lon[still])), float(np.median(tr.lat[still]))))
-    if len(stopped) < p.crowd_min_vessels:
+    if not stopped:
         return events
     xs, ys = proj.xy(np.array([s[1] for s in stopped]), np.array([s[2] for s in stopped]))
     tree = cKDTree(np.column_stack([xs, ys]))

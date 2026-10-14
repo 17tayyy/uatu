@@ -195,12 +195,23 @@ def test_stopped_or_patchy_vessels_going_silent_are_informative():
 
 
 def test_events_among_many_stopped_vessels_are_routine():
-    from uatu.ais.events import downgrade_in_crowds
+    from uatu.ais.events import downgrade_in_crowds, stopped_points
 
     minutes = range(0, 241, 2)
     loiterer = track(1, minutes, sog=0.4)
-    [alone] = downgrade_in_crowds(detect_loitering([loiterer], at_sea(20)), [loiterer], PROJ)
+    [alone] = downgrade_in_crowds(detect_loitering([loiterer], at_sea(20)), stopped_points([loiterer]), PROJ)
     assert alone.severity == 2
     anchorage = [track(100 + k, minutes, lat=LAT0 + 0.005 * k, sog=0.1) for k in range(6)]  # within ~3 km
-    [routine] = downgrade_in_crowds(detect_loitering([loiterer], at_sea(20)), [loiterer, *anchorage], PROJ)
+    stopped = stopped_points([loiterer, *anchorage])
+    [routine] = downgrade_in_crowds(detect_loitering([loiterer], at_sea(20)), stopped, PROJ)
     assert routine.severity == 1 and routine.details["vessels_stopped_nearby"] == 6
+
+
+def test_waiting_areas_are_learnt_from_past_days_too():
+    from uatu.ais.events import downgrade_in_crowds
+
+    loiterer = track(1, range(0, 241, 2), sog=0.4)
+    # Nobody else stopped there today, but five vessels waited around it earlier in the week.
+    history = [(200 + k, LON0 + 0.02 * k, LAT0 + 0.01) for k in range(5)]
+    [e] = downgrade_in_crowds(detect_loitering([loiterer], at_sea(20)), history, PROJ)
+    assert e.severity == 1 and e.details["vessels_stopped_nearby"] == 5
