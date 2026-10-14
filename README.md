@@ -203,7 +203,7 @@ minute.
   `sar_scenes` and queued.
   The catalogue can omit fresh products for a few minutes; a later run finds them.
 - `sar.process_scene`: download, detect, pair, link suspects, store, rebuild fixed objects;
-  retried 3 times 10 minutes apart, then marked `failed`. One at a time (~0.8 GB of RAM).
+  retried 3 times 10 minutes apart, then marked `failed`. Two at a time (~0.8 GB of RAM each).
   Products are deleted once processed. Each live pass ends with a notification: candidates
   where AIS is received, split into reception gaps, vessels that went silent (high priority
   if sanctioned) and unidentified ones.

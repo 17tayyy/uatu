@@ -233,6 +233,7 @@ def _finite(value: float) -> float | None:
 
 # Detections of different passes within this distance are the same object. Stationary targets
 # carry no Doppler shift, and geolocation agrees to tens of metres between orbits.
+FIXED_OBJECTS_LOCK = 0x5A_F1_ED  # advisory lock key for rebuilding them
 FIXED_EPS_M = 150.0
 FIXED_MIN_PASSES = 3
 FIXED_MIN_PERSISTENCE = 0.5
@@ -272,6 +273,8 @@ async def rebuild_fixed_objects(engine: AsyncEngine, srid: int) -> dict[str, int
     srid: a metric CRS for the area (its UTM zone), in which the clustering distance applies.
     """
     async with engine.begin() as conn:
+        # One rebuild at a time: two scenes finishing together would delete each other's objects.
+        await conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": FIXED_OBJECTS_LOCK})
         rows = (await conn.execute(_RECURRING_OBJECTS, {"srid": srid, "eps": FIXED_EPS_M})).all()
         await conn.execute(delete(SarFixedObject))  # detections' links are set to NULL
         fixed = 0

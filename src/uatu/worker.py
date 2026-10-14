@@ -25,6 +25,7 @@ AIS
 
 import asyncio
 import uuid
+from collections import defaultdict
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -65,18 +66,22 @@ settings = WorkerSettings()
 configure_logging(settings.log_level, settings.log_format)
 log = structlog.get_logger(component="worker")
 
-# One task at a time: processing a scene takes ~0.8 GB of RAM. Historical scenes go on the
-# "backfill" lane, which is only consumed when nothing else is waiting. No prefetching: a
-# periodic task (health, AIS analysis) then waits at most for the scene being processed,
-# rather than also for one already taken off the queue (a backfill download can take 12 min).
+# Two tasks at a time (a 4 GB container): two scenes take ~1.7 GB of RAM, or one scene and a
+# periodic task (health, AIS analysis), which then never waits for a download. Historical scenes
+# go on the "backfill" lane, consumed only when nothing else is waiting. No prefetching, so that
+# a task is not held back behind one already taken off the queue (a download can take 12 min).
+# Tasks run on one event loop: the locks below keep two scenes of the same frame (two zones)
+# from downloading it twice, and a pass from being announced twice.
 app = Ardiq(
     redis_url=settings.redis_url,
     queue_name="uatu",
     priorities=["backfill", "default"],
     default_priority="default",
-    concurrency=1,
+    concurrency=2,
     prefetch=1,
 )
+_downloading: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)  # by product id
+_announcing = asyncio.Lock()
 LOST_AFTER = timedelta(hours=2)
 # Tasks that run every few minutes: one failure (a network blip, a service down for a while)
 # fixes itself on the next run, so they alert only when failing this many times in a row.
@@ -220,7 +225,8 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     recording_since = await store.recording_start(state.engine, zs.zone)
     historical = recording_since is None or scene.start < recording_since
     log.info("scene_started", scene=scene.name, zone=zs.zone, historical=historical)
-    path = await download(state.http, state.auth, scene, settings.sar_data_dir)
+    async with _downloading[scene.id]:  # the frame's other zone may be downloading it right now
+        path = await download(state.http, state.auth, scene, settings.sar_data_dir)
     engine = None if historical else state.engine  # no AIS to pair with
     out_dir = settings.sar_data_dir / zs.zone / scene.name.removesuffix(".SAFE")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -241,14 +247,15 @@ async def announce_pass(scene_id: uuid.UUID) -> None:
     """Notify the pass a frame belongs to, once all its frames are done (see store.pass_announcement).
     A frame that turns up after its pass was announced is notified only if it adds vessels without AIS."""
     engine = app.state.engine
-    announcement = await store.pass_announcement(engine, scene_id)
-    if announcement is None:
-        return
-    report = await store.pass_report(engine, announcement.frames)
-    if not announcement.late or any(c.kind != "reception_gap" for c in report.candidates):
-        title, message, priority, link = scene_notification(report, late=announcement.late)
-        await app.state.alerter.notify(title, message, priority, link)
-    await store.mark_notified(engine, announcement.fresh)
+    async with _announcing:  # two frames of a pass finishing together must not both announce it
+        announcement = await store.pass_announcement(engine, scene_id)
+        if announcement is None:
+            return
+        report = await store.pass_report(engine, announcement.frames)
+        if not announcement.late or any(c.kind != "reception_gap" for c in report.candidates):
+            title, message, priority, link = scene_notification(report, late=announcement.late)
+            await app.state.alerter.notify(title, message, priority, link)
+        await store.mark_notified(engine, announcement.fresh)
 
 
 # --- AIS ------------------------------------------------------------------------------------------

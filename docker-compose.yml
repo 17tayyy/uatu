@@ -84,7 +84,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    mem_limit: 1500m  # a scene takes ~0.75 GB; never let it squeeze Postgres
+    mem_limit: 3000m  # two scenes at once take ~1.7 GB; never let them squeeze Postgres (4 GB container)
     stop_grace_period: 60s
     logging:
       driver: json-file
@@ -113,7 +113,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    mem_limit: 400m
+    mem_limit: 600m  # the land outlines of every zone are held in memory
     logging:
       driver: json-file
       options:
