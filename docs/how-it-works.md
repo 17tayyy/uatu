@@ -163,9 +163,12 @@ anchor", "moored"). Else the place does: by the coast and a port, alongside; wit
 coast, at anchor; further out, lying still at sea, which is where ship-to-ship transfers happen.
 Stops are named after the nearest port of the World Port Index.
 
-**Crossing the Strait.** A crossing is counted where a vessel's track crosses the meridian 5°33' W
-between the two coasts. The meridian is east of Tarifa and Tangier and west of Algeciras and
-Tanger Med: the ferries between those ports, dozens a day, never cross it.
+**Crossing the Strait.** A passage is placed where a vessel's track crosses the meridian 5°33' W
+between the two coasts. It counts only if the vessel came from west of 5°39' W and went on east of
+5°27' W, or the other way, within a few hours. A bare crossing was not enough: a container ship
+manoeuvring off Tanger Med's breakwater crossed it west and back east before berthing, two
+"passages" in three hours. The ferries between Tarifa and Tangier and between Algeciras and
+Tanger Med, dozens a day, never reach both sides.
 
 ## 10. Lessons from running it
 

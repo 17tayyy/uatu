@@ -80,12 +80,16 @@ def test_drifting_is_one_stop_moving_on_to_another_is_two():
     assert len(stops([track(minutes, lon, 35.93, 0.1, nav=1)], coast_km=3)) == 2
 
 
-def test_transits_of_the_narrows_but_not_the_ferries_beside_them():
-    eastbound = track([0, 20], [-5.70, -5.45], [35.95, 35.96], 14, mmsi=1)
-    westbound = track([0, 20], [-5.45, -5.70], [35.97, 35.96], 14, mmsi=2)
+def test_transits_of_the_narrows_but_not_the_ferries_or_the_manoeuvres_beside_them():
+    eastbound = track([0, 20, 40], [-5.70, -5.60, -5.35], [35.95, 35.95, 35.96], 14, mmsi=1)
+    westbound = track([0, 20], [-5.40, -5.70], [35.97, 35.96], 14, mmsi=2)
     tarifa_tangier = track([0, 20, 40], [-5.60, -5.70, -5.80], [36.0, 35.9, 35.79], 20, mmsi=3)
     algeciras_tanger_med = track([0, 30, 60], [-5.43, -5.47, -5.50], [36.13, 36.0, 35.89], 20, mmsi=4)
-    unheard = track([0, 240], [-5.70, -5.45], [35.95, 35.96], 14, mmsi=5)  # where it crossed, unknown
-    found = detect_transits([eastbound, westbound, tarifa_tangier, algeciras_tanger_med, unheard])
+    unheard = track([0, 240], [-5.70, -5.40], [35.95, 35.96], 14, mmsi=5)  # where it crossed, unknown
+    # Off Tanger Med from the east, turning west of the meridian to come alongside: no passage.
+    manoeuvre = track([0, 30, 60, 90], [-5.35, -5.53, -5.57, -5.51], 35.9, 5, mmsi=6)
+    # Crossed, but not seen beyond the far side yet: a later analysis will count it.
+    not_yet = track([0, 20], [-5.70, -5.52], 35.95, 14, mmsi=7)
+    found = detect_transits([eastbound, westbound, tarifa_tangier, algeciras_tanger_med, unheard, manoeuvre, not_yet])
     assert [(t.mmsi, t.direction) for t in found] == [(1, "east"), (2, "west")]
-    assert found[0].at.timestamp() == T0 + 0.6 * 20 * 60  # 0.15 of 0.25 degrees: 60% of the way
+    assert found[0].at.timestamp() == T0 + (20 + 0.2 * 20) * 60  # 0.05 of 0.25 degrees past -5.60
