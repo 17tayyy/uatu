@@ -14,7 +14,9 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.warp import transform_geom
-from shapely.geometry import Polygon, mapping, shape
+from shapely import unary_union
+from shapely.geometry import mapping, shape
+from shapely.geometry.base import BaseGeometry
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,16 +35,22 @@ def area(bbox: BBox) -> MapArea:
 NATURAL_EARTH_LAND = Path(__file__).parent / "natural_earth_land.geojson"
 
 
-def land(grid: Grid, land_path: Path | None) -> FeatureCollection[LandProperties]:
-    """Land for the map: the land mask where there is one, Natural Earth around it (or everywhere without it)."""
-    if land_path is None:
-        return context_land(None)
-    detailed = land_outlines(grid, land_path)
-    covered = Polygon(zip(*grid.outline_lonlat(), strict=True))
-    return FeatureCollection(features=detailed.features + context_land(covered).features)
+def land(masks: list[tuple[Grid, Path, BBox]]) -> FeatureCollection[LandProperties]:
+    """Land for the map: each zone's land mask within its box, Natural Earth everywhere else."""
+    features = []
+    for grid, path, bbox in masks:
+        box = bbox_polygon(bbox)
+        for f in land_outlines(grid, path).features:
+            clipped = shape(f.geometry.model_dump()).intersection(box)
+            if not clipped.is_empty:
+                features.append(
+                    Feature(geometry=Geometry.model_validate(_rounded(mapping(clipped))), properties=LandProperties())
+                )
+    covered = unary_union([bbox_polygon(bbox) for _, _, bbox in masks]) if masks else None
+    return FeatureCollection(features=features + context_land(covered).features)
 
 
-def context_land(covered: Polygon | None) -> FeatureCollection[LandProperties]:
+def context_land(covered: BaseGeometry | None) -> FeatureCollection[LandProperties]:
     """Natural Earth land, minus the part `covered` by a better source."""
     features = []
     for f in json.loads(NATURAL_EARTH_LAND.read_text())["features"]:

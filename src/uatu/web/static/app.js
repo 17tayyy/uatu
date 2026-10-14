@@ -61,8 +61,12 @@ const LAYERS = {
 
 const EMPTY = { type: "FeatureCollection", features: [] };
 
+const ALL = "todas";
+
 const state = {
-  area: null,
+  zone: loadZonePref(), // a zone's key, or ALL for the whole coast
+  zones: [], // the zones analysed, south-west to north-east
+  wholeCoast: null,
   status: null,
   passes: null,
   pass: null, // the pass drawn on the map
@@ -194,6 +198,36 @@ async function api(path) {
   return body.data;
 }
 
+function loadZonePref() {
+  try {
+    return localStorage.getItem("uatu.zone") ?? ALL;
+  } catch {
+    return ALL;
+  }
+}
+
+function saveZonePref() {
+  try {
+    localStorage.setItem("uatu.zone", state.zone);
+  } catch {
+    // not remembered: fine
+  }
+}
+
+/** The path with the zone the dashboard looks at. */
+function inZone(path) {
+  return `${path}${path.includes("?") ? "&" : "?"}zone=${encodeURIComponent(state.zone)}`;
+}
+
+function zoneName(key) {
+  return state.zones.find((z) => z.key === key)?.name ?? key;
+}
+
+/** The box the dashboard looks at: the zone's, or the whole coast's. */
+function scopeArea() {
+  return state.zones.find((z) => z.key === state.zone) ?? state.wholeCoast;
+}
+
 function loadLayerPrefs() {
   const prefs = Object.fromEntries(Object.entries(LAYERS).map(([key, layer]) => [key, layer.on]));
   try {
@@ -223,7 +257,7 @@ const map = new maplibregl.Map({
   },
   center: [-5.5, 36],
   zoom: 8,
-  minZoom: 6,
+  minZoom: 4,
   maxZoom: 15,
   attributionControl: false,
   dragRotate: false,
@@ -297,7 +331,7 @@ function addLayers() {
   ]) {
     map.addImage(name, image, { pixelRatio: 2 });
   }
-  for (const id of ["land", "outside", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "link", "selected"]) {
+  for (const id of ["land", "zones", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "link", "selected"]) {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
@@ -335,12 +369,17 @@ function addLayers() {
     source: "infra",
     paint: { "circle-radius": 2.5, "circle-color": C.infra, "circle-stroke-width": 1, "circle-stroke-color": C.page },
   });
-  // The edge of the watched area: AIS is recorded and radar processed inside it only.
+  // The edges of the zones: AIS is recorded and radar processed inside them only.
   map.addLayer({
-    id: "area-edge",
+    id: "zone-edges",
     type: "line",
-    source: "outside",
-    paint: { "line-color": C.muted, "line-width": 1, "line-opacity": 0.6, "line-dasharray": [4, 3] },
+    source: "zones",
+    paint: {
+      "line-color": ["case", ["get", "selected"], C.ink2, C.muted],
+      "line-width": 1,
+      "line-opacity": ["case", ["get", "selected"], 0.8, 0.5],
+      "line-dasharray": [4, 3],
+    },
   });
   map.addLayer({
     id: "footprint",
@@ -495,11 +534,19 @@ function showRadarImage(pass) {
   });
 }
 
-/** The world minus the watched area: a polygon with the area as its hole. */
-function outsideOf(a) {
-  const world = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
-  const hole = [[a.west, a.south], [a.west, a.north], [a.east, a.north], [a.east, a.south], [a.west, a.south]];
-  return { type: "Feature", geometry: { type: "Polygon", coordinates: [world, hole] }, properties: {} };
+/** Each zone's edge, the selected one brighter. */
+function zoneEdges() {
+  return {
+    type: "FeatureCollection",
+    features: state.zones.map((z) => ({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [[z.west, z.south], [z.east, z.south], [z.east, z.north], [z.west, z.north], [z.west, z.south]],
+      },
+      properties: { selected: z.key === state.zone },
+    })),
+  };
 }
 
 function select(lngLat) {
@@ -540,7 +587,7 @@ function bounds(coordinates) {
 }
 
 function fitToArea(b) {
-  const a = state.area;
+  const a = scopeArea();
   if (a) {
     b = new maplibregl.LngLatBounds(
       [Math.max(b.getWest(), a.west), Math.max(b.getSouth(), a.south)],
@@ -819,7 +866,7 @@ function renderLegend() {
   if (state.layers.coverage) {
     parts.push(h("h3", null, "Recepción AIS"), Object.values(RECEPTION).map((r) => legendItem("square", r.color, r.label)));
   }
-  parts.push(h("h3", null, "Mapa"), legendItem("dash", C.muted, "Límite de la zona vigilada"));
+  parts.push(h("h3", null, "Mapa"), legendItem("dash", C.muted, "Zonas vigiladas"));
   fill(document.getElementById("legend"), parts);
 }
 
@@ -848,7 +895,13 @@ function renderStatus(error) {
       { class: "facts num" },
       `${plural(s.vessels_last_hour, "barco", "barcos")} en la última hora · ${plural(s.events_24h, "evento", "eventos")} en 24 h`,
     ),
-    s.latest_pass && h("div", { class: "facts" }, `Última pasada ${when(s.latest_pass.acquired_at)} · Sentinel-${s.latest_pass.platform.slice(1)}`),
+    s.latest_pass &&
+      h(
+        "div",
+        { class: "facts" },
+        `Última pasada ${when(s.latest_pass.acquired_at)} · Sentinel-${s.latest_pass.platform.slice(1)}`,
+        state.zone === ALL ? ` · ${zoneName(s.latest_pass.zone)}` : "",
+      ),
   );
 }
 
@@ -916,7 +969,13 @@ function passRow(p) {
         "div",
         { class: "row-top" },
         h("span", { class: "row-title" }, when(p.acquired_at)),
-        h("span", { class: "row-time" }, `${p.platform} · ${p.orbit_direction === "ASCENDING" ? "asc." : "desc."} · ${Math.round(p.coverage * 100)} % zona`),
+        h(
+          "span",
+          { class: "row-time" },
+          [state.zone === ALL && zoneName(p.zone), p.platform, p.orbit_direction === "ASCENDING" ? "asc." : "desc.", `${Math.round(p.coverage * 100)} %`]
+            .filter(Boolean)
+            .join(" · "),
+        ),
       ),
       countsLine(p),
     ),
@@ -925,14 +984,18 @@ function passRow(p) {
 
 async function renderPasses() {
   if (!state.passes) fill(view, message("loading", "Cargando pasadas…"));
-  state.passes = await api("/passes?limit=60");
+  state.passes = await api(inZone("/passes?limit=60"));
   if (route.tab !== "passes" || route.id) return;
   if (!state.passes.length) {
     fill(view, message("empty", "Todavía no hay pasadas procesadas desde que se graba AIS."));
     return;
   }
   fill(view, 
-    h("p", { class: "note" }, "Pasadas de Sentinel-1 sobre el Estrecho desde que Uatu graba AIS. Cada detección radar se cruza con las posiciones AIS de ese momento."),
+    h(
+      "p",
+      { class: "note" },
+      `Pasadas de Sentinel-1 sobre ${state.zone === ALL ? "la costa" : zoneName(state.zone)} desde que Uatu graba AIS allí. Cada detección radar se cruza con las posiciones AIS de ese momento.`,
+    ),
     h("ul", { class: "list" }, state.passes.map(passRow)),
   );
 }
@@ -977,7 +1040,7 @@ function renderMapContext() {
     fill(
       el,
       svg("circle", C.blue),
-      h("span", null, `Radar: pasada de ${when(pass.acquired_at)}`),
+      h("span", null, `Radar: pasada de ${when(pass.acquired_at)}${state.zone === ALL ? ` · ${zoneName(pass.zone)}` : ""}`),
       !onIt && h("button", { onclick: () => navigate(`passes/${pass.id}`) }, "Ver"),
     );
   } else if (state.passNote) {
@@ -1043,7 +1106,7 @@ async function renderPass(id) {
       h(
         "div",
         { class: "detail-sub" },
-        `Sentinel-${pass.platform.slice(1)} · ${pass.orbit_direction === "ASCENDING" ? "ascendente" : "descendente"} · ${Math.round(pass.coverage * 100)} % de la zona`,
+        `${zoneName(pass.zone)} · Sentinel-${pass.platform.slice(1)} · ${pass.orbit_direction === "ASCENDING" ? "ascendente" : "descendente"} · ${Math.round(pass.coverage * 100)} % de la zona`,
         pass.frames > 1 ? ` · ${pass.frames} tomas` : "",
       ),
     ),
@@ -1073,7 +1136,7 @@ async function renderPass(id) {
 
 async function loadEvents() {
   const { minSeverity, hours } = state.eventFilter;
-  state.events = await api(`/events?hours=${hours}&min_severity=${minSeverity}&limit=500`);
+  state.events = await api(inZone(`/events?hours=${hours}&min_severity=${minSeverity}&limit=500`));
   byId.events = new Map(state.events.features.map((f) => [f.properties.id, f.properties]));
   setData("events", state.events);
   renderLegend();
@@ -1326,21 +1389,21 @@ async function loadCoverage() {
   if (state.coverageLoaded) return;
   state.coverageLoaded = true;
   try {
-    setData("coverage", await api("/coverage?days=7"));
+    setData("coverage", await api(inZone("/coverage?days=7")));
   } catch {
     state.coverageLoaded = false;
   }
 }
 
 async function loadLive() {
-  state.live = await api("/vessels/live?minutes=60");
+  state.live = await api(inZone("/vessels/live?minutes=60"));
   setData("vessels", state.live);
 }
 
 async function refresh() {
   if (document.hidden) return;
   try {
-    state.status = await api("/status");
+    state.status = await api(inZone("/status"));
     renderStatus();
   } catch {
     renderStatus(true);
@@ -1355,20 +1418,53 @@ async function refresh() {
   }
 }
 
+function renderZoneSelect() {
+  const select = document.getElementById("zone");
+  fill(
+    select,
+    h("option", { value: ALL, selected: state.zone === ALL }, "Toda la costa"),
+    state.zones.map((z) => h("option", { value: z.key, selected: state.zone === z.key }, z.name)),
+  );
+  select.onchange = () => changeZone(select.value);
+}
+
+/** Draw what depends on the zone looked at (but not live data: see refresh). */
+async function showZone({ fit }) {
+  setData("zones", zoneEdges());
+  const area = scopeArea();
+  if (fit) map.fitBounds([[area.west, area.south], [area.east, area.north]], { padding: 20, duration: fit === "animate" ? 600 : 0 });
+  state.coverageLoaded = false;
+  if (state.layers.coverage) loadCoverage();
+  setData("infra", await api(inZone("/map/infrastructure")).catch(() => EMPTY));
+}
+
+async function changeZone(key) {
+  state.zone = key;
+  saveZonePref();
+  if (state.pass && key !== ALL && state.pass.zone !== key) clearPass(null);
+  await showZone({ fit: "animate" });
+  state.passes = await api(inZone("/passes?limit=60")).catch(() => null);
+  if (route.id) navigate(route.tab);
+  await refresh();
+  if (!state.pass && state.status?.latest_pass) await loadPass(state.status.latest_pass.id).catch(() => {});
+  if (!route.id) render();
+}
+
 async function start() {
   fitPadding();
   phone.addEventListener("change", fitPadding);
   addLayers();
   wireMapEvents();
   renderLayers();
-  const [area, land, infra] = await Promise.all([api("/map/area"), api("/map/land"), api("/map/infrastructure")]);
-  state.area = area;
-  map.setMaxBounds([[area.west - 1.5, area.south - 1], [area.east + 1.5, area.north + 1]]);
-  setData("outside", outsideOf(area));
+  const [zones, land] = await Promise.all([api("/zones"), api("/map/land")]);
+  state.zones = zones.zones;
+  state.wholeCoast = zones.whole_coast;
+  if (state.zone !== ALL && !state.zones.some((z) => z.key === state.zone)) state.zone = ALL;
+  const coast = zones.whole_coast;
+  map.setMaxBounds([[coast.west - 3, coast.south - 2], [coast.east + 3, coast.north + 2]]);
   setData("land", land);
-  setData("infra", infra);
-  if (!parseRoute().id) map.fitBounds([[area.west, area.south], [area.east, area.north]], { padding: 20, duration: 0 });
-  if (state.layers.coverage) loadCoverage();
+  renderZoneSelect();
+  await showZone({ fit: !parseRoute().id });
   applyLayerVisibility();
   if (phone.matches) {
     const attribution = document.querySelector(".maplibregl-ctrl-attrib");
@@ -1377,7 +1473,7 @@ async function start() {
   }
 
   // The passes, to find the one an event happened under from any view.
-  state.passes = await api("/passes?limit=60").catch(() => null);
+  state.passes = await api(inZone("/passes?limit=60")).catch(() => null);
   await refresh();
   // Show the latest pass on the map from the start, without leaving the current view.
   if (state.status?.latest_pass && !(parseRoute().tab === "passes" && parseRoute().id)) {

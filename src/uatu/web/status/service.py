@@ -12,8 +12,8 @@ from uatu.web.passes.service import pass_id
 from uatu.web.status.schemas import LatestPass, Status
 
 
-async def status(db: AsyncSession, bbox: BBox) -> Status:
-    """Recording is global; what was seen is counted within the zone."""
+async def status(db: AsyncSession, bbox: BBox, zones: list[str]) -> Status:
+    """Recording is global; what was seen is counted within the zones."""
     now = datetime.now(UTC)
     session = (
         await db.execute(
@@ -42,10 +42,10 @@ async def status(db: AsyncSession, bbox: BBox) -> Status:
     started = func.min(SarScene.acquired_from)
     latest = (
         await db.execute(
-            select(SarScene.platform, SarScene.datatake, started.label("acquired_at"))
-            .where(SarScene.status == "processed")
-            .group_by(SarScene.platform, SarScene.datatake)
-            .order_by(started.desc(), SarScene.platform, SarScene.datatake)
+            select(SarScene.platform, SarScene.datatake, SarScene.zone, started.label("acquired_at"))
+            .where(SarScene.status == "processed", SarScene.zone.in_(zones))
+            .group_by(SarScene.platform, SarScene.datatake, SarScene.zone)
+            .order_by(started.desc(), SarScene.platform, SarScene.datatake, SarScene.zone)
             .limit(1)
         )
     ).first()
@@ -56,7 +56,10 @@ async def status(db: AsyncSession, bbox: BBox) -> Status:
         events_24h=sum(severities.values()),
         alerts_24h=severities.get(3, 0),
         latest_pass=LatestPass(
-            id=pass_id(latest.platform, latest.datatake), acquired_at=latest.acquired_at, platform=latest.platform
+            id=pass_id(latest.platform, latest.datatake, latest.zone),
+            acquired_at=latest.acquired_at,
+            platform=latest.platform,
+            zone=latest.zone,
         )
         if latest
         else None,

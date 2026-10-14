@@ -17,11 +17,12 @@ class DetectionKind(StrEnum):
 
 
 class PassSummary(OutputSchema):
-    id: str  # platform-datatake, e.g. S1C-013AD6
+    id: str  # platform-datatake-zone, e.g. S1C-013AD6-estrecho
     platform: str
+    zone: str
     acquired_at: datetime
     orbit_direction: str
-    coverage: float  # fraction of the area of interest imaged, all frames together
+    coverage: float  # fraction of the zone imaged, all frames together
     frames: int  # products the pass came in
     detections: int
     matched: int

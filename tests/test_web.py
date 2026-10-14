@@ -14,7 +14,16 @@ import pytest
 from sqlalchemy import delete, insert
 
 from uatu import db
-from uatu.db.models import AisEvent, IngestSession, Position, SarAisCheck, SarDetection, SarScene, Vessel
+from uatu.db.models import (
+    AisEvent,
+    IngestSession,
+    Position,
+    RecordedZone,
+    SarAisCheck,
+    SarDetection,
+    SarScene,
+    Vessel,
+)
 from uatu.web.config import WebSettings
 from uatu.web.main import create_app
 
@@ -54,7 +63,7 @@ SCENE_ID, SCENE2_ID = uuid.uuid4(), uuid.uuid4()  # two frames of one pass
 SCENE_NAME = f"S1C_IW_GRDH_1SDV_TEST_{SCENE_ID.hex[:8]}_COG.SAFE"
 SCENE2_NAME = f"S1C_IW_GRDH_1SDV_TEST_{SCENE2_ID.hex[:8]}_COG.SAFE"
 DATATAKE = SCENE_ID.hex[:6].upper()
-PASS_ID = f"S1C-{DATATAKE}"
+PASS_ID = f"S1C-{DATATAKE}-estrecho"
 EVENT_KEY = f"test:{SCENE_ID.hex}"
 SESSION_ID = uuid.uuid4()
 CELL = (35.931, -5.611)  # inside one 0.02° coverage cell
@@ -69,6 +78,8 @@ async def rows():
                 id=SESSION_ID, connected_at=NOW - timedelta(hours=3), last_message_at=NOW, close_reason="test:web"
             )
         )
+        await conn.execute(delete(RecordedZone).where(RecordedZone.key == "estrecho"))
+        await conn.execute(insert(RecordedZone).values(key="estrecho", since=NOW - timedelta(hours=3)))
         await conn.execute(
             insert(Vessel).values(ais_class="A", first_seen_at=NOW, last_static_at=NOW),
             [
@@ -216,6 +227,7 @@ async def rows():
         await conn.execute(delete(Position).where(Position.mmsi.in_(mmsis)))
         await conn.execute(delete(Vessel).where(Vessel.mmsi.in_(mmsis)))
         await conn.execute(delete(IngestSession).where(IngestSession.id == SESSION_ID))
+        await conn.execute(delete(RecordedZone).where(RecordedZone.key == "estrecho"))
     await engine.dispose()
 
 
@@ -262,8 +274,8 @@ async def test_passes(client, tmp_path):
     assert detail["images"] == []
 
     assert (await client.get(f"/api/v1/passes/{PASS_ID}/images/1")).status_code == 404
-    overlay = tmp_path / SCENE2_NAME.removesuffix(".SAFE")  # only the second frame has one
-    overlay.mkdir()
+    overlay = tmp_path / "estrecho" / SCENE2_NAME.removesuffix(".SAFE")  # only the second frame has one
+    overlay.mkdir(parents=True)
     (overlay / "backscatter.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (overlay / "backscatter.json").write_text("[[-6, 36.5], [-5, 36.5], [-5, 35.5], [-6, 35.5]]")
     detail = await ok(client, f"/api/v1/passes/{PASS_ID}")
@@ -279,21 +291,27 @@ async def test_passes(client, tmp_path):
 
 @needs_db
 async def test_events(client):
-    events = await ok(client, "/api/v1/events?hours=2&min_severity=3")
+    events = await ok(client, "/api/v1/events?hours=2&min_severity=3&zone=estrecho")
     ours = next(f for f in events["features"] if f["properties"]["mmsi"] == MMSI_A)
     assert ours["properties"]["title"] == "Barco sancionado en la zona: TEST ALFA"
     assert ours["geometry"] == {"type": "Point", "coordinates": [CELL[1], CELL[0]]}
     assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in events["features"])
+    mmsis = {f["properties"]["mmsi"] for f in (await ok(client, "/api/v1/events?hours=2"))["features"]}
+    assert {MMSI_A, MMSI_BARCELONA} <= mmsis  # the whole coast
 
 
 @needs_db
 async def test_vessels(client):
-    live = await ok(client, "/api/v1/vessels/live?minutes=60")
+    live = await ok(client, "/api/v1/vessels/live?minutes=60&zone=estrecho")
     alfa = next(f["properties"] for f in live["features"] if f["properties"]["mmsi"] == MMSI_A)
     assert alfa["name"] == "TEST ALFA"
     assert alfa["sog"] == 12.3
     assert alfa["cog"] == 270
     assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in live["features"])
+    catalonia = await ok(client, "/api/v1/vessels/live?minutes=60&zone=cataluna")
+    assert [f["properties"]["mmsi"] for f in catalonia["features"] if f["properties"]["mmsi"] > 999_000_000] == [
+        MMSI_BARCELONA
+    ]
 
     found = await ok(client, "/api/v1/vessels?q=test%20bra")
     assert [v["mmsi"] for v in found] == [MMSI_B]
@@ -333,7 +351,9 @@ async def test_coverage_and_status(client):
 @needs_db
 async def test_errors_share_one_shape(client):
     for path, status, code in [
-        ("/api/v1/passes/S1Z-FFFFFF", 404, "not_found"),
+        ("/api/v1/passes/S1Z-FFFFFF-estrecho", 404, "not_found"),
+        ("/api/v1/passes/S1C-013AD6", 422, "invalid_input"),
+        ("/api/v1/events?zone=marte", 404, "not_found"),
         ("/api/v1/passes/not-a-pass", 422, "invalid_input"),
         ("/api/v1/events?hours=0", 422, "invalid_input"),
         ("/api/v1/nothing-here", 404, "not_found"),
@@ -359,7 +379,12 @@ async def test_page_and_health(client):
     assert (await client.get("/app.js")).status_code == 200
     assert (await client.get("/health/live")).json() == {"status": "ok"}
     assert (await client.get("/health/ready")).json() == {"status": "ok"}
-    assert (await ok(client, "/api/v1/map/area")) == {"west": -6.5, "south": 35.5, "east": -4.5, "north": 36.7}
+    zones = await ok(client, "/api/v1/zones")
+    strait = zones["zones"][0]
+    assert (strait["key"], strait["name"], strait["north"]) == ("estrecho", "Estrecho de Gibraltar", 36.7)
+    assert strait["recording_since"] is not None
+    assert [z["key"] for z in zones["zones"]] == ["estrecho", "alboran", "murcia", "valencia", "cataluna", "baleares"]
+    assert zones["whole_coast"] == {"west": -6.5, "south": 35.2, "east": 4.4, "north": 42.5}
     land = await ok(client, "/api/v1/map/land")  # no land mask here: Natural Earth everywhere
     assert land["features"]
     assert all(f["geometry"]["type"] in ("Polygon", "MultiPolygon") for f in land["features"])

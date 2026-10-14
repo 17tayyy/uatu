@@ -146,7 +146,7 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
     names = {mmsi: vessel.name} if vessel and vessel.name else {}
     sightings = (
         await db.execute(
-            select(SarDetection, SarScene.platform, SarScene.datatake)
+            select(SarDetection, SarScene.platform, SarScene.datatake, SarScene.zone)
             .join(SarScene, SarScene.id == SarDetection.scene_id)
             .where(or_(SarDetection.mmsi == mmsi, SarDetection.suspected_mmsi == mmsi))
             .order_by(SarDetection.seen_at.desc(), SarDetection.id.desc())
@@ -172,14 +172,14 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
         events=[_event(e, names) for e in events],
         radar_sightings=[
             RadarSighting(
-                pass_id=pass_id(platform, datatake),
+                pass_id=pass_id(platform, datatake, zone),
                 seen_at=d.seen_at,
                 lat=d.lat,
                 lon=d.lon,
                 as_suspect=d.mmsi != mmsi,
                 distance_m=d.distance_m if d.mmsi == mmsi else d.suspect_distance_m,
             )
-            for d, platform, datatake in sightings
+            for d, platform, datatake, zone in sightings
         ],
     )
 

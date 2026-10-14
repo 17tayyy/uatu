@@ -123,7 +123,7 @@ coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
 10. **Fixed objects**: detections of all passes are clustered (PostGIS `ST_ClusterDBSCAN`,
     150 m); a place detected in 3+ passes and in at least half of the passes covering it is a
     fixed object (platform, buoy, fish farm, long-term mooring), not a candidate. Historical
-    passes, processed without AIS, teach this from the start (`uatu-sar backfill --days 90`).
+    passes, processed without AIS, teach this from the start (`uatu-sar backfill <zone> --days 90`).
 
 Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io
 coverage has gaps (see `ingest_gaps`), and it delivers about one position per vessel per
@@ -142,7 +142,12 @@ minute.
   Products are deleted once processed. Each live pass ends with a notification: candidates
   where AIS is received, split into reception gaps, vessels that went silent (high priority
   if sanctioned) and unidentified ones.
-- `sar.backfill`: on demand, queues historical passes on a low-priority lane.
+- `sar.backfill`: on demand, queues a zone's historical passes on a low-priority lane.
+
+Everything runs zone by zone (`ANALYSIS_ZONES`): each zone has its own radar grid (in its UTM
+zone), land mask, coast distance and bathymetry. A frame over two zones is analysed for each
+(a scene per zone) but downloaded once. A zone's passes are paired with AIS only from the moment
+the recorder first subscribed to it (`recorded_zones`).
 
 Results land in `sar_detections` (one row per ship, with `status` matched / dark /
 no_coverage and the time the radar saw it) and `sar_ais_checks` (each AIS vessel the scene
@@ -163,7 +168,8 @@ ORDER BY d.seen_at DESC;
 
 ## Dashboard
 
-A map and a side panel at `http://<host>:8000` (the `web` service), in Spanish:
+A map and a side panel at `http://<host>:8000` (the `web` service), in Spanish, over the whole
+coast or one zone at a time (the selector in the header):
 
 - **Pasadas**: every Sentinel-1 pass since AIS recording began, with the radar image laid on
   the map and each detection coloured by what AIS says about it (paired, where AIS is barely
@@ -265,7 +271,7 @@ Environment variables (or `.env`):
 | `AISSTREAM_API_KEY`  | required                              |                                            |
 | `DATABASE_URL`       | `postgresql+asyncpg://uatu:uatu@localhost:5432/uatu` | set by docker compose       |
 | `ZONES`              | all six                               | zones the recorder records: `estrecho,alboran,murcia,valencia,cataluna,baleares` (`uatu/config.py`) |
-| `AIS_BBOX`           | `35.5,-6.5,36.7,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`; AIS analysis and dashboard |
+| `ANALYSIS_ZONES`     | all six                               | zones the worker and the dashboard analyse; new ones are calibrated one at a time |
 | `RAW_ARCHIVE_DIR`    | unset (disabled)                      | `/data/raw` volume in docker compose       |
 | `BATCH_SIZE`         | `1000`                                | rows per database transaction              |
 | `FLUSH_INTERVAL_S`   | `2`                                   | max wait before writing a partial batch    |
@@ -275,7 +281,7 @@ Environment variables (or `.env`):
 | `STATS_INTERVAL_S`   | `60`                                  |                                            |
 | `LOG_LEVEL` / `LOG_FORMAT` | `INFO` / `json`                 | `LOG_FORMAT=console` for local development |
 | `CDSE_USERNAME` / `CDSE_PASSWORD` | unset                    | [Copernicus Data Space](https://dataspace.copernicus.eu) account, to download scenes |
-| `SAR_BBOX`           | `35.5,-6.5,36.7,-4.5`                 | area for SAR search and detection          |
+| `SAR_BBOX`           | `35.5,-6.5,36.7,-4.5`                 | area for the manual `uatu-sar` commands (`lat_min,lon_min,lat_max,lon_max`) |
 | `SAR_DATA_DIR`       | `data/sar`                            | downloaded scenes and outputs              |
 | `REDIS_URL`          | `redis://localhost:6379`              | ArdiQ broker, set by docker compose        |
 | `SAR_DISCOVER_MINUTES` | `10`                                | how often the worker looks for new scenes  |
