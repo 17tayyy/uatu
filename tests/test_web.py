@@ -308,4 +308,6 @@ async def test_page_and_health(client):
     assert (await client.get("/health/live")).json() == {"status": "ok"}
     assert (await client.get("/health/ready")).json() == {"status": "ok"}
     assert (await ok(client, "/api/v1/map/area")) == {"west": -6.5, "south": 35.5, "east": -4.5, "north": 36.5}
-    assert (await ok(client, "/api/v1/map/land")) == {"type": "FeatureCollection", "features": []}  # no land mask here
+    land = await ok(client, "/api/v1/map/land")  # no land mask here: Natural Earth everywhere
+    assert land["features"]
+    assert all(f["geometry"]["type"] in ("Polygon", "MultiPolygon") for f in land["features"])

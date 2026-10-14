@@ -296,7 +296,7 @@ function addLayers() {
   ]) {
     map.addImage(name, image, { pixelRatio: 2 });
   }
-  for (const id of ["land", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "selected"]) {
+  for (const id of ["land", "outside", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "selected"]) {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
@@ -332,6 +332,9 @@ function addLayers() {
     source: "infra",
     paint: { "circle-radius": 2.5, "circle-color": C.infra, "circle-stroke-width": 1, "circle-stroke-color": C.page },
   });
+  // Outside the watched area: dimmed, so its edge (and the radar image beyond it) reads as a boundary.
+  map.addLayer({ id: "outside", type: "fill", source: "outside", paint: { "fill-color": C.page, "fill-opacity": 0.5 } });
+  map.addLayer({ id: "area-edge", type: "line", source: "outside", paint: { "line-color": C.muted, "line-width": 1, "line-opacity": 0.5 } });
   map.addLayer({
     id: "footprint",
     type: "line",
@@ -457,6 +460,13 @@ function showRadarImage(pass) {
     },
     "coverage",
   );
+}
+
+/** The world minus the watched area: a polygon with the area as its hole. */
+function outsideOf(a) {
+  const world = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
+  const hole = [[a.west, a.south], [a.west, a.north], [a.east, a.north], [a.east, a.south], [a.west, a.south]];
+  return { type: "Feature", geometry: { type: "Polygon", coordinates: [world, hole] }, properties: {} };
 }
 
 function select(lngLat) {
@@ -1168,6 +1178,7 @@ async function start() {
   const [area, land, infra] = await Promise.all([api("/map/area"), api("/map/land"), api("/map/infrastructure")]);
   state.area = area;
   map.setMaxBounds([[area.west - 1.5, area.south - 1], [area.east + 1.5, area.north + 1]]);
+  setData("outside", outsideOf(area));
   setData("land", land);
   setData("infra", infra);
   if (!parseRoute().id) map.fitBounds([[area.west, area.south], [area.east, area.north]], { padding: 20, duration: 0 });
