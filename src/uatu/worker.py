@@ -28,7 +28,7 @@ from pathlib import Path
 
 import httpx
 import structlog
-from ardiq import Ardiq, ErrorContext
+from ardiq import Ardiq, ErrorContext, ExecutionContext
 from pydantic import Field
 
 from uatu import db, ops
@@ -148,7 +148,6 @@ async def discover() -> int:
     for scene in [*new, *lost]:
         await _enqueue_scene(scene, recording_since)
     log.info("discovered", catalogue=len(scenes), new=len(new), requeued=len(lost))
-    await _succeeded("sar.discover")
     return len(new)
 
 
@@ -225,7 +224,6 @@ async def analyse_ais() -> dict[str, int]:
         urgent=len(urgent),
         gaps_closed=outcome.gaps_closed,
     )
-    await _succeeded("ais.analyse")
     return {"new": len(outcome.new), "urgent": len(urgent)}
 
 
@@ -273,7 +271,6 @@ async def health() -> dict[str, bool]:
     await app.state.alerter.update(checks)
     if settings.healthcheck_url:
         await ops.ping_healthcheck(app.state.http, settings.healthcheck_url, all(c.ok for c in checks))
-    await _succeeded("ops.health")
     return {c.name: c.ok for c in checks}
 
 
@@ -302,7 +299,10 @@ async def on_error(ctx: ErrorContext) -> None:
     await app.state.alerter.notify(f"Uatu: {ctx.name} failed", f"after {ctx.tries} tries: {ctx.exc!r}", "high")
 
 
-async def _succeeded(task: str) -> None:
-    """A periodic task ran fine: forget its failures, and say so if they had been alerted."""
-    if app.state.failures.pop(task, 0):
-        await app.state.alerter.update([ops.Check(task, True, "running again")])
+@app.middleware
+async def track_periodic(ctx: ExecutionContext, call_next):
+    """A periodic task that ran fine: forget its failures, and say so if they had been alerted."""
+    result = await call_next()
+    if ctx.name in FAILURES_BEFORE_ALERT and app.state.failures.pop(ctx.name, 0):
+        await app.state.alerter.update([ops.Check(ctx.name, True, "running again")])
+    return result
