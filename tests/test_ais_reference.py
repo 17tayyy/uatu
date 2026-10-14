@@ -38,3 +38,20 @@ def test_international_cables_are_cut_to_spanish_waters():
         ("landing_point", "Barcelona, Spain"),
     ]
     assert "-19 36" in rows[0]["geom"] and "-30 36" not in rows[0]["geom"]
+
+
+def test_world_ports_by_the_names_people_use():
+    from uatu.ais.reference import world_ports
+
+    def row(number, name, country, lat, lon):
+        return {"World Port Index Number": number, "Main Port Name": name, "Country Code": country,
+                "UN/LOCODE": "", "Harbor Size": "Medium", "Latitude": lat, "Longitude": lon}  # fmt: skip
+
+    rows = [
+        row("38330.0", "Europa Point", "Gibraltar", "36.13", "-5.35"),
+        row("45730.0", "Ceuta", "Spain", "35.9", "-5.32"),
+        row("", "Broken", "Nowhere", "x", "y"),
+    ]
+    gibraltar, ceuta = world_ports(rows)
+    assert (gibraltar["id"], gibraltar["name"], gibraltar["locode"]) == (38330, "Gibraltar", None)
+    assert (ceuta["name"], ceuta["lat"], ceuta["lon"]) == ("Ceuta", 35.9, -5.32)

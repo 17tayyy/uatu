@@ -3,7 +3,9 @@
 uatu-ais around LAT LON [--at TIME]   who was near a place around a time (after an incident at sea)
 uatu-ais events [--hours 24]          recent AIS events
 uatu-ais analyse                      run the detectors now
-uatu-ais refresh                      reload sanctions, the companies behind vessels and infrastructure
+uatu-ais stops [--days 7] [--listed]  where vessels stopped (berths, anchorages), sanctioned/watchlisted only
+uatu-ais stops --rebuild --days 3     find them again in the recorded AIS of the last days
+uatu-ais refresh                      reload sanctions, the companies behind vessels, infrastructure, ports
 """
 
 import argparse
@@ -16,6 +18,8 @@ from pydantic import ValidationError
 
 from uatu import db
 from uatu.ais import analysis, reference, sanctions, store
+from uatu.ais.events import LocalProjection
+from uatu.ais.stops import detect_stops, detect_transits
 from uatu.config import ZoneSettings
 from uatu.log import configure_logging
 from uatu.sar.config import SarSettings
@@ -72,13 +76,47 @@ async def cmd_events(settings: AisSettings, args: argparse.Namespace) -> int:
 
 async def cmd_analyse(settings: AisSettings, args: argparse.Namespace) -> int:
     cache = settings.sar_data_dir / "cache"
-    areas = [analysis.Area(z.bbox, geography(z, cache).coast) for z in settings.zones]
+    areas = [analysis.Area(z.bbox, geography(z, cache).coast, zone=z.key) for z in settings.zones]
     engine = db.create_engine(settings.database_url)
     try:
         outcome = await analysis.analyse(engine, datetime.now(UTC), areas)
     finally:
         await engine.dispose()
     print(f"{outcome.tracks} tracks, {outcome.detected} events detected, {len(outcome.new)} new")
+    print(f"{outcome.stops} vessels stopped, {outcome.transits} new crossings of the Strait")
+    return 0
+
+
+async def cmd_stops(settings: AisSettings, args: argparse.Namespace) -> int:
+    now = datetime.now(UTC)
+    since = now - timedelta(days=args.days)
+    engine = db.create_engine(settings.database_url)
+    try:
+        if args.rebuild:
+            await store.clear_stops(engine, since)
+            ports = await store.ports(engine)
+            cache = settings.sar_data_dir / "cache"
+            for zone in settings.zones:
+                lat_min, lon_min, lat_max, lon_max = zone.bbox
+                proj = LocalProjection((lon_min + lon_max) / 2, (lat_min + lat_max) / 2)
+                tracks = await store.tracks(engine, since, now, zone.bbox)
+                found = detect_stops(tracks, geography(zone, cache).coast.at, ports, proj)
+                stops = await store.save_stops(engine, found, zone.key)
+                await store.save(engine, await analysis.listed_stops(engine, stops))
+                crossed = await store.save_transits(engine, detect_transits(tracks))
+                print(f"{zone.name}: {len(tracks)} tracks, {len(stops)} stops, {crossed} crossings of the Strait")
+        rows = await store.stops_since(engine, since, listed_only=args.listed)
+    finally:
+        await engine.dispose()
+    kinds = {"berth": "puerto", "anchorage": "fondeo", "drifting": "a la deriva"}
+    for r in rows:
+        place = f"{r.port} ({r.port_km:.0f} km)" if r.port else f"{r.lat:.4f}, {r.lon:.4f}"
+        hours = (r.end_at - r.start_at).total_seconds() / 3600
+        print(
+            f"{r.start_at:%m-%d %H:%M}  {hours:5.1f} h  {kinds[r.kind]:11} {(r.name or str(r.mmsi))[:22]:22}"
+            f" {place[:32]:32} {r.listed or ''}"
+        )
+    print(f"\n{len(rows)} stops")
     return 0
 
 
@@ -118,6 +156,11 @@ def main() -> None:
     events.set_defaults(run=cmd_events)
 
     commands.add_parser("analyse", help="run the detectors now").set_defaults(run=cmd_analyse)
+    stops = commands.add_parser("stops", help="where vessels stopped")
+    stops.add_argument("--days", type=float, default=7)
+    stops.add_argument("--listed", action="store_true", help="sanctioned and watchlisted vessels only")
+    stops.add_argument("--rebuild", action="store_true", help="find them again in the recorded AIS")
+    stops.set_defaults(run=cmd_stops)
     refresh = commands.add_parser("refresh", help="reload sanctions, ship owners and managers, infrastructure")
     refresh.set_defaults(run=cmd_refresh)
 

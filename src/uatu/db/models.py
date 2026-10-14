@@ -351,6 +351,57 @@ class Infrastructure(Base):
     properties: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
+class Port(Base):
+    """A port of the World Port Index (NGA, public domain): to name where vessels stop."""
+
+    __tablename__ = "ports"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False, comment="World Port Index number")
+    name: Mapped[str]
+    country: Mapped[str] = mapped_column(comment="as the index names it: Spain, Morocco, Gibraltar...")
+    locode: Mapped[str | None] = mapped_column(comment="UN/LOCODE")
+    size: Mapped[str | None] = mapped_column(comment="harbour size: Very Small ... Large")
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+
+
+class VesselStop(Base):
+    """A vessel staying put for a while: at a berth, at anchor, or lying still at sea."""
+
+    __tablename__ = "vessel_stops"
+    __table_args__ = (
+        Index("ix_vessel_stops_mmsi_start_at", "mmsi", "start_at"),
+        Index("ix_vessel_stops_start_at", "start_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    mmsi: Mapped[int]
+    kind: Mapped[str] = mapped_column(comment="berth | anchorage | drifting")
+    start_at: Mapped[datetime]
+    end_at: Mapped[datetime] = mapped_column(comment="last report there; it may have stayed on unheard")
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+    coast_km: Mapped[float | None] = mapped_column(REAL)
+    port_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ports.id", ondelete="SET NULL"), comment="the nearest port, if within 30 km"
+    )
+    port_km: Mapped[float | None] = mapped_column(REAL)
+    zone: Mapped[str | None]
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class StraitTransit(Base):
+    """A vessel crossing the Strait of Gibraltar's narrows, east of Tarifa."""
+
+    __tablename__ = "strait_transits"
+    __table_args__ = (Index("ix_strait_transits_at", "at"),)
+
+    mmsi: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(primary_key=True, comment="interpolated between two reports")
+    direction: Mapped[str] = mapped_column(comment="east (into the Mediterranean) | west")
+    lat: Mapped[float] = mapped_column(Double)
+
+
 class AisEvent(Base):
     """Something notable in the AIS record: a vessel going silent, two vessels meeting at sea..."""
 

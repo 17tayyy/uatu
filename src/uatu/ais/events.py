@@ -33,6 +33,7 @@ class Track:
     lon: np.ndarray
     sog: np.ndarray
     cog: np.ndarray
+    nav: np.ndarray | None = None  # AIS navigational status (1 at anchor, 5 moored...); NaN when unknown
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,11 +16,12 @@ Operations
 AIS
     ais.analyse         every 10 minutes: AIS gaps, encounters, loitering, vessels over cables, sanctioned
                         vessels and vessels of sanctioned companies, identity changes... into ais_events;
-                        pushes the serious ones at once.
+                        pushes the serious ones at once. Also where vessels stop (berths, anchorages)
+                        and their crossings of the Strait.
     ais.digest          08:00 and 20:00 UTC: a summary notification of the notable events of 12 h.
     ref.sanctions       daily: from OpenSanctions, sanctioned vessels, who owns and manages vessels
                         (sanctions lists, Ukraine's GUR, port state control) and other watchlists.
-    ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports.
+    ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports; the World Port Index.
 
     ardiq run uatu.worker:app
 """
@@ -138,13 +139,15 @@ async def _bathymetry(http: httpx.AsyncClient, bbox: BBox, cache: Path) -> Bathy
 
 
 async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
-    """First start: don't wait for the scheduled refresh to have sanctions and infrastructure."""
-    listed, infrastructure = await ais_store.reference_loaded(engine)
+    """First start: don't wait for the scheduled refresh to have sanctions, infrastructure and ports."""
+    listed, infrastructure, ports = await ais_store.reference_loaded(engine)
     try:
         if not listed:
             await sanctions.refresh_sanctions(engine, http)
         if not infrastructure:
             await reference.refresh_infrastructure(engine, http)
+        if not ports:
+            await reference.refresh_ports(engine, http)
     except httpx.HTTPError as e:  # the scheduled refresh will try again
         log.warning("reference_load_failed", error=repr(e))
 
@@ -268,7 +271,10 @@ async def announce_pass(scene_id: uuid.UUID) -> None:
 async def analyse_ais() -> dict[str, int]:
     state = app.state
     now = datetime.now(UTC)
-    areas = [ais_analysis.Area(z.geography.zone.bbox, z.geography.coast, z.bathymetry) for z in state.zones.values()]
+    areas = [
+        ais_analysis.Area(z.geography.zone.bbox, z.geography.coast, z.bathymetry, z.geography.zone.key)
+        for z in state.zones.values()
+    ]
     outcome = await ais_analysis.analyse(state.engine, now, areas)
     urgent = [e for e in outcome.new if e.severity >= 3 and ais_analysis.worth_alerting(e, now)]
     if urgent:
@@ -286,6 +292,8 @@ async def analyse_ais() -> dict[str, int]:
         new=len(outcome.new),
         urgent=len(urgent),
         gaps_closed=outcome.gaps_closed,
+        stops=outcome.stops,
+        transits=outcome.transits,
     )
     return {"new": len(outcome.new), "urgent": len(urgent)}
 
@@ -311,6 +319,7 @@ async def refresh_sanctions() -> int:
 
 @app.cron("30 4 * * 1", name="ref.infrastructure", max_retries=2, backoff_ms=30 * 60_000, timeout=900)
 async def refresh_infrastructure() -> int:
+    await reference.refresh_ports(app.state.engine, app.state.http)
     return await reference.refresh_infrastructure(app.state.engine, app.state.http)
 
 

@@ -126,6 +126,7 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `infrastructure_loitering` | under 3 kn for 30 min+ within 1 km of a submarine cable or pipeline | where an anchor can reach the seabed, ≤ 200 m deep (alert) |
 | `sanctioned_vessel` | a vessel on a sanctions list, by IMO (or listed MMSI) | always (alert) |
 | `sanctioned_owner` | a vessel off the lists whose owner or manager is on one | always (alert) |
+| `listed_stop` | a sanctioned or watchlisted vessel at a berth, at anchor or lying still for an hour or more | always; alert alongside in a port if sanctioned or run by a sanctioned company |
 | `watchlisted_vessel` | off the lists, but run by a company with a mostly sanctioned fleet (2+ vessels, half or more), on GUR's lists (shadow fleet, vessels working for Russia), banned from European ports (Paris MoU) or insured by a sanctioned club | always |
 | `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
@@ -150,10 +151,24 @@ Reference data, refreshed by the worker:
 - **Infrastructure in Spanish waters**: [EMODnet Human Activities](https://emodnet.ec.europa.eu/en/human-activities)
   (telecom cables from Spain's CICA, pipelines, platforms, ports) and
   [TeleGeography](https://www.submarinecablemap.com)'s submarine cable map (CC BY-NC-SA), weekly.
+- **Ports**: the [World Port Index](https://msi.nga.mil/Publications/WPI) (NGA Pub. 150, public
+  domain), 3,800 ports worldwide, weekly: to name where vessels stop.
+
+**Where vessels stop, and when they cross the Strait.** Each analysis also finds the vessels that
+stay put for an hour or more, at a berth, at anchor or lying still at sea. A stop survives a few
+hours unheard if the vessel is found where it was: at anchor in the Bay of Algeciras, aisstream may
+hear it once an hour. What kind of stop it is comes from the vessel's own AIS status ("at anchor",
+"moored") when it gives one, else from where it is. Each stop is named after the nearest port
+("fondeado frente a Ceuta"). Crossings of the Strait's narrows, east of Tarifa, are counted east or
+west. The meridian runs between the ferry terminals, so the Tarifa–Tangier and Algeciras–Tanger Med
+ferries never count. A sanctioned or watchlisted vessel stopping is an event (`listed_stop`): an
+alert if it is alongside in a port and sanctioned or run by a sanctioned company, notable otherwise.
+A vessel's card shows its last 30 days of stops and crossings.
 
 ```sh
 uv run uatu-ais around 36.10 -5.40 --at 2026-10-13T18:25Z   # who was there: AIS, events, radar
 uv run uatu-ais events --hours 24
+uv run uatu-ais stops --listed --days 7                     # where sanctioned and watchlisted vessels stopped
 ```
 
 ## SAR ship detection

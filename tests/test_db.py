@@ -259,6 +259,51 @@ async def test_vessels_with_sanctioned_managers_or_on_watchlists_are_events(engi
             await conn.execute(delete(VesselRisk).where(VesselRisk.imo.in_([9_999_801, 9_999_802])))
 
 
+async def test_a_stop_seen_in_pieces_is_one_and_a_watchlisted_vessel_stopping_is_an_event(engine):
+    from uatu.ais import analysis, store
+    from uatu.ais.stops import Port, Stop, Transit
+    from uatu.db.models import Port as PortRow
+    from uatu.db.models import StraitTransit, VesselRisk, VesselStop
+
+    port = Port(999_001, "TEST PORT", "Spain", -5.32, 35.9)
+    h = timedelta(hours=1)
+    first = Stop(MMSI_A, "anchorage", T0, T0 + 3 * h, 35.93, -5.30, 3000.0, port, 3500.0)
+    later = Stop(MMSI_A, "anchorage", T0 + 5 * h, T0 + 9 * h, 35.931, -5.301, 3000.0, port, 3500.0)
+    elsewhere = Stop(MMSI_A, "berth", T0 + 10 * h, T0 + 12 * h, 36.13, -5.43, 200.0, None, None)  # 25 km away
+    reason = [{"kind": "shadow_fleet"}]
+    async with engine.begin() as conn:
+        await conn.execute(insert(PortRow).values(id=port.id, name=port.name, country="Spain", lat=35.9, lon=-5.32))
+        await conn.execute(insert(VesselRisk).values(imo=9_999_801, level="watchlisted", reasons=reason))
+    await write(engine, [StaticRow(MMSI_A, T0, 5, name="ANCHOR TEST", imo=9_999_801)])
+    try:
+        await store.save_stops(engine, [first], "estrecho")
+        [kept] = await store.save_stops(engine, [later], "estrecho")  # unheard for 2 h, in the same place
+        assert (kept.start, kept.end) == (T0, T0 + 9 * h)
+        await store.save_stops(engine, [elsewhere], "estrecho")
+        async with engine.connect() as conn:
+            rows = (await conn.execute(select(VesselStop).where(VesselStop.mmsi == MMSI_A).order_by("start_at"))).all()
+        assert [(r.kind, r.start_at, r.end_at, r.port_id) for r in rows] == [
+            ("anchorage", T0, T0 + 9 * h, port.id),
+            ("berth", T0 + 10 * h, T0 + 12 * h, None),
+        ]
+
+        [event] = await analysis.listed_stops(engine, [kept])
+        assert (event.kind, event.severity, event.details["hours"]) == ("listed_stop", 2, 9.0)
+        title, _, _ = analysis.describe(event, {})
+        assert title == "Barco vigilado fondeado frente a TEST PORT: ANCHOR TEST"
+        assert [r.name for r in await store.stops_since(engine, T0 - h, listed_only=True)] == ["ANCHOR TEST"] * 2
+
+        crossing = Transit(MMSI_A, T0, "east", 35.95)
+        assert await store.save_transits(engine, [crossing]) == 1
+        assert await store.save_transits(engine, [crossing]) == 0  # seen again: the same crossing
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(VesselStop).where(VesselStop.mmsi == MMSI_A))
+            await conn.execute(delete(StraitTransit).where(StraitTransit.mmsi == MMSI_A))
+            await conn.execute(delete(VesselRisk).where(VesselRisk.imo == 9_999_801))
+            await conn.execute(delete(PortRow).where(PortRow.id == port.id))
+
+
 async def test_a_sanctioned_vessels_visit_is_one_event_and_severity_follows_the_latest(engine):
     from uatu.ais import store
     from uatu.ais.events import Event

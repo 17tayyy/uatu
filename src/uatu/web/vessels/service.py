@@ -13,12 +13,15 @@ from uatu.ais.sanctions import explain
 from uatu.config import BBox
 from uatu.db.models import (
     AisEvent,
+    Port,
     Position,
     SanctionedVessel,
     SarDetection,
     SarScene,
+    StraitTransit,
     Vessel,
     VesselRisk,
+    VesselStop,
     WatchlistedVessel,
 )
 from uatu.web.companies.service import vessel_companies
@@ -33,6 +36,8 @@ from uatu.web.vessels.schemas import (
     RadarSighting,
     Risk,
     Sanction,
+    StopOut,
+    TransitOut,
     VesselDetail,
     VesselSummary,
     Watchlisting,
@@ -181,6 +186,25 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
         )
     ).all()
 
+    month = datetime.now(UTC) - timedelta(days=30)
+    stops = (
+        await db.execute(
+            select(VesselStop, Port.name, Port.country)
+            .outerjoin(Port, Port.id == VesselStop.port_id)
+            .where(VesselStop.mmsi == mmsi, VesselStop.end_at >= month)
+            .order_by(VesselStop.start_at.desc())
+            .limit(50)
+        )
+    ).all()
+    transits = (
+        await db.scalars(
+            select(StraitTransit)
+            .where(StraitTransit.mmsi == mmsi, StraitTransit.at >= month)
+            .order_by(StraitTransit.at.desc())
+            .limit(50)
+        )
+    ).all()
+
     return VesselDetail(
         mmsi=mmsi,
         name=vessel.name if vessel else None,
@@ -211,6 +235,20 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
             )
             for d, platform, datatake, zone in sightings
         ],
+        stops=[
+            StopOut(
+                kind=s.kind,
+                start_at=s.start_at,
+                end_at=s.end_at,
+                lat=s.lat,
+                lon=s.lon,
+                place=place,
+                place_country=country,
+                place_km=s.port_km,
+            )
+            for s, place, country in stops
+        ],
+        transits=[TransitOut(at=t.at, direction=t.direction) for t in transits],
     )
 
 
