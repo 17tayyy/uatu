@@ -4,6 +4,7 @@ uatu-sar search [--days 7]               passes over the area of interest
 uatu-sar download (--latest | DATATAKE)  download every frame of a pass
 uatu-sar detect SCENE.zip [--ais]        detect ships, optionally pairing them with recorded AIS
 uatu-sar backfill [--days 90]            have the worker process the passes before AIS recording began
+uatu-sar candidates [--days 7]           dark vessel candidates of recent passes
 """
 
 import argparse
@@ -123,6 +124,20 @@ async def cmd_backfill(settings: SarSettings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_candidates(settings: SarSettings, args: argparse.Namespace) -> int:
+    from uatu.sar import store
+    from uatu.sar.report import scene_notification
+
+    engine = db.create_engine(settings.database_url)
+    try:
+        for scene_id in await store.recent_live_scenes(engine, datetime.now(UTC) - timedelta(days=args.days)):
+            title, message, _, link = scene_notification(await store.scene_report(engine, scene_id))
+            print(f"{title}\n{message}" + (f"\n{link}" if link else "") + "\n")
+    finally:
+        await engine.dispose()
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="uatu-sar", description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -165,6 +180,10 @@ def main() -> None:
     backfill_cmd = commands.add_parser("backfill", help="queue historical passes for the worker")
     backfill_cmd.add_argument("--days", type=float, default=90, help="before AIS recording began (default: 90)")
     backfill_cmd.set_defaults(run=cmd_backfill)
+
+    candidates_cmd = commands.add_parser("candidates", help="dark vessel candidates of recent passes")
+    candidates_cmd.add_argument("--days", type=float, default=7)
+    candidates_cmd.set_defaults(run=cmd_candidates)
 
     args = parser.parse_args()
     try:

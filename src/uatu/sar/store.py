@@ -1,15 +1,24 @@
 """Scenes and their results in the database."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from geoalchemy2.shape import to_shape
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from uatu.db.models import IngestSession, SarAisCheck, SarDetection, SarScene
+from uatu.db.models import (
+    IngestSession,
+    SanctionedVessel,
+    SarAisCheck,
+    SarDetection,
+    SarFixedObject,
+    SarScene,
+    Vessel,
+)
 from uatu.sar.analysis import Analysis
 from uatu.sar.catalog import Scene
 
@@ -87,6 +96,7 @@ async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analy
             "vv_db": d.vv_db,
             "vh_db": _finite(d.vh_db),
             "background_db": _finite(d.background_db),
+            **_suspect(analysis.suspects.get(d)),
         }
         for d, seen_at in zip(detections, analysis.seen_at(detections), strict=True)
     ]
@@ -156,5 +166,180 @@ def _scene(row: Any) -> Scene:
     )
 
 
+def _suspect(suspect: Any) -> dict[str, Any]:
+    if suspect is None:
+        return {"suspected_mmsi": None, "suspect_distance_m": None, "suspect_silent_minutes": None}
+    return {
+        "suspected_mmsi": suspect.vessel.mmsi,
+        "suspect_distance_m": suspect.distance_m,
+        "suspect_silent_minutes": round(suspect.vessel.report_gap_s / 60, 1),
+    }
+
+
 def _finite(value: float) -> float | None:
     return value if value == value else None  # NaN -> NULL
+
+
+# --- fixed objects ---------------------------------------------------------------------------------
+
+# Detections of different passes within this distance are the same object. Stationary targets
+# carry no Doppler shift, and geolocation agrees to tens of metres between orbits.
+FIXED_EPS_M = 150.0
+FIXED_MIN_PASSES = 3
+FIXED_MIN_PERSISTENCE = 0.5
+
+_RECURRING_OBJECTS = text(
+    """
+    WITH d AS (
+        SELECT d.id, s.datatake, d.seen_at, d.length_m, ST_Transform(d.geom::geometry, CAST(:srid AS integer)) AS g
+        FROM sar_detections d JOIN sar_scenes s ON s.id = d.scene_id
+        WHERE s.status = 'processed'
+    ), clustered AS (
+        SELECT *, ST_ClusterDBSCAN(g, eps := CAST(:eps AS double precision), minpoints := 2) OVER () AS cluster FROM d
+    ), objects AS (
+        SELECT ST_Transform(ST_Centroid(ST_Collect(g)), 4326) AS centre,
+               count(DISTINCT datatake) AS passes_seen,
+               count(*) AS detections,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY length_m) AS length_m,
+               min(seen_at) AS first_seen,
+               max(seen_at) AS last_seen,
+               array_agg(id) AS detection_ids
+        FROM clustered WHERE cluster IS NOT NULL
+        GROUP BY cluster
+    )
+    SELECT ST_X(o.centre) AS lon, ST_Y(o.centre) AS lat, o.passes_seen, o.detections, o.length_m,
+           o.first_seen, o.last_seen, o.detection_ids,
+           (SELECT count(DISTINCT s.datatake) FROM sar_scenes s
+            WHERE s.status = 'processed' AND ST_Covers(s.footprint, o.centre::geography)) AS passes_covering
+    FROM objects o
+    WHERE o.passes_seen >= 2
+    """
+)
+
+
+async def rebuild_fixed_objects(engine: AsyncEngine, srid: int) -> dict[str, int]:
+    """Re-derive recurring objects from every processed pass and link detections to them.
+
+    srid: a metric CRS for the area (its UTM zone), in which the clustering distance applies.
+    """
+    async with engine.begin() as conn:
+        rows = (await conn.execute(_RECURRING_OBJECTS, {"srid": srid, "eps": FIXED_EPS_M})).all()
+        await conn.execute(delete(SarFixedObject))  # detections' links are set to NULL
+        fixed = 0
+        for r in rows:
+            persistence = r.passes_seen / max(r.passes_covering, r.passes_seen)
+            is_fixed = r.passes_seen >= FIXED_MIN_PASSES and persistence >= FIXED_MIN_PERSISTENCE
+            fixed += is_fixed
+            object_id = await conn.scalar(
+                insert(SarFixedObject)
+                .values(
+                    lat=r.lat,
+                    lon=r.lon,
+                    passes_seen=r.passes_seen,
+                    passes_covering=max(r.passes_covering, r.passes_seen),
+                    persistence=round(persistence, 3),
+                    fixed=is_fixed,
+                    detections=r.detections,
+                    length_m=r.length_m,
+                    first_seen=r.first_seen,
+                    last_seen=r.last_seen,
+                )
+                .returning(SarFixedObject.id)
+            )
+            await conn.execute(
+                update(SarDetection).where(SarDetection.id.in_(r.detection_ids)).values(fixed_object_id=object_id)
+            )
+    return {"recurring": len(rows), "fixed": fixed}
+
+
+# --- scene report ----------------------------------------------------------------------------------
+
+# A suspect silent for less than this was most likely just not received (aisstream.io hears most
+# vessels only every few minutes); longer, the vessel may have switched its transponder off.
+RECEPTION_GAP_MINUTES = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    lat: float
+    lon: float
+    length_m: float
+    seen_at: datetime
+    suspected_mmsi: int | None
+    suspect_name: str | None
+    suspect_silent_minutes: float | None
+    suspect_distance_m: float | None
+    suspect_sanctioned: str | None  # sanctions programmes, if the suspect's IMO is listed
+
+    @property
+    def kind(self) -> str:
+        """unidentified | went_silent | reception_gap"""
+        if self.suspected_mmsi is None:
+            return "unidentified"
+        if (self.suspect_silent_minutes or 0) >= RECEPTION_GAP_MINUTES:
+            return "went_silent"
+        return "reception_gap"
+
+
+@dataclass(frozen=True)
+class SceneReport:
+    name: str
+    acquired: datetime
+    coverage: float
+    detections: int
+    matched: int
+    no_coverage: int
+    at_fixed_objects: int
+    candidates: list[Candidate]  # dark: AIS received around, none paired, not a fixed object
+
+
+async def scene_report(engine: AsyncEngine, scene_id: uuid.UUID) -> SceneReport:
+    fixed = select(SarFixedObject.id).where(SarFixedObject.fixed).scalar_subquery()
+    at_fixed = SarDetection.fixed_object_id.in_(fixed)
+    stmt = (
+        select(
+            SarDetection.lat,
+            SarDetection.lon,
+            SarDetection.length_m,
+            SarDetection.seen_at,
+            SarDetection.suspected_mmsi,
+            Vessel.name,
+            SarDetection.suspect_silent_minutes,
+            SarDetection.suspect_distance_m,
+            SanctionedVessel.programs,
+        )
+        .outerjoin(Vessel, Vessel.mmsi == SarDetection.suspected_mmsi)
+        .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
+        .where(SarDetection.scene_id == scene_id, SarDetection.status == "dark", ~func.coalesce(at_fixed, False))
+        .order_by(SarDetection.seen_at)
+    )
+    counts = select(
+        func.count(),
+        func.count().filter(SarDetection.status == "matched"),
+        func.count().filter(SarDetection.status == "no_coverage"),
+        func.count().filter(func.coalesce(at_fixed, False)),
+    ).where(SarDetection.scene_id == scene_id)
+    async with engine.connect() as conn:
+        scene = (await conn.execute(select(SarScene).where(SarScene.id == scene_id))).one()
+        total, matched, no_coverage, fixed_count = (await conn.execute(counts)).one()
+        candidates = [Candidate(*row) for row in await conn.execute(stmt)]
+    return SceneReport(
+        scene.name, scene.acquired_from, scene.aoi_coverage, total, matched, no_coverage, fixed_count, candidates
+    )
+
+
+async def recent_live_scenes(engine: AsyncEngine, since: datetime) -> list[uuid.UUID]:
+    """Processed scenes acquired since `since` while AIS was being recorded, oldest first."""
+    recording_since = await ais_recording_start(engine)
+    if recording_since is None:
+        return []
+    stmt = (
+        select(SarScene.id)
+        .where(
+            SarScene.status == "processed",
+            SarScene.acquired_from >= max(since, recording_since),
+        )
+        .order_by(SarScene.acquired_from)
+    )
+    async with engine.connect() as conn:
+        return list((await conn.scalars(stmt)).all())

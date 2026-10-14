@@ -230,3 +230,32 @@ def test_worker_skips_scenes_that_barely_cover_the_area():
 
     big, sliver = scene("a", box(-7, 35, -5, 37)), scene("b", box(-4.6, 35, -4, 37))  # 75% and 5%
     assert worth_processing([big, sliver], aoi, min_coverage=0.1) == [big]
+
+
+def test_silent_vessels_are_placed_across_their_silence():
+    from datetime import timedelta as td
+
+    reports = [Report(T0, -5.6, 36.0, 10, 0), Report(T0 + td(hours=2), -5.6, 36.2, 10, 0)]
+    middle = T0 + td(hours=1)
+    assert predict(reports, middle) is None  # no report within 10 min: not placed for pairing
+    lon, lat, _, _, gap = predict(reports, middle, max_gap=td(hours=3))
+    assert (lon, round(lat, 3), gap) == (-5.6, 36.1, 3600)
+
+
+def test_scene_notification_separates_reception_gaps_from_silent_vessels():
+    from uatu.sar.report import scene_notification
+    from uatu.sar.store import Candidate, SceneReport
+
+    def candidate(mmsi=None, silent=None, sanctioned=None):
+        return Candidate(36.1, -5.3, 150.0, T0, mmsi, "SPARTAN" if mmsi else None, silent, 900.0, sanctioned)
+
+    report = SceneReport(
+        "S1C_IW_GRDH_TEST", T0, 0.42, 38, 12, 18, 1,
+        [candidate(), candidate(1, 95.0, "EU-RUS"), candidate(2, 12.0)],
+    )  # fmt: skip
+    title, message, priority, link = scene_notification(report)
+    assert title == "Pasada S1C 13/10 18:25 UTC: 2 barcos sin AIS"
+    assert "1 explicados por huecos de recepción" in message
+    assert "Se calló: SPARTAN ⚠ SANCIONADO (EU-RUS), 1 h 35 min sin emitir" in message
+    assert "Sin identificar" in message
+    assert priority == "high" and link is not None

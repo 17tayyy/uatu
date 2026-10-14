@@ -108,6 +108,17 @@ coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
    aisstream.io hears AIS around it (at least 5 vessels within 15 km and 2 h). Elsewhere
    it is reported as `no_coverage`: nothing can be said about it.
 
+9. **Who is the dark vessel?** Unpaired detections are paired in turn, the same way, with
+   vessels heard within 3 h of the acquisition but silent around it, placed across their
+   silence (interpolated, or dead-reckoned from the last report) with a tolerance growing
+   with how long they had been silent. Most turn out to be reception gaps (silent < 1 h:
+   aisstream.io hears many vessels only every few minutes); a match after a longer silence
+   names a vessel that may have switched its transponder off.
+10. **Fixed objects**: detections of all passes are clustered (PostGIS `ST_ClusterDBSCAN`,
+    150 m); a place detected in 3+ passes and in at least half of the passes covering it is a
+    fixed object (platform, buoy, fish farm, long-term mooring), not a candidate. Historical
+    passes, processed without AIS, teach this from the start (`uatu-sar backfill --days 90`).
+
 Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io
 coverage has gaps (see `ingest_gaps`), and it delivers about one position per vessel per
 minute.
@@ -120,18 +131,27 @@ minute.
 - `sar.discover`, every 10 minutes: Sentinel-1 frames over the area acquired since AIS
   recording began (frames covering < 10% are skipped), recorded in `sar_scenes` and queued.
   The catalogue can omit fresh products for a few minutes; a later run finds them.
-- `sar.process_scene`: download, detect, pair, store; retried 3 times 10 minutes apart, then
-  marked `failed`. One at a time (~0.8 GB of RAM). Products are deleted once processed.
+- `sar.process_scene`: download, detect, pair, link suspects, store, rebuild fixed objects;
+  retried 3 times 10 minutes apart, then marked `failed`. One at a time (~0.8 GB of RAM).
+  Products are deleted once processed. Each live pass ends with a notification: candidates
+  where AIS is received, split into reception gaps, vessels that went silent (high priority
+  if sanctioned) and unidentified ones.
+- `sar.backfill`: on demand, queues historical passes on a low-priority lane.
 
 Results land in `sar_detections` (one row per ship, with `status` matched / dark /
 no_coverage and the time the radar saw it) and `sar_ais_checks` (each AIS vessel the scene
 should have shown, detected or not), plus GeoJSON and a quicklook in the `sardata` volume.
 
+```sh
+uv run uatu-sar candidates --days 7    # dark vessel candidates of recent passes
+```
+
 ```sql
 -- Dark vessel candidates, latest first
-SELECT s.acquired_from, d.lat, d.lon, d.length_m, d.ais_vessels_nearby
+SELECT s.acquired_from, d.lat, d.lon, d.length_m, d.suspected_mmsi, d.suspect_silent_minutes
 FROM sar_detections d JOIN sar_scenes s ON s.id = d.scene_id
-WHERE d.status = 'dark'
+LEFT JOIN sar_fixed_objects f ON f.id = d.fixed_object_id
+WHERE d.status = 'dark' AND f.fixed IS NOT TRUE
 ORDER BY d.seen_at DESC;
 ```
 

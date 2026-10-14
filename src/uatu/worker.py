@@ -45,6 +45,7 @@ from uatu.sar.config import SarSettings
 from uatu.sar.detect import CfarParams
 from uatu.sar.download import CdseAuth, download
 from uatu.sar.raster import Grid, land_cache
+from uatu.sar.report import scene_notification
 
 
 class WorkerSettings(SarSettings):
@@ -187,7 +188,12 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     summary = await store.save_results(state.engine, uuid.UUID(scene_id), analysis)
     if not settings.sar_keep_scenes:
         path.unlink(missing_ok=True)
-    log.info("scene_processed", scene=scene.name, **summary)
+    objects = await store.rebuild_fixed_objects(state.engine, srid=state.grid.crs.to_epsg())
+    log.info("scene_processed", scene=scene.name, historical=historical, **summary, **objects)
+    if not historical:
+        report = await store.scene_report(state.engine, uuid.UUID(scene_id))
+        title, message, priority, link = scene_notification(report)
+        await state.alerter.notify(title, message, priority, link)
     return summary
 
 

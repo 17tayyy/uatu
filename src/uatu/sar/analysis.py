@@ -1,7 +1,7 @@
 """One scene from product to results: ships detected, AIS at acquisition time, pairing and coverage."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.config import BBox
 from uatu.sar import report
-from uatu.sar.ais import vessels_at_acquisition, vessels_nearby
+from uatu.sar.ais import AisVessel, silent_vessels, vessels_at_acquisition, vessels_nearby
 from uatu.sar.annotation import AcquisitionGeometry, read_geometry
 from uatu.sar.detect import CfarParams, Detection
 from uatu.sar.match import MatchResult, expected_positions, match, split_by_coverage
@@ -26,9 +26,20 @@ class PairingParams:
     coverage_radius_m: float = 15_000.0
     coverage_window: timedelta = timedelta(hours=2)
     doppler_sign: float = 1.0
+    # Linking unpaired detections to vessels that had gone silent: beyond this uncertainty on where
+    # the vessel would be, any link is a guess.
+    max_suspect_tolerance_m: float = 8_000.0
 
 
 DEFAULT_PAIRING = PairingParams()
+
+
+@dataclass(frozen=True, slots=True)
+class Suspect:
+    """A vessel that had stopped transmitting and would be about where an unpaired detection is."""
+
+    vessel: AisVessel
+    distance_m: float
 
 
 @dataclass(frozen=True)
@@ -38,6 +49,7 @@ class Analysis:
     output: SceneOutput
     result: MatchResult | None  # None when AIS was not consulted
     ais_vessels: int
+    suspects: dict[Detection, Suspect] = field(default_factory=dict)
 
     def seen_at(self, detections: list[Detection]) -> list[datetime]:
         """When the radar looked at each detection's spot."""
@@ -72,7 +84,34 @@ async def analyse(
         engine, [(d.lon, d.lat) for d in result.dark], middle, pairing.coverage_radius_m, pairing.coverage_window
     )
     result = split_by_coverage(result, nearby, pairing.min_ais_nearby)
-    return Analysis(name, geometry, output, result, len(vessels))
+    suspects = await find_suspects(engine, result, output, geometry, grid, bbox, pairing)
+    return Analysis(name, geometry, output, result, len(vessels), suspects)
+
+
+async def find_suspects(
+    engine: AsyncEngine,
+    result: MatchResult,
+    output: SceneOutput,
+    geometry: AcquisitionGeometry,
+    grid: Grid,
+    bbox: BBox,
+    pairing: PairingParams,
+) -> dict[Detection, Suspect]:
+    """Pair unpaired detections with vessels that were silent at acquisition time, the same way
+    detections are paired with live AIS, but with the uncertainty of how long they had been silent."""
+    unpaired = [*result.dark, *result.no_coverage]
+    if not unpaired:
+        return {}
+    silent = await silent_vessels(engine, geometry, geometry.duration_s, bbox)
+    ghosts = [
+        e
+        for e in expected_positions(
+            silent, geometry, grid, pairing.base_tolerance_m, pairing.drift_fraction, pairing.doppler_sign
+        )
+        if e.tolerance_m <= pairing.max_suspect_tolerance_m
+    ]
+    linked = match(unpaired, ghosts, output.searched, output.coarse)
+    return {m.detection: Suspect(m.expected.vessel, m.distance_m) for m in linked.matches}
 
 
 def write_outputs(analysis: Analysis, out_dir: Path) -> None:
