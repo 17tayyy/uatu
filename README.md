@@ -130,7 +130,9 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
 
-Anything happening where 4+ vessels have sat stopped within 8 km over the last 7 days (an
+Gaps and encounters within 2 km of the coast are not kept at all: in a harbour, vessels lie side
+by side for days and go quiet at their berth (Barcelona's marinas alone made ~2,000 "encounters" a
+day). Anything happening where 4+ vessels have sat stopped within 8 km over the last 7 days (an
 anchorage or waiting area, learnt from the record itself) is routine and only informative. Alerts with severity 3 are
 pushed to the phone at once; notable ones (2) go into a summary at 08:00 and 20:00 UTC.
 
