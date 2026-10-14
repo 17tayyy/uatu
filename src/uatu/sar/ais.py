@@ -132,23 +132,37 @@ def predict(
     return lon, lat, nearest.sog, nearest.cog, abs(dt)
 
 
-async def vessels_nearby(
-    engine: AsyncEngine, points: list[tuple[float, float]], at: datetime, radius_m: float, window: timedelta
-) -> list[int]:
-    """Distinct AIS vessels received within radius_m of each (lon, lat) point, within ±window of `at`.
+@dataclass(frozen=True, slots=True)
+class Coverage:
+    """AIS received around a place: how many vessels, and how many of their reports."""
 
-    A proxy for AIS coverage: shipping lanes are never empty for hours, so hearing no vessels
-    at all around a place means no receiver feeding aisstream.io covers it.
+    vessels: int
+    reports: int
+
+    @property
+    def reports_per_vessel(self) -> float:
+        return self.reports / self.vessels if self.vessels else 0.0
+
+
+async def coverage_around(
+    engine: AsyncEngine, points: list[tuple[float, float]], at: datetime, radius_m: float, window: timedelta
+) -> list[Coverage]:
+    """AIS received within radius_m of each (lon, lat) point, within ±window of `at`.
+
+    A proxy for whether aisstream.io covers the place: vessels go by every shipping lane, and
+    where coverage is good each is heard many times (up to once a minute) while it is near.
+    Where vessels are heard about once each, a receiver only catches them now and then.
     """
-    counts = []
+    found = []
     async with engine.connect() as conn:
         for lon, lat in points:
-            stmt = select(func.count(distinct(Position.mmsi))).where(
+            stmt = select(func.count(distinct(Position.mmsi)), func.count()).where(
                 Position.received_at.between(at - window, at + window),
                 func.ST_DWithin(Position.geom, func.geography(func.ST_Point(lon, lat, 4326)), radius_m),
             )
-            counts.append(await conn.scalar(stmt) or 0)
-    return counts
+            vessels, reports = (await conn.execute(stmt)).one()
+            found.append(Coverage(vessels, reports))
+    return found
 
 
 async def _tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> dict[int, list[Report]]:

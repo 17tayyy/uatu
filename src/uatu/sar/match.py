@@ -25,7 +25,7 @@ import numpy as np
 from rasterio.warp import transform
 from scipy.optimize import linear_sum_assignment
 
-from uatu.sar.ais import AisVessel
+from uatu.sar.ais import AisVessel, Coverage
 from uatu.sar.annotation import AcquisitionGeometry
 from uatu.sar.detect import Detection
 from uatu.sar.raster import Grid
@@ -62,17 +62,25 @@ class MatchResult:
     ais_nearby: dict[Detection, int] = field(default_factory=dict)  # AIS vessels heard around unpaired ones
 
 
-def split_by_coverage(result: MatchResult, ais_nearby: list[int], min_vessels: int) -> MatchResult:
-    """Move dark detections where too few AIS vessels are heard around them to `no_coverage`.
+def split_by_coverage(
+    result: MatchResult, coverage: list[Coverage], min_vessels: int, min_reports_per_vessel: float
+) -> MatchResult:
+    """Move dark detections where AIS is not really being received to `no_coverage`: too few
+    vessels heard around them, or each heard only now and then.
 
-    ais_nearby: for each detection in result.dark, the AIS vessels received around it.
+    coverage: for each detection in result.dark, the AIS received around it.
     """
-    counts = dict(zip(result.dark, ais_nearby, strict=True))
+    around = dict(zip(result.dark, coverage, strict=True))
+
+    def covered(d: Detection) -> bool:
+        c = around[d]
+        return c.vessels >= min_vessels and c.reports_per_vessel >= min_reports_per_vessel
+
     return replace(
         result,
-        dark=[d for d in result.dark if counts[d] >= min_vessels],
-        no_coverage=[d for d in result.dark if counts[d] < min_vessels],
-        ais_nearby=counts,
+        dark=[d for d in result.dark if covered(d)],
+        no_coverage=[d for d in result.dark if not covered(d)],
+        ais_nearby={d: c.vessels for d, c in around.items()},
     )
 
 
