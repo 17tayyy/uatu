@@ -25,6 +25,7 @@ from uatu.web.events.router import router as events_router
 from uatu.web.health.router import router as health_router
 from uatu.web.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from uatu.web.passes.router import router as passes_router
+from uatu.web.radar.router import router as radar_router
 from uatu.web.schemas import FeatureCollection
 from uatu.web.status.router import router as status_router
 from uatu.web.vessels.router import router as vessels_router
@@ -91,6 +92,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         zones_router,
         status_router,
         passes_router,
+        radar_router,
         events_router,
         vessels_router,
         coverage_router,

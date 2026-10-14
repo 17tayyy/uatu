@@ -378,3 +378,41 @@ def test_the_radar_image_is_cut_into_map_tiles_where_it_has_data(tmp_path):
     assert abs(int(np.median(grey[alpha == 255])) - int(backscatter_grey(np.array([0.05]))[0])) <= 3
     assert radar_tile(tmp_path / "radar.tif", 13, *right) is None  # no data there
     assert radar_tile(tmp_path / "radar.tif", 13, 0, 0) is None  # far away
+
+
+def test_the_recent_radar_shows_each_place_from_the_newest_pass_over_it(tmp_path):
+    import io
+    import math
+
+    import rasterio
+    from PIL import Image
+
+    from uatu.sar.raster import backscatter_grey
+    from uatu.sar.report import radar_image
+    from uatu.web.radar.service import mosaic_tile
+
+    grid = Grid(CRS.from_epsg(32630), Affine(20, 0, 280_000, 0, -20, 4_000_000), 2000, 1000)
+
+    def frame(name: str, sigma0: np.ndarray):
+        utm = tmp_path / f"{name}_utm.tif"
+        with rasterio.open(utm, "w", **grid.profile(dtype="uint8", nodata=0)) as dst:
+            dst.write(backscatter_grey(sigma0), 1)
+        radar_image(utm, tmp_path / f"{name}.tif")
+        return tmp_path / f"{name}.tif"
+
+    older = frame("older", np.full(grid.shape, 0.01, dtype=np.float32))  # the whole area, darker
+    newer_sigma0 = np.full(grid.shape, 0.1, dtype=np.float32)
+    newer_sigma0[:, 1000:] = np.nan  # the western half only, brighter
+    newer = frame("newer", newer_sigma0)
+
+    with rasterio.open(older) as src:
+        b = src.bounds
+    size = 2 * math.pi * 6378137.0 / 2**13  # ~4 km: well inside the 40 x 20 km area
+    x = int(((b.left + b.right) / 2 + math.pi * 6378137.0) / size)  # a tile across the middle
+    y = int((math.pi * 6378137.0 - (b.bottom + b.top) / 2) / size)
+    grey, alpha = (np.asarray(band) for band in Image.open(io.BytesIO(mosaic_tile([newer, older], 13, x, y))).split())
+    assert alpha.all()  # the older pass fills what the newer one did not image
+    levels = set(np.unique(grey[alpha == 255]).tolist())
+    bright, dark = (int(backscatter_grey(np.array([v]))[0]) for v in (0.1, 0.01))
+    assert any(abs(v - bright) <= 3 for v in levels)  # newer on top where it has data
+    assert any(abs(v - dark) <= 3 for v in levels)  # older elsewhere

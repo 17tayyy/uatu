@@ -50,12 +50,14 @@ class RequestContextMiddleware:
                 )
 
 
-# The page loads MapLibre from jsdelivr, which runs its workers from blob: URLs. The API docs
-# (Swagger UI, ReDoc) need inline scripts, so they go without the policy.
+# The page loads MapLibre from jsdelivr, which runs its workers from blob: URLs, and the optional
+# satellite layer's tiles from EOX. The API docs (Swagger UI, ReDoc) need inline scripts, so they
+# go without the policy.
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; "
-    "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data: blob:; "
-    "worker-src blob:; child-src blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+    "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; img-src 'self' data: blob: https://tiles.maps.eox.at; "
+    "worker-src blob:; child-src blob:; connect-src 'self' https://tiles.maps.eox.at; frame-ancestors 'none'; "
+    "base-uri 'none'; "
     "form-action 'none'"
 )
 NO_POLICY_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc"}

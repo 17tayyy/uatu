@@ -50,6 +50,8 @@ const RECEPTION = {
 };
 
 const LAYERS = {
+  satellite: { label: "Satélite (óptico)", hint: "fondo", on: false, ids: ["satellite"] },
+  recent: { label: "Radar reciente", hint: "7 días", on: true, ids: ["radar-recent"] },
   radar: { label: "Imagen radar", on: true, ids: ["radar-0", "radar-1", "radar-2", "radar-3"] }, // one per frame
   detections: { label: "Detecciones radar", on: true, ids: ["footprint", "detections"] },
   passAis: { label: "AIS en la pasada", on: false, ids: ["pass-ais"] },
@@ -335,9 +337,27 @@ function addLayers() {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
-  // Land under the radar image (which shows the land too where the satellite imaged it), the
-  // coastline over it.
+  // Land under the radar images (which show the land too where the satellite imaged it), the
+  // coastline over them.
   map.addLayer({ id: "land", type: "fill", source: "land", paint: { "fill-color": C.land } });
+  // Optical imagery underneath everything, for detail: Sentinel-2 cloudless, a yearly mosaic by EOX.
+  map.addSource("satellite", {
+    type: "raster",
+    tiles: ["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/{z}/{y}/{x}.jpg"],
+    tileSize: 256,
+    maxzoom: 15,
+    attribution:
+      '<a href="https://s2maps.eu" target="_blank" rel="noopener noreferrer">Sentinel-2 cloudless</a> by EOX IT Services GmbH (contiene datos modificados de Copernicus Sentinel 2025)',
+  });
+  map.addLayer({ id: "satellite", type: "raster", source: "satellite", paint: { "raster-fade-duration": 0 } });
+  // The latest radar image of every place: the passes of the last days, newest on top.
+  map.addSource("radar-recent", { type: "raster", tiles: [recentRadarUrl()], tileSize: 256, minzoom: 5, maxzoom: 14 });
+  map.addLayer({
+    id: "radar-recent",
+    type: "raster",
+    source: "radar-recent",
+    paint: { "raster-opacity": 0.9, "raster-brightness-max": 0.7, "raster-fade-duration": 0 },
+  });
   map.addLayer({
     id: "coverage",
     type: "fill",
@@ -538,6 +558,15 @@ function showRadarImage(pass) {
       "coverage",
     );
   });
+}
+
+function recentRadarUrl() {
+  const latest = state.status?.latest_pass?.id ?? ""; // a new pass, new tiles
+  return `${location.origin}${API}/radar/tiles/{z}/{x}/{y}.png?zone=${encodeURIComponent(state.zone)}&days=7&v=${latest}`;
+}
+
+function updateRecentRadar() {
+  map.getSource("radar-recent")?.setTiles([recentRadarUrl()]);
 }
 
 /** Each zone's edge, the selected one brighter. */
@@ -873,6 +902,7 @@ function renderLegend() {
     parts.push(h("h3", null, "Recepción AIS"), Object.values(RECEPTION).map((r) => legendItem("square", r.color, r.label)));
   }
   parts.push(h("h3", null, "Mapa"), legendItem("dash", C.muted, "Zonas vigiladas"));
+  if (state.layers.recent) parts.push(legendItem("square", "#8a8a85", "Radar: última pasada de cada sitio, 7 días"));
   fill(document.getElementById("legend"), parts);
 }
 
@@ -1409,8 +1439,10 @@ async function loadLive() {
 async function refresh() {
   if (document.hidden) return;
   try {
+    const before = state.status?.latest_pass?.id;
     state.status = await api(inZone("/status"));
     renderStatus();
+    if (state.status.latest_pass?.id !== before) updateRecentRadar();
   } catch {
     renderStatus(true);
     return;
@@ -1437,6 +1469,7 @@ function renderZoneSelect() {
 /** Draw what depends on the zone looked at (but not live data: see refresh). */
 async function showZone({ fit }) {
   setData("zones", zoneEdges());
+  updateRecentRadar();
   const area = scopeArea();
   if (fit) map.fitBounds([[area.west, area.south], [area.east, area.north]], { padding: 20, duration: fit === "animate" ? 600 : 0 });
   state.coverageLoaded = false;

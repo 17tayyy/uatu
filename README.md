@@ -248,7 +248,10 @@ coast or one zone at a time (the selector in the header):
 
 The radar image of each pass is kept at 20 m (the sensor's actual resolution) as a tiled
 Web Mercator GeoTIFF with overviews (`radar.tif`, ~17 MB a frame), and served as map tiles: the
-whole frame from afar, each ship's echo when zoomed in.
+whole frame from afar, each ship's echo when zoomed in. A "recent radar" layer mosaics the passes
+of the last week, newest on top, so the whole coast shows its latest radar image at once; an
+optional optical layer underneath is [Sentinel-2 cloudless](https://s2maps.eu) by EOX (CC BY-NC-SA
+4.0).
 It draws its own base map with MapLibre GL, no third-party tiles: land from the SAR land mask in
 the watched area (its edge dashed), and from [Natural Earth](https://www.naturalearthdata.com)
 (public domain) around it. The radar image, land included, covers the part of the area inside the
