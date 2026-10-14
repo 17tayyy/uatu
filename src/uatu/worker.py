@@ -4,6 +4,8 @@ SAR
     sar.discover        every SAR_DISCOVER_MINUTES (10): Sentinel-1 frames over the area acquired
                         since AIS recording began; records the new ones and queues them.
     sar.process_scene   download, detect ships, pair them with the AIS recorded at the time, store.
+    sar.backfill        on demand: queue the passes of the N days before AIS recording began, on a
+                        low-priority lane, to learn the area (fixed objects) from history.
 Operations
     ops.backup          daily at 03:00 UTC: pg_dump of the database, the BACKUP_KEEP newest kept.
     ops.health          every 5 minutes: AIS still arriving, disk space, backups recent. Alerts on
@@ -38,7 +40,7 @@ from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, bbox_polygon
 from uatu.log import configure_logging
 from uatu.sar import store
 from uatu.sar.analysis import analyse, write_outputs
-from uatu.sar.catalog import search, worth_processing
+from uatu.sar.catalog import Scene, search, worth_processing
 from uatu.sar.config import SarSettings
 from uatu.sar.detect import CfarParams
 from uatu.sar.download import CdseAuth, download
@@ -59,8 +61,15 @@ settings = WorkerSettings()
 configure_logging(settings.log_level, settings.log_format)
 log = structlog.get_logger(component="worker")
 
-# One task at a time: processing a scene takes ~0.8 GB of RAM.
-app = Ardiq(redis_url=settings.redis_url, queue_name="uatu", concurrency=1)
+# One task at a time: processing a scene takes ~0.8 GB of RAM. Historical scenes go on the
+# "backfill" lane, which is only consumed when nothing else is waiting.
+app = Ardiq(
+    redis_url=settings.redis_url,
+    queue_name="uatu",
+    priorities=["backfill", "default"],
+    default_priority="default",
+    concurrency=1,
+)
 AOI = bbox_polygon(settings.sar_bbox)
 LOST_AFTER = timedelta(hours=2)
 # Tasks that run every few minutes: one failure (a network blip, a service down for a while)
@@ -133,9 +142,32 @@ async def discover() -> int:
     # was lost (e.g. Redis wiped). Its id is fixed, so re-queueing never duplicates it.
     lost = await store.queued(engine, discovered_before=now - LOST_AFTER)
     for scene in [*new, *lost]:
-        await process_scene.options(task_id=f"sar-scene:{scene.id}").enqueue(scene.id)
+        await _enqueue_scene(scene, recording_since)
     log.info("discovered", catalogue=len(scenes), new=len(new), requeued=len(lost))
     await _succeeded("sar.discover")
+    return len(new)
+
+
+async def _enqueue_scene(scene: Scene, recording_since: datetime) -> None:
+    """Queue a scene by a fixed id (re-queueing never duplicates); historical ones on the backfill lane."""
+    lane = "backfill" if scene.start < recording_since else "default"
+    await process_scene.options(task_id=f"sar-scene:{scene.id}", priority=lane).enqueue(scene.id)
+
+
+@app.task(name="sar.backfill", max_retries=0, timeout=600)
+async def backfill(days: float) -> int:
+    """Queue the passes of the `days` before AIS recording began. Without AIS they are not paired,
+    but their detections teach Uatu which objects in the area never move."""
+    engine = app.state.engine
+    recording_since = await store.ais_recording_start(engine)
+    if recording_since is None:
+        raise RuntimeError("no AIS recorded yet: nothing to set the backfill against")
+    scenes = await search(app.state.http, AOI, recording_since - timedelta(days=days), recording_since)
+    candidates = worth_processing(scenes, AOI, settings.sar_min_coverage)
+    new = await store.queue_new(engine, candidates, {s.id: s.coverage(AOI) for s in candidates})
+    for scene in new:
+        await _enqueue_scene(scene, recording_since)
+    log.info("backfill_queued", days=days, catalogue=len(scenes), queued=len(new))
     return len(new)
 
 
@@ -145,9 +177,12 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     if state.auth is None:
         raise RuntimeError("CDSE credentials not configured")
     scene = await store.load(state.engine, uuid.UUID(scene_id))
-    log.info("scene_started", scene=scene.name)
+    recording_since = await store.ais_recording_start(state.engine)
+    historical = recording_since is None or scene.start < recording_since
+    log.info("scene_started", scene=scene.name, historical=historical)
     path = await download(state.http, state.auth, scene, settings.sar_data_dir)
-    analysis = await analyse(path, state.grid, state.land, CfarParams(), state.engine, settings.sar_bbox)
+    engine = None if historical else state.engine  # no AIS to pair with
+    analysis = await analyse(path, state.grid, state.land, CfarParams(), engine, settings.sar_bbox)
     await asyncio.to_thread(write_outputs, analysis, settings.sar_data_dir / analysis.name)
     summary = await store.save_results(state.engine, uuid.UUID(scene_id), analysis)
     if not settings.sar_keep_scenes:

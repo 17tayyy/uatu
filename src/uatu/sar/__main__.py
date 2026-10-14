@@ -3,6 +3,7 @@
 uatu-sar search [--days 7]               passes over the area of interest
 uatu-sar download (--latest | DATATAKE)  download every frame of a pass
 uatu-sar detect SCENE.zip [--ais]        detect ships, optionally pairing them with recorded AIS
+uatu-sar backfill [--days 90]            have the worker process the passes before AIS recording began
 """
 
 import argparse
@@ -110,6 +111,18 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_backfill(settings: SarSettings, args: argparse.Namespace) -> int:
+    from uatu.worker import backfill  # the worker's app: same Redis and queue
+
+    job = await backfill.enqueue(args.days)
+    result = await job.result(timeout=600)
+    if not result.success:
+        print(f"backfill failed: {result.value}", file=sys.stderr)
+        return 1
+    print(f"{result.value} scenes queued on the backfill lane")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="uatu-sar", description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -148,6 +161,10 @@ def main() -> None:
     )
     detect_cmd.add_argument("--doppler-sign", type=float, default=1.0, help=argparse.SUPPRESS)
     detect_cmd.set_defaults(run=cmd_detect)
+
+    backfill_cmd = commands.add_parser("backfill", help="queue historical passes for the worker")
+    backfill_cmd.add_argument("--days", type=float, default=90, help="before AIS recording began (default: 90)")
+    backfill_cmd.set_defaults(run=cmd_backfill)
 
     args = parser.parse_args()
     try:
