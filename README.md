@@ -107,9 +107,10 @@ coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
    between its nearest AIS report and the acquisition. Vessels just outside the searched
    sea can still pair; if they don't, they count as not imaged rather than missed.
 8. **AIS coverage**: an unpaired detection is a **dark vessel candidate** only where
-   aisstream.io hears AIS around it (at least 5 vessels within 15 km and 2 h). Elsewhere
-   it is reported as `no_coverage`: nothing can be said about it.
-
+   aisstream.io was receiving AIS right there: at least 3 other vessels heard within 3 km
+   and ±2 h. Coverage has holes at the scale of a bay (it hears the strait's lanes but almost
+   nothing in the anchorages behind the Rock of Gibraltar), so it is measured locally.
+   Elsewhere the detection is `no_coverage`: nothing can be said about it.
 9. **Who is the dark vessel?** Unpaired detections are paired in turn, the same way, with
    vessels heard within 3 h of the acquisition but silent around it, placed across their
    silence (interpolated, or dead-reckoned from the last report) with a tolerance growing

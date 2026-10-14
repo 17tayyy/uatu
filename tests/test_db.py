@@ -287,3 +287,23 @@ async def test_fixed_objects_and_the_scene_report(engine):
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(SarScene).where(SarScene.id.in_(scene_ids)))
+
+
+async def test_a_frame_published_twice_is_queued_once(engine):
+    from shapely import box
+
+    from uatu.db.models import SarScene
+    from uatu.sar import store
+    from uatu.sar.catalog import Scene
+
+    frame = "S1C_IW_GRDH_1SDV_20261014T062636_20261014T062701_009877_013B0F"
+    standard = Scene("00000000-0000-0000-0000-0000000d0001", f"{frame}_5632.SAFE", T0, T0, "DESCENDING", 154, 0,
+                     True, box(-7, 35, -5, 37))  # fmt: skip
+    cog = Scene("00000000-0000-0000-0000-0000000d0002", f"{frame}_434A_COG.SAFE", T0, T0, "DESCENDING", 154, 0,
+                True, box(-7, 35, -5, 37))  # fmt: skip
+    try:
+        assert await store.queue_new(engine, [standard], {standard.id: 0.8}) == [standard]
+        assert await store.queue_new(engine, [cog], {cog.id: 0.8}) == []  # published again, as COG, 40 min later
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(SarScene).where(SarScene.name.like(f"{frame}%")))
