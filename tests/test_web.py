@@ -24,8 +24,10 @@ from uatu.db.models import (
     SarScene,
     ShipCompany,
     ShipLink,
+    StraitTransit,
     Vessel,
     VesselRisk,
+    VesselStop,
     WatchlistedVessel,
 )
 from uatu.web.config import WebSettings
@@ -163,6 +165,15 @@ async def rows():
                 imo=IMO_A, watchlist="shadow_fleet", name="ALFA AS LISTED", note="Exports Urals.", source_id="test"
             )
         )  # fmt: skip
+        await conn.execute(
+            insert(VesselStop).values(
+                mmsi=MMSI_A, kind="anchorage", start_at=NOW - timedelta(hours=9), end_at=NOW - timedelta(hours=2),
+                lat=35.93, lon=-5.30, coast_km=3.0, zone="estrecho",
+            )
+        )  # fmt: skip
+        await conn.execute(
+            insert(StraitTransit).values(mmsi=MMSI_A, at=NOW - timedelta(hours=10), direction="east", lat=35.95)
+        )
         positions = []
         for i in range(4):  # four reports each, all in one cell: good reception there
             for mmsi in (MMSI_A, MMSI_B, MMSI_C):
@@ -299,6 +310,8 @@ async def rows():
         await conn.execute(delete(AisEvent).where(AisEvent.key.like(f"{EVENT_KEY}%")))
         await conn.execute(delete(Position).where(Position.mmsi.in_(mmsis)))
         await conn.execute(delete(Vessel).where(Vessel.mmsi.in_(mmsis)))
+        await conn.execute(delete(VesselStop).where(VesselStop.mmsi.in_(mmsis)))
+        await conn.execute(delete(StraitTransit).where(StraitTransit.mmsi.in_(mmsis)))
         await conn.execute(delete(ShipCompany).where(ShipCompany.id == COMPANY_ID))  # and its links
         await conn.execute(delete(VesselRisk).where(VesselRisk.imo == IMO_A))
         await conn.execute(delete(WatchlistedVessel).where(WatchlistedVessel.imo == IMO_A))
@@ -405,6 +418,9 @@ async def test_vessels(client):
         ],
     }
     assert detail["watchlists"] == [{"watchlist": "shadow_fleet", "note": "Exports Urals."}]
+    [stop] = detail["stops"]
+    assert (stop["kind"], stop["place"], stop["lat"]) == ("anchorage", None, 35.93)
+    assert [t["direction"] for t in detail["transits"]] == ["east"]
     [manager] = detail["companies"]
     assert (manager["id"], manager["sanctioned"], manager["roles"]) == (
         COMPANY_ID,

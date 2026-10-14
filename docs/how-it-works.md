@@ -151,6 +151,20 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
 Where 4 or more vessels have sat stopped within 8 km over the past week, an anchorage or waiting
 area learnt from the record itself, stopping is routine and only informative.
 
+**Where vessels stop.** Behind every sanctioned tanker passing Gibraltar is the question of what
+it does here: does it berth, take on fuel at anchor off Ceuta or in the Bay of Algeciras, or meet
+another ship? A stop is a vessel under 1 knot, staying within 1 km, for an hour or more. It
+survives up to 6 hours unheard if the vessel is found where it was: in the bay, aisstream may hear
+an anchored ship once an hour. Each analysis sees a few hours, so a stop of days is stored in pieces
+and joined. The vessel's own AIS status says what kind of stop it is when it gives one ("at
+anchor", "moored"). Else the place does: by the coast and a port, alongside; within 10 km of the
+coast, at anchor; further out, lying still at sea, which is where ship-to-ship transfers happen.
+Stops are named after the nearest port of the World Port Index.
+
+**Crossing the Strait.** A crossing is counted where a vessel's track crosses the meridian 5°33' W
+between the two coasts. The meridian is east of Tarifa and Tangier and west of Algeciras and
+Tanger Med: the ferries between those ports, dozens a day, never cross it.
+
 ## 10. Lessons from running it
 
 - **Measure what absence means before reporting it.** The coverage test (section 6) came from

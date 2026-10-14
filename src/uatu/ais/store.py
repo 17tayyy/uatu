@@ -1,7 +1,7 @@
 """AIS analysis against the database: tracks and reference data in, events out."""
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -9,28 +9,33 @@ import numpy as np
 from geoalchemy2.shape import to_shape
 from shapely import Geometry
 from shapely.ops import transform as shapely_transform
-from sqlalchemy import Text, and_, cast, func, literal_column, or_, select, text, true, update
+from sqlalchemy import Text, and_, case, cast, delete, func, literal_column, or_, select, text, true, update
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.ais.events import Event, LocalProjection, StaticReport, Track, ais_day
+from uatu.ais.stops import DEFAULT_STOPS, Ports, Stop, StopParams, Transit
+from uatu.ais.stops import Port as NamedPort
 from uatu.config import BBox
 from uatu.db.models import (
     AisEvent,
     Infrastructure,
+    Port,
     Position,
     SanctionedVessel,
     SarDetection,
     ShipCompany,
+    StraitTransit,
     Vessel,
     VesselRisk,
+    VesselStop,
 )
 from uatu.db.models import StaticReport as Report
 
 # Events that span time and are re-detected on every run: a new detection that overlaps (or
 # follows within this gap) one already stored extends it instead of adding another.
-LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel"}
+LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel", "listed_stop"}
 SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", *LISTED}
 MERGE_GAP = timedelta(minutes=30)
 # A listed vessel's visit lasts until it has been gone this long: one alert per visit, even
@@ -41,7 +46,15 @@ MERGE_GAPS = dict.fromkeys(LISTED, timedelta(hours=12))
 async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> list[Track]:
     lat_min, lon_min, lat_max, lon_max = bbox
     stmt = (
-        select(Position.mmsi, Position.received_at, Position.lat, Position.lon, Position.sog, Position.cog)
+        select(
+            Position.mmsi,
+            Position.received_at,
+            Position.lat,
+            Position.lon,
+            Position.sog,
+            Position.cog,
+            Position.nav_status,
+        )
         .where(
             Position.received_at.between(start, end),
             Position.lat.between(lat_min, lat_max),
@@ -51,14 +64,21 @@ async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox
     )
     by_vessel: dict[int, list[tuple]] = defaultdict(list)
     async with engine.connect() as conn:
-        for mmsi, t, lat, lon, sog, cog in await conn.execute(stmt):
+        for mmsi, t, lat, lon, sog, cog, nav in await conn.execute(stmt):
             by_vessel[mmsi].append(
-                (t.timestamp(), lat, lon, np.nan if sog is None else sog, np.nan if cog is None else cog)
+                (
+                    t.timestamp(),
+                    lat,
+                    lon,
+                    np.nan if sog is None else sog,
+                    np.nan if cog is None else cog,
+                    np.nan if nav is None else nav,
+                )
             )
     result = []
     for mmsi, rows in by_vessel.items():
-        t, lat, lon, sog, cog = (np.array(column, dtype=float) for column in zip(*rows, strict=True))
-        result.append(Track(mmsi, t, lat, lon, sog, cog))
+        t, lat, lon, sog, cog, nav = (np.array(column, dtype=float) for column in zip(*rows, strict=True))
+        result.append(Track(mmsi, t, lat, lon, sog, cog, nav))
     return result
 
 
@@ -426,10 +446,119 @@ async def notable_since(engine: AsyncEngine, since: datetime, min_severity: int)
     ]
 
 
-async def reference_loaded(engine: AsyncEngine) -> tuple[bool, bool]:
-    """(sanctions and the companies behind vessels loaded, infrastructure loaded)."""
+async def reference_loaded(engine: AsyncEngine) -> tuple[bool, bool, bool]:
+    """(sanctions and the companies behind vessels loaded, infrastructure loaded, ports loaded)."""
     async with engine.connect() as conn:
         sanctions = await conn.scalar(select(func.count()).select_from(SanctionedVessel))
         companies = await conn.scalar(select(func.count()).select_from(ShipCompany))
         infrastructure = await conn.scalar(select(func.count()).select_from(Infrastructure))
-    return bool(sanctions and companies), bool(infrastructure)
+        ports = await conn.scalar(select(func.count()).select_from(Port))
+    return bool(sanctions and companies), bool(infrastructure), bool(ports)
+
+
+# --- stops and transits ----------------------------------------------------------------------------
+
+
+async def ports(engine: AsyncEngine) -> Ports:
+    async with engine.connect() as conn:
+        rows = (await conn.execute(select(Port.id, Port.name, Port.country, Port.lon, Port.lat))).all()
+    return Ports([NamedPort(*row) for row in rows])
+
+
+async def save_stops(
+    engine: AsyncEngine, stops: list[Stop], zone: str | None, p: StopParams = DEFAULT_STOPS
+) -> list[Stop]:
+    """Store stops, extending the one a vessel was already found at rather than adding another (each
+    analysis sees a few hours: a stop of days is seen in pieces). The stops, from their first report."""
+    gap = timedelta(seconds=p.max_silence_s)
+    kept = []
+    async with engine.begin() as conn:
+        for s in stops:
+            values = {
+                "kind": s.kind,
+                "lat": s.lat,
+                "lon": s.lon,
+                "coast_km": None if np.isnan(s.coast_m) else round(s.coast_m / 1000, 1),
+                "port_id": s.place.id if s.place else None,
+                "port_km": round(s.place_m / 1000, 1) if s.place_m is not None else None,
+                "zone": zone,
+            }
+            candidates = (
+                await conn.execute(
+                    select(VesselStop.id, VesselStop.start_at, VesselStop.end_at, VesselStop.lat, VesselStop.lon)
+                    .where(
+                        VesselStop.mmsi == s.mmsi,
+                        VesselStop.start_at <= s.end + gap,
+                        VesselStop.end_at >= s.start - gap,
+                    )
+                    .order_by(VesselStop.start_at)
+                )
+            ).all()
+            proj = LocalProjection(s.lon, s.lat)
+            same = next((c for c in candidates if np.hypot(*proj.xy(c.lon, c.lat)) <= p.radius_m), None)
+            if same is None:
+                await conn.execute(pg_insert(VesselStop).values(mmsi=s.mmsi, start_at=s.start, end_at=s.end, **values))
+                kept.append(s)
+                continue
+            start, end = min(same.start_at, s.start), max(same.end_at, s.end)
+            await conn.execute(
+                update(VesselStop)
+                .where(VesselStop.id == same.id)
+                .values(start_at=start, end_at=end, updated_at=func.now(), **values)
+            )
+            kept.append(replace(s, start=start, end=end))
+    return kept
+
+
+async def clear_stops(engine: AsyncEngine, since: datetime) -> None:
+    """Forget the stops and transits found since then, to find them again."""
+    async with engine.begin() as conn:
+        await conn.execute(delete(VesselStop).where(VesselStop.end_at >= since))
+        await conn.execute(delete(StraitTransit).where(StraitTransit.at >= since))
+        await conn.execute(delete(AisEvent).where(AisEvent.kind == "listed_stop", AisEvent.start_at >= since))
+
+
+async def stops_since(engine: AsyncEngine, since: datetime, listed_only: bool = False) -> list[Any]:
+    """Stops going on since then, with the vessel's name and whether it is sanctioned or watchlisted."""
+    listed = case((SanctionedVessel.imo.is_not(None), literal_column("'sanctioned'")), else_=VesselRisk.level).label(
+        "listed"
+    )
+    stop = (VesselStop.mmsi, VesselStop.kind, VesselStop.start_at, VesselStop.end_at, VesselStop.lat, VesselStop.lon)
+    stmt = (
+        select(*stop, VesselStop.port_km, Vessel.name, Port.name.label("port"), listed)
+        .outerjoin(Vessel, Vessel.mmsi == VesselStop.mmsi)
+        .outerjoin(Port, Port.id == VesselStop.port_id)
+        .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
+        .outerjoin(VesselRisk, VesselRisk.imo == Vessel.imo)
+        .where(VesselStop.end_at >= since)
+        .order_by(VesselStop.start_at)
+    )
+    if listed_only:
+        stmt = stmt.where(or_(SanctionedVessel.imo.is_not(None), VesselRisk.imo.is_not(None)))
+    async with engine.connect() as conn:
+        return list((await conn.execute(stmt)).all())
+
+
+async def save_transits(engine: AsyncEngine, transits: list[Transit]) -> int:
+    """Store Strait transits; one seen again (between the same two reports) is the same."""
+    if not transits:
+        return 0
+    rows = [{"mmsi": t.mmsi, "at": t.at, "direction": t.direction, "lat": t.lat} for t in transits]
+    async with engine.begin() as conn:
+        result = await conn.execute(pg_insert(StraitTransit).values(rows).on_conflict_do_nothing())
+    return result.rowcount
+
+
+async def listed(engine: AsyncEngine, mmsis: set[int]) -> dict[int, tuple[str, str | None]]:
+    """(sanctioned | sanctioned_owner | watchlisted, name) of those vessels that are, by IMO number."""
+    if not mmsis:
+        return {}
+    stmt = (
+        select(Vessel.mmsi, Vessel.name, SanctionedVessel.imo.label("sanctioned"), VesselRisk.level)
+        .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
+        .outerjoin(VesselRisk, VesselRisk.imo == Vessel.imo)
+        .where(Vessel.mmsi.in_(mmsis), or_(SanctionedVessel.imo.is_not(None), VesselRisk.imo.is_not(None)))
+    )
+    async with engine.connect() as conn:
+        rows = (await conn.execute(stmt)).all()
+    return {r.mmsi: ("sanctioned" if r.sanctioned else r.level, r.name) for r in rows}

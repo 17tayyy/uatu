@@ -1,10 +1,15 @@
-"""Reference data for AIS analysis: critical infrastructure in Spanish waters (sanctions: see sanctions.py).
+"""Reference data for AIS analysis (sanctions: see sanctions.py).
 
-EMODnet Human Activities (telecom cables from Spain's CICA, pipelines, platforms, ports) and
-TeleGeography's submarine cable map (international cables and their landing points), CC BY-NC-SA.
+- Critical infrastructure in Spanish waters: EMODnet Human Activities (telecom cables from Spain's
+  CICA, pipelines, platforms, ports) and TeleGeography's submarine cable map (international cables
+  and their landing points), CC BY-NC-SA.
+- Ports worldwide, to name where vessels stop: the World Port Index (NGA Pub. 150), public domain.
 """
 
-from collections.abc import Iterator
+import csv
+import io
+import itertools
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 import httpx
@@ -12,15 +17,18 @@ import structlog
 from shapely import Geometry, box
 from shapely.geometry import shape
 from sqlalchemy import delete, insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from uatu.db.models import Infrastructure
+from uatu.db.models import Infrastructure, Port
 
 log = structlog.get_logger(component="reference")
 
 EMODNET_WFS = "https://ows.emodnet-humanactivities.eu/wfs"
 TELEGEOGRAPHY_CABLES = "https://www.submarinecablemap.com/api/v3/cable/cable-geo.json"
 TELEGEOGRAPHY_LANDINGS = "https://www.submarinecablemap.com/api/v3/landing-point/landing-point-geo.json"
+WORLD_PORT_INDEX = "https://msi.nga.mil/api/publications/download?type=view&key=16920959/SFH00000/UpdatedPub150.csv"
+PORT_NAMES = {"Europa Point": "Gibraltar", "Tangier-Mediterranean": "Tanger Med"}  # the names people use
 
 # Spanish waters: the Peninsula, the Balearics and the Canaries (lon_min, lat_min, lon_max, lat_max).
 SPAIN = box(-19.0, 27.0, 5.0, 44.5)
@@ -114,3 +122,44 @@ def _status(value: object) -> str | None:
         return None
     text = str(value).lower()
     return "operational" if text in ("active", "operational", "in service") else text
+
+
+# --- ports -----------------------------------------------------------------------------------------
+
+
+def world_ports(rows: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
+    """Rows of the World Port Index CSV as ports."""
+    ports = []
+    for row in rows:
+        try:
+            port_id = int(float(row["World Port Index Number"]))
+            lat, lon = float(row["Latitude"]), float(row["Longitude"])
+        except KeyError, ValueError:
+            continue
+        name = row["Main Port Name"].strip()
+        ports.append(
+            {
+                "id": port_id,
+                "name": PORT_NAMES.get(name, name),
+                "country": row["Country Code"].strip(),
+                "locode": row["UN/LOCODE"].strip() or None,
+                "size": row["Harbor Size"].strip() or None,
+                "lat": lat,
+                "lon": lon,
+            }
+        )
+    return ports
+
+
+async def refresh_ports(engine: AsyncEngine, http: httpx.AsyncClient) -> int:
+    """Insert or update the World Port Index's ports (never delete: stops refer to them)."""
+    response = await http.get(WORLD_PORT_INDEX, follow_redirects=True)
+    response.raise_for_status()
+    ports = world_ports(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    async with engine.begin() as conn:
+        for batch in itertools.batched(ports, 2000, strict=False):  # within the parameters a statement takes
+            stmt = pg_insert(Port).values(batch)
+            update = {c: stmt.excluded[c] for c in ("name", "country", "locode", "size", "lat", "lon")}
+            await conn.execute(stmt.on_conflict_do_update(index_elements=[Port.id], set_=update))
+    log.info("ports_refreshed", ports=len(ports))
+    return len(ports)

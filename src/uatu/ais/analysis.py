@@ -22,6 +22,7 @@ from uatu.ais.events import (
     downgrade_in_crowds,
 )
 from uatu.ais.sanctions import explain
+from uatu.ais.stops import Stop, detect_stops, detect_transits
 from uatu.config import BBox
 
 WINDOW = timedelta(hours=6)  # long enough for the longest pattern (3 h loitering) plus margin
@@ -34,6 +35,8 @@ class Outcome:
     detected: int  # all events found this run, including ones already stored
     tracks: int
     gaps_closed: int
+    stops: int = 0  # vessels found stopped (most of them already known)
+    transits: int = 0  # new crossings of the Strait
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ class Area:
     bbox: BBox
     coast: CoastDistance
     bathymetry: Bathymetry | None = None  # without it, every vessel over a cable is an alert
+    zone: str | None = None  # its key, recorded with the stops found in it
 
 
 async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Params = DEFAULT_PARAMS) -> Outcome:
@@ -51,7 +55,8 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     t0, t1 = start.timestamp(), now.timestamp()
     stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days))
     events: list[Event] = []
-    tracked = 0
+    tracked = stopped_now = crossed = 0
+    ports = await store.ports(engine)
     for area in areas:
         lat_min, lon_min, lat_max, lon_max = area.bbox
         proj = LocalProjection((lon_min + lon_max) / 2, (lat_min + lat_max) / 2)
@@ -67,6 +72,10 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
         ]
         events += downgrade_in_crowds(found, stopped, proj, p)
         tracked += len(tracks)
+        stops = await store.save_stops(engine, detect_stops(tracks, area.coast.at, ports, proj), area.zone)
+        events += await listed_stops(engine, stops)
+        stopped_now += len(stops)
+        crossed += await store.save_transits(engine, detect_transits(tracks))
     reports = await store.static_reports(engine, now - IDENTITY_HISTORY)
     events += detect_identity_changes(reports, start, await store.last_positions(engine, start))
     events += await store.sanctioned_present(engine, start, now)
@@ -75,7 +84,45 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
 
     closed = await store.close_resumed_gaps(engine)
     new = await store.save(engine, events)
-    return Outcome(new, len(events), tracked, closed)
+    return Outcome(new, len(events), tracked, closed, stopped_now, crossed)
+
+
+STOPPED = {"berth": "en puerto", "anchorage": "fondeado", "drifting": "parado mar adentro"}
+
+
+async def listed_stops(engine: AsyncEngine, stops: list[Stop]) -> list[Event]:
+    """Sanctioned and watchlisted vessels stopping here: in a port (an alert, for one sanctioned or run
+    by a sanctioned company) or at anchor, where bunkering and transfers happen."""
+    statuses = await store.listed(engine, {s.mmsi for s in stops})
+    events = []
+    for s in stops:
+        if s.mmsi not in statuses:
+            continue
+        status, name = statuses[s.mmsi]
+        severity = 3 if s.kind == "berth" and status in ("sanctioned", "sanctioned_owner") else 2
+        details = {
+            "name": name,
+            "listed": status,
+            "stop": s.kind,
+            "place": s.place.name if s.place else None,
+            "place_country": s.place.country if s.place else None,
+            "place_km": round(s.place_m / 1000, 1) if s.place_m is not None else None,
+            "hours": s.hours,
+        }
+        events.append(Event("listed_stop", severity, s.mmsi, s.start, s.lat, s.lon, details, s.end))
+    return events
+
+
+def stop_place(d: dict) -> str:
+    """'fondeado frente a Ceuta', 'en puerto (Algeciras)', 'parado mar adentro, a 40 km de Almería'."""
+    stop, place = d["stop"], d.get("place")
+    if not place:
+        return STOPPED[stop]
+    if stop == "berth":
+        return f"en el puerto de {place}"
+    if stop == "anchorage":
+        return f"fondeado frente a {place}"
+    return f"parado mar adentro, a {d['place_km']:.0f} km de {place}"
 
 
 # --- alerts ----------------------------------------------------------------------------------------
@@ -135,6 +182,10 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
                 f"{name} (MMSI {e.mmsi}, IMO {d['imo']}): {'; '.join(explain(r) for r in d['reasons'])}."
                 f" Última posición {where}."
             )
+        case "listed_stop":
+            who = {"sanctioned": "sancionado", "sanctioned_owner": "con gestor sancionado"}.get(d["listed"], "vigilado")
+            title = f"Barco {who} {stop_place(d)}: {name}"
+            message = f"{name} (MMSI {e.mmsi}) lleva {d['hours']} h {stop_place(d)}. Posición {where}."
         case "identity_change":
             title = f"Cambio de identidad: {name}"
             message = f"MMSI {e.mmsi} ha cambiado su {d['field']}: {d['before']} → {d['after']}."
@@ -164,6 +215,7 @@ def digest(
         "sanctioned_vessel": ("barco sancionado", "barcos sancionados"),
         "sanctioned_owner": ("barco de armador o gestor sancionado", "barcos de armadores o gestores sancionados"),
         "watchlisted_vessel": ("barco en listas de vigilancia", "barcos en listas de vigilancia"),
+        "listed_stop": ("parada de un barco vigilado", "paradas de barcos vigilados"),
         "identity_change": ("cambio de identidad", "cambios de identidad"),
         "shared_imo": ("IMO duplicado", "IMO duplicados"),
     }

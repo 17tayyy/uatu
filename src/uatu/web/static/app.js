@@ -1553,6 +1553,10 @@ async function renderVessel(mmsi) {
         ),
       ),
     ],
+    h("h3", { class: "section-title" }, `Escalas, fondeos y cruces del Estrecho (${v.stops.length + v.transits.length})`),
+    v.stops.length + v.transits.length
+      ? h("ul", { class: "list" }, voyageRows(v))
+      : h("p", { class: "note" }, "Ninguna parada ni cruce del Estrecho en 30 días, en las zonas analizadas."),
     h("h3", { class: "section-title" }, `Eventos (${v.events.length})`),
     v.events.length
       ? h(
@@ -1598,6 +1602,58 @@ async function renderVessel(mmsi) {
         )
       : h("p", { class: "note" }, "Ninguna pasada lo ha captado todavía."),
   );
+}
+
+// Where a vessel stopped and when it crossed the Strait: one timeline, newest first.
+const STOP = {
+  berth: { label: "En puerto", color: C.blue },
+  anchorage: { label: "Fondeado", color: C.ink2 },
+  drifting: { label: "Parado mar adentro", color: C.serious },
+};
+const COUNTRY = { Spain: "España", Morocco: "Marruecos", Algeria: "Argelia", France: "Francia", Italy: "Italia", Tunisia: "Túnez" };
+
+function stopTitle(s) {
+  const where = s.place && s.place_country && s.place_country !== "Spain" ? `${s.place} (${COUNTRY[s.place_country] ?? s.place_country})` : s.place;
+  if (!where) return STOP[s.kind].label;
+  if (s.kind === "berth") return `Puerto de ${where}`;
+  if (s.kind === "anchorage") return `Fondeado frente a ${where}`;
+  return `Parado mar adentro, a ${Math.round(s.place_km)} km de ${where}`;
+}
+
+function voyageRows(v) {
+  const items = [
+    ...v.stops.map((s) => ({ at: s.start_at, stop: s })),
+    ...v.transits.map((t) => ({ at: t.at, transit: t })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  return items.map(({ stop, transit }) => {
+    if (transit) {
+      const east = transit.direction === "east";
+      return h(
+        "li",
+        null,
+        h(
+          "div",
+          { class: "row" },
+          h("div", { class: "row-top" }, h("span", { class: "row-title" }, east ? "Cruza el Estrecho hacia el Mediterráneo" : "Cruza el Estrecho hacia el Atlántico"), h("span", { class: "grow" }), h("span", { class: "row-time" }, when(transit.at))),
+        ),
+      );
+    }
+    const kind = STOP[stop.kind];
+    const minutes = (new Date(stop.end_at) - new Date(stop.start_at)) / 60_000;
+    const sameDay = dayKey.format(new Date(stop.start_at)) === dayKey.format(new Date(stop.end_at));
+    const span = `${when(stop.start_at)} – ${sameDay ? fmtTime.format(new Date(stop.end_at)) : when(stop.end_at)}`;
+    const recent = Date.now() - new Date(stop.end_at) < 30 * 60_000;
+    return h(
+      "li",
+      null,
+      h(
+        "button",
+        { class: "row", onclick: () => { flyTo([stop.lon, stop.lat], 13); select([stop.lon, stop.lat]); } },
+        h("div", { class: "row-top" }, h("span", { class: "row-title" }, stopTitle(stop)), tag("square", kind.color, kind.label)),
+        h("div", { class: "row-meta" }, `${span} · ${duration(minutes)}${recent ? " · sigue ahí" : ""}`),
+      ),
+    );
+  });
 }
 
 function riskCallout(risk) {

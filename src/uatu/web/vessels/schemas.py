@@ -22,6 +22,24 @@ class Watchlisting(OutputSchema):
     note: str | None  # what the source says, in its words
 
 
+class StopOut(OutputSchema):
+    """Where the vessel stayed put: at a berth, at anchor, or lying still at sea."""
+
+    kind: str  # berth | anchorage | drifting
+    start_at: datetime
+    end_at: datetime  # its last report there
+    lat: Degrees
+    lon: Degrees
+    place: str | None  # the nearest port, within 30 km
+    place_country: str | None  # as the World Port Index names it
+    place_km: OneDecimal | None
+
+
+class TransitOut(OutputSchema):
+    at: datetime
+    direction: str  # east (into the Mediterranean) | west (into the Atlantic)
+
+
 class LiveVesselProperties(OutputSchema):
     mmsi: int
     name: str | None
@@ -71,3 +89,5 @@ class VesselDetail(OutputSchema):
     track: Geometry | None  # LineString of the last hours
     events: list[EventProperties]
     radar_sightings: list[RadarSighting]
+    stops: list[StopOut]  # the last 30 days, newest first
+    transits: list[TransitOut]  # of the Strait, the last 30 days, newest first
