@@ -68,6 +68,18 @@ def test_stops_end_when_it_moves_and_survive_silences_where_it_stays():
     assert stops([track(range(0, 31, 5), -5.30, 35.93, 0.1, nav=1)], coast_km=3) == []
 
 
+def test_drifting_is_one_stop_moving_on_to_another_is_two():
+    # Waiting off Tanger Med for a berth, drifting east at 0.6 kn for 6 h: ~6.7 km, one stop.
+    minutes = np.arange(0, 361, 20)
+    lon = -5.45 + minutes / 60 * 0.6 * 1852 / (111_320 * np.cos(np.radians(35.95)))
+    [drift] = stops([track(minutes, lon, 35.95, 0.6)], coast_km=6)
+    assert (drift.kind, drift.hours) == ("anchorage", 6.0)
+    # Stopped at one spot, unheard for an hour, then stopped 8 km away: it sailed there. Two stops.
+    minutes = [*range(0, 121, 20), *range(180, 301, 20)]
+    lon = [-5.30] * 7 + [-5.21] * 7
+    assert len(stops([track(minutes, lon, 35.93, 0.1, nav=1)], coast_km=3)) == 2
+
+
 def test_transits_of_the_narrows_but_not_the_ferries_beside_them():
     eastbound = track([0, 20], [-5.70, -5.45], [35.95, 35.96], 14, mmsi=1)
     westbound = track([0, 20], [-5.45, -5.70], [35.97, 35.96], 14, mmsi=2)

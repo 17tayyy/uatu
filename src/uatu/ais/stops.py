@@ -1,8 +1,9 @@
 """Where vessels stop and when they cross the Strait. Pure functions: tracks in, stops and transits out.
 
 A stop is a vessel staying put for an hour or more: at a berth in a port, at anchor, or lying
-still at sea. With free AIS a vessel at anchor in the Bay of Algeciras may be heard once an hour,
-so a stop survives silences of a few hours as long as the vessel is found where it was. What
+still at sea, where it drifts with the current. With free AIS a vessel at anchor in the Bay of
+Algeciras may be heard once an hour, so a stop survives silences of a few hours as long as the
+vessel is found where it was, or where drifting could have taken it. What
 kind of stop it is comes first from the vessel itself (AIS navigational status "at anchor" or
 "moored"), else from where it is: by the coast near a port, a berth; within 10 km of the coast,
 an anchorage; further out, lying still at sea.
@@ -18,7 +19,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-from uatu.ais.events import CoastFn, LocalProjection, Track
+from uatu.ais.events import KNOT, CoastFn, LocalProjection, Track
 
 AT_ANCHOR, MOORED = 1, 5  # AIS navigational status
 
@@ -27,7 +28,10 @@ AT_ANCHOR, MOORED = 1, 5  # AIS navigational status
 class StopParams:
     max_sog: float = 1.0  # knots: slower than this, stopped (a vessel swinging at anchor shows 0-1 kn)
     under_way_sog: float = 3.0  # a report at this speed or more ends a stop
-    radius_m: float = 1_000  # around the stop: an anchored vessel swings a few hundred metres
+    # Between two reports, a stopped vessel moves no faster than this: drifting, or swinging at anchor
+    # (a few hundred metres, which close reports can make look fast: below jitter_m it never counts).
+    drift_sog: float = 2.0
+    jitter_m: float = 500
     max_silence_s: float = 6 * 3600  # still the same stop after this long unheard, if found in place
     min_s: float = 3600
     min_reports: int = 2
@@ -106,16 +110,16 @@ def detect_stops(
                 i += 1
                 continue
             members = [i]
-            cx, cy = float(x[i]), float(y[i])
             j = i + 1
             while j < n:
-                if tr.t[j] - tr.t[members[-1]] > p.max_silence_s:
+                last = members[-1]
+                dt = tr.t[j] - tr.t[last]
+                moved = float(np.hypot(x[j] - x[last], y[j] - y[last]))
+                if dt > p.max_silence_s or tr.sog[j] >= p.under_way_sog:
                     break
-                if np.hypot(x[j] - cx, y[j] - cy) > p.radius_m or tr.sog[j] >= p.under_way_sog:
+                if moved > p.jitter_m and moved > p.drift_sog * KNOT * dt:  # it went somewhere meanwhile
                     break
                 members.append(j)
-                cx += (float(x[j]) - cx) / len(members)  # running mean: where it lies
-                cy += (float(y[j]) - cy) / len(members)
                 j += 1
             if tr.t[members[-1]] - tr.t[members[0]] >= p.min_s and len(members) >= p.min_reports:
                 stops.append(_stop(tr, members, coast, ports, p))
