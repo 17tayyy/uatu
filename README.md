@@ -246,6 +246,9 @@ coast or one zone at a time (the selector in the header):
   MMSI, and a vessel's card: track, events, sanctions and the passes that saw it.
 - Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute.
 
+The radar image of each pass is kept at 20 m (the sensor's actual resolution) as a tiled
+Web Mercator GeoTIFF with overviews (`radar.tif`, ~17 MB a frame), and served as map tiles: the
+whole frame from afar, each ship's echo when zoomed in.
 It draws its own base map with MapLibre GL, no third-party tiles: land from the SAR land mask in
 the watched area (its edge dashed), and from [Natural Earth](https://www.naturalearthdata.com)
 (public domain) around it. The radar image, land included, covers the part of the area inside the

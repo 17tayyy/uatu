@@ -61,8 +61,10 @@ class AisCheckProperties(OutputSchema):
 
 
 class ImageOverlay(OutputSchema):
-    url: str
+    url: str  # the whole frame at 80 m, as one image
     coordinates: list[list[float]]  # lon/lat of top-left, top-right, bottom-right, bottom-left
+    tiles: str | None = None  # at 20 m, as map tiles: a {z}/{x}/{y} URL template (passes since tiles exist)
+    bounds: list[float] | None = None  # lon/lat west, south, east, north of the tiles
 
 
 class ReceptionRule(OutputSchema):

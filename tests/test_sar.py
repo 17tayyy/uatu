@@ -339,3 +339,42 @@ def test_a_frame_is_worth_processing_for_the_sea_it_covers_not_the_land():
     inland = wkt.loads("POLYGON((2.7414 41.4944,3.1398 42.9945,-0.0919 43.4055,-0.4139 41.9061,2.7414 41.4944))")
     assert inland.intersection(bbox_polygon(catalonia.bbox)).area / bbox_polygon(catalonia.bbox).area > 0.3
     assert inland.intersection(sea).area / sea.area < 0.1
+
+
+def test_the_radar_image_is_cut_into_map_tiles_where_it_has_data(tmp_path):
+    import io
+    import math
+
+    import rasterio
+    from PIL import Image
+
+    from uatu.sar.raster import backscatter_grey
+    from uatu.sar.report import radar_image
+    from uatu.web.passes.service import radar_tile
+
+    # A small scene on a UTM grid at 20 m: bright sea on the left half, no data on the right half.
+    grid = Grid(CRS.from_epsg(32630), Affine(20, 0, 280_000, 0, -20, 4_000_000), 2000, 1000)
+    sigma0 = np.full(grid.shape, 0.05, dtype=np.float32)
+    sigma0[:, 1000:] = np.nan
+    utm = tmp_path / "radar_utm.tif"
+    with rasterio.open(utm, "w", **grid.profile(dtype="uint8", nodata=0)) as dst:
+        dst.write(backscatter_grey(sigma0), 1)
+    radar_image(utm, tmp_path / "radar.tif")
+
+    with rasterio.open(tmp_path / "radar.tif") as src:
+        assert src.crs.to_epsg() == 3857 and src.overviews(1)
+        bounds = src.bounds
+
+    def tile_at(x_m: float, y_m: float, z: int) -> tuple[int, int]:
+        size = 2 * math.pi * 6378137.0 / 2**z
+        return int((x_m + math.pi * 6378137.0) / size), int((math.pi * 6378137.0 - y_m) / size)
+
+    middle_y = (bounds.bottom + bounds.top) / 2
+    left = tile_at(bounds.left + (bounds.right - bounds.left) * 0.2, middle_y, 13)
+    right = tile_at(bounds.left + (bounds.right - bounds.left) * 0.8, middle_y, 13)
+    image = Image.open(io.BytesIO(radar_tile(tmp_path / "radar.tif", 13, *left)))
+    grey, alpha = (np.asarray(band) for band in image.split())
+    assert image.size == (256, 256) and alpha.max() == 255
+    assert abs(int(np.median(grey[alpha == 255])) - int(backscatter_grey(np.array([0.05]))[0])) <= 3
+    assert radar_tile(tmp_path / "radar.tif", 13, *right) is None  # no data there
+    assert radar_tile(tmp_path / "radar.tif", 13, 0, 0) is None  # far away

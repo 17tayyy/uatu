@@ -56,6 +56,7 @@ class Analysis:
     result: MatchResult | None  # None when AIS was not consulted
     ais_vessels: int
     suspects: dict[Detection, Suspect] = field(default_factory=dict)
+    image: Path | None = None  # the backscatter at 20 m on the scene's grid, when asked for
 
     def seen_at(self, detections: list[Detection]) -> list[datetime]:
         """When the radar looked at each detection's spot."""
@@ -72,13 +73,17 @@ async def analyse(
     engine: AsyncEngine | None,
     bbox: BBox,
     pairing: PairingParams = DEFAULT_PAIRING,
+    image_path: Path | None = None,
 ) -> Analysis:
-    """Detect ships in a scene and, given a database, pair them with the AIS recorded at the time."""
-    output = await asyncio.to_thread(process, zip_path, grid, land_path, cfar)
+    """Detect ships in a scene and, given a database, pair them with the AIS recorded at the time.
+
+    image_path: also keep the backscatter at 20 m there, for write_outputs to turn into map tiles.
+    """
+    output = await asyncio.to_thread(process, zip_path, grid, land_path, cfar, image_path=image_path)
     geometry = await asyncio.to_thread(read_geometry, zip_path)
     name = zip_path.name.removesuffix(".zip")
     if engine is None:
-        return Analysis(name, geometry, output, None, 0)
+        return Analysis(name, geometry, output, None, 0, image=image_path)
 
     vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, bbox)
     expected = expected_positions(
@@ -91,7 +96,7 @@ async def analyse(
     )
     result = split_by_coverage(result, nearby, pairing.min_ais_nearby, pairing.min_reports_per_vessel)
     suspects = await find_suspects(engine, result, output, geometry, grid, bbox, pairing)
-    return Analysis(name, geometry, output, result, len(vessels), suspects)
+    return Analysis(name, geometry, output, result, len(vessels), suspects, image=image_path)
 
 
 async def find_suspects(
@@ -121,8 +126,8 @@ async def find_suspects(
 
 
 def write_outputs(analysis: Analysis, out_dir: Path) -> None:
-    """detections.geojson, ais.geojson (when paired), quicklook.png and the map overlay
-    (backscatter.png + backscatter.json)."""
+    """detections.geojson, ais.geojson (when paired), quicklook.png, the map overlay (backscatter.png +
+    backscatter.json) and, when the analysis kept the backscatter at 20 m, radar.tif for map tiles."""
     out_dir.mkdir(parents=True, exist_ok=True)
     detections = analysis.output.detections
     report.detections_geojson(detections, analysis.result, out_dir / "detections.geojson")
@@ -131,3 +136,6 @@ def write_outputs(analysis: Analysis, out_dir: Path) -> None:
     title = f"{analysis.name[:3]} {analysis.geometry.start:%Y-%m-%d %H:%M} UTC - {len(detections)} ship detections"
     report.quicklook(analysis.output, analysis.result, title, out_dir / "quicklook.png")
     report.backscatter_overlay(analysis.output, out_dir / "backscatter.png", out_dir / "backscatter.json")
+    if analysis.image is not None and analysis.image.exists():
+        report.radar_image(analysis.image, out_dir / "radar.tif")
+        analysis.image.unlink()

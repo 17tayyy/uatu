@@ -520,7 +520,13 @@ function showRadarImage(pass) {
   }
   (pass?.images ?? []).slice(0, LAYERS.radar.ids.length).forEach((image, i) => {
     const id = LAYERS.radar.ids[i];
-    map.addSource(id, { type: "image", url: image.url, coordinates: image.coordinates });
+    // At 20 m as map tiles when the pass has them (detail on zooming in); else the frame at 80 m as one image.
+    map.addSource(
+      id,
+      image.tiles
+        ? { type: "raster", tiles: [image.tiles], tileSize: 256, bounds: image.bounds, minzoom: 5, maxzoom: 14 }
+        : { type: "image", url: image.url, coordinates: image.coordinates },
+    );
     map.addLayer(
       {
         id,

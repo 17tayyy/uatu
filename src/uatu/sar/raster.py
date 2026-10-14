@@ -243,6 +243,15 @@ def _member_paths(zip_path: Path, polarisation: str) -> tuple[str, str]:
     return measurement, calibration
 
 
+def backscatter_grey(sigma0: np.ndarray) -> np.ndarray:
+    """Linear backscatter as image levels: -25 dB (calm sea) to 0 dB (ships, land) over 1-255; 0 where there is
+    no data (NaN), to be transparent."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        db = 10 * np.log10(sigma0)
+    grey = np.clip((db + 25) / 25 * 254 + 1, 1, 255)
+    return np.where(np.isfinite(db), grey, 0).astype(np.uint8)
+
+
 def land_cache(grid: Grid, cache_dir: Path, tile: int = 4096) -> Path:
     """GeoTIFF of the grid, 1 on land, from ESA WorldCover 2021 (10 m). Built once per grid."""
     path = cache_dir / f"land_{grid.key}.tif"

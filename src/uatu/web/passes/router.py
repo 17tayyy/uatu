@@ -1,7 +1,8 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from uatu.web.dependencies import DbSession, Settings, ZoneScope
 from uatu.web.passes import service as pass_service
@@ -24,6 +25,24 @@ async def list_passes(
 @router.get("/{pass_id}")
 async def get_pass(pass_id: PassId, db: DbSession, settings: Settings) -> DataResponse[PassDetail]:
     return DataResponse(data=await pass_service.get_pass(db, settings.sar_data_dir, pass_id))
+
+
+@router.get("/{pass_id}/images/{frame}/tiles/{z}/{x}/{y}.png", response_class=Response)
+async def get_radar_tile(
+    pass_id: PassId,
+    frame: Annotated[int, Path(ge=0, le=9)],
+    z: Annotated[int, Path(ge=0, le=18)],
+    x: Annotated[int, Path(ge=0)],
+    y: Annotated[int, Path(ge=0)],
+    db: DbSession,
+    settings: Settings,
+) -> Response:
+    """A frame's radar image at 20 m, cut into 256 px web map tiles; empty (204) where it has none."""
+    radar = await pass_service.get_radar_tiles(db, settings.sar_data_dir, pass_id, frame)
+    png = await asyncio.to_thread(pass_service.radar_tile, radar, z, x, y)
+    if png is None:
+        return Response(status_code=204)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/{pass_id}/images/{frame}", response_class=FileResponse)
