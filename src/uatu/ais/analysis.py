@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.ais import store
+from uatu.ais.bathymetry import Bathymetry
 from uatu.ais.coast import CoastDistance
 from uatu.ais.events import (
     DEFAULT_PARAMS,
@@ -35,7 +36,12 @@ class Outcome:
 
 
 async def analyse(
-    engine: AsyncEngine, now: datetime, bbox: BBox, coast: CoastDistance, p: Params = DEFAULT_PARAMS
+    engine: AsyncEngine,
+    now: datetime,
+    bbox: BBox,
+    coast: CoastDistance,
+    p: Params = DEFAULT_PARAMS,
+    bathymetry: Bathymetry | None = None,
 ) -> Outcome:
     start = now - WINDOW
     lat_min, lon_min, lat_max, lon_max = bbox
@@ -48,7 +54,9 @@ async def analyse(
         *detect_gaps(tracks, t1, bbox, coast.at, proj, p),
         *detect_encounters(tracks, t0, t1, coast.at, proj, p),
         *detect_loitering(tracks, coast.at, p),
-        *detect_infrastructure_loitering(tracks, infrastructure, coast.at, proj, p),
+        *detect_infrastructure_loitering(
+            tracks, infrastructure, coast.at, proj, p, bathymetry.depth_at if bathymetry else None
+        ),
         *detect_jumps(tracks, proj, p),
     ]
     stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days))
@@ -98,7 +106,9 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
             title = f"Barco sobre {d['infrastructure']}: {name}"
             message = (
                 f"{name} (MMSI {e.mmsi}) lleva {d['minutes']} min a menos de 3 nudos y a {d['min_distance_m']} m"
-                f" de {d['infrastructure']} ({d['infrastructure_kind']}). Posición {where}."
+                f" de {d['infrastructure']} ({d['infrastructure_kind']})"
+                + (f", en {d['depth_m']} m de agua" if d.get("depth_m") is not None else "")
+                + f". Posición {where}."
             )
         case "sanctioned_vessel":
             title = f"Barco sancionado en la zona: {name}"

@@ -78,6 +78,9 @@ class Params:
     infra_distance_m: float = 1_000
     infra_max_sog: float = 3.0
     infra_min_s: float = 1800
+    # Deepest water where an anchor can reach the seabed (and so a cable): large ships carry chain
+    # for roughly 100-200 m of depth. Deeper, a vessel over a cable cannot harm it.
+    anchor_depth_m: float = 200
 
 
 DEFAULT_PARAMS = Params()
@@ -301,10 +304,13 @@ def detect_infrastructure_loitering(
     coast: CoastFn,
     proj: LocalProjection,
     p: Params = DEFAULT_PARAMS,
+    depth: CoastFn | None = None,
 ) -> list[Event]:
     """Vessels slow or stopped over a submarine cable or pipeline, away from ports.
 
     infrastructure: (kind, name, geometry in `proj` metres).
+    depth: (lon, lat) -> metres of water. Only where an anchor can reach the seabed is this an
+    alert; in deep water it is informative. Without it, every event is an alert.
     """
     if not infrastructure:
         return []
@@ -333,7 +339,13 @@ def detect_infrastructure_loitering(
                 "min_distance_m": round(float(distance[closest])),
                 "minutes": round((tr.t[last] - tr.t[first]) / 60),
             }
-            events.append(_span_event("infrastructure_loitering", 3, tr, first, last, details))
+            severity = 3
+            if depth is not None:
+                metres = float(depth(tr.lon[closest : closest + 1], tr.lat[closest : closest + 1])[0])
+                details["depth_m"] = None if math.isnan(metres) else round(metres)
+                if metres > p.anchor_depth_m:  # NaN (unknown depth) keeps the alert
+                    severity = 1
+            events.append(_span_event("infrastructure_loitering", severity, tr, first, last, details))
     return events
 
 
