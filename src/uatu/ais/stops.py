@@ -45,7 +45,8 @@ class StopParams:
     strait_lats: tuple[float, float] = (35.85, 36.06)  # the narrows between the two coasts on that meridian
     transit_max_gap_s: float = 3 * 3600  # two reports further apart don't say where it crossed
     # A passage comes from west of this and goes on east of that (or the other way), within hours.
-    transit_west_lon: float = -5.65
+    # Tarifa's meridian: aisstream hears little further west, and loses most westbound ships past it.
+    transit_west_lon: float = -5.60
     transit_east_lon: float = -5.45
     transit_within_s: float = 6 * 3600
 
