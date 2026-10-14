@@ -54,8 +54,8 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
 
-Anything happening where 4+ vessels sit stopped within 8 km (an anchorage or waiting area,
-found from the data itself) is routine and only informative. Alerts with severity 3 are
+Anything happening where 4+ vessels have sat stopped within 8 km over the last 7 days (an
+anchorage or waiting area, learnt from the record itself) is routine and only informative. Alerts with severity 3 are
 pushed to the phone at once; notable ones (2) go into a summary at 08:00 and 20:00 UTC.
 
 Reference data, refreshed by the worker:
@@ -143,7 +143,10 @@ The worker also keeps the system healthy:
   on the same disk as the database, so also back up the container (e.g. Proxmox `vzdump`).
 - `ops.health`, every 5 minutes: AIS still arriving (< 15 min), disk > 10% free, last backup
   < 26 h old. Changes are pushed to a phone through [ntfy](https://ntfy.sh) (`NTFY_URL`), as
-  are tasks that fail for good. With `HEALTHCHECK_URL` (e.g. healthchecks.io) it also pings a
+  are tasks that fail for good (periodic ones only after 3 failures in a row: one network
+  blip fixes itself on the next run). A notification that cannot be delivered, often because
+  the connection itself is down, is retried on the next check. The twice-daily AIS digest
+  also lists the periods with no AIS recorded. With `HEALTHCHECK_URL` (e.g. healthchecks.io) it also pings a
   dead man's switch, which alerts when the worker or the whole machine goes quiet.
 
 Restoring a backup, into an empty database (`--clean` cannot drop PostGIS while tables use it):

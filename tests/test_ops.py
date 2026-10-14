@@ -25,6 +25,37 @@ async def test_alerter_notifies_on_changes_only():
     assert sent == [("Uatu: ais failing", "high"), ("Uatu: ais recovered", "default")]
 
 
+async def test_alerts_that_could_not_be_sent_are_retried():
+    import httpx
+
+    sent: list[str] = []
+    online = False
+
+    async def send(title: str, message: str, priority: str, link: str | None) -> None:
+        if not online:
+            raise httpx.ConnectError("no internet")
+        sent.append(title)
+
+    alerter = Alerter(send)
+    failing = Check("ais", False, "40 min ago")
+    await alerter.update([failing])  # network down: nothing delivered
+    await alerter.update([failing])
+    online = True
+    await alerter.update([failing])  # delivered now, once
+    await alerter.update([failing])
+    assert sent == ["Uatu: ais failing"]
+
+
+def test_digest_mentions_recording_gaps():
+    from datetime import UTC, datetime
+
+    from uatu.ais.analysis import digest
+
+    gap = (datetime(2026, 10, 13, 22, 34, tzinfo=UTC), datetime(2026, 10, 14, 1, 19, tzinfo=UTC))
+    _, message = digest([], {}, hours=12, gaps=[gap])
+    assert "Sin AIS 165 min (22:34-01:19 UTC)" in message
+
+
 def test_disk_and_backup_checks(tmp_path: Path):
     assert check_disk(tmp_path, min_free=0.0).ok
     assert not check_disk(tmp_path, min_free=1.0).ok

@@ -63,6 +63,9 @@ log = structlog.get_logger(component="worker")
 app = Ardiq(redis_url=settings.redis_url, queue_name="uatu", concurrency=1)
 AOI = bbox_polygon(settings.sar_bbox)
 LOST_AFTER = timedelta(hours=2)
+# Tasks that run every few minutes: one failure (a network blip, a service down for a while)
+# fixes itself on the next run, so they alert only when failing this many times in a row.
+FAILURES_BEFORE_ALERT = {"sar.discover": 3, "ais.analyse": 3, "ops.health": 3}
 
 
 @app.lifespan
@@ -85,6 +88,7 @@ async def lifespan():
         log.info("worker_ready", grid=f"{grid.width}x{grid.height}", alerts=settings.ntfy_url is not None)
         await alerter.notify("Uatu worker started", f"Watching {settings.sar_bbox}", "low")
         yield {
+            "failures": {},  # consecutive failures of periodic tasks
             "engine": engine,
             "http": http,
             "alerter": alerter,
@@ -131,6 +135,7 @@ async def discover() -> int:
     for scene in [*new, *lost]:
         await process_scene.options(task_id=f"sar-scene:{scene.id}").enqueue(scene.id)
     log.info("discovered", catalogue=len(scenes), new=len(new), requeued=len(lost))
+    await _succeeded("sar.discover")
     return len(new)
 
 
@@ -176,6 +181,7 @@ async def analyse_ais() -> dict[str, int]:
         urgent=len(urgent),
         gaps_closed=outcome.gaps_closed,
     )
+    await _succeeded("ais.analyse")
     return {"new": len(outcome.new), "urgent": len(urgent)}
 
 
@@ -223,6 +229,7 @@ async def health() -> dict[str, bool]:
     await app.state.alerter.update(checks)
     if settings.healthcheck_url:
         await ops.ping_healthcheck(app.state.http, settings.healthcheck_url, all(c.ok for c in checks))
+    await _succeeded("ops.health")
     return {c.name: c.ok for c in checks}
 
 
@@ -238,7 +245,20 @@ async def on_error(ctx: ErrorContext) -> None:
     )
     if ctx.will_retry:
         return
+    if ctx.name in FAILURES_BEFORE_ALERT:
+        failures = app.state.failures
+        failures[ctx.name] = count = failures.get(ctx.name, 0) + 1
+        if count >= FAILURES_BEFORE_ALERT[ctx.name]:
+            detail = f"failed {count} times in a row, last: {ctx.exc!r}"
+            await app.state.alerter.update([ops.Check(ctx.name, False, detail)])
+        return
     if ctx.name == "sar.process_scene" and ctx.task_id.startswith("sar-scene:"):
         scene_id = uuid.UUID(ctx.task_id.removeprefix("sar-scene:"))
         await store.mark_failed(app.state.engine, scene_id, repr(ctx.exc))
     await app.state.alerter.notify(f"Uatu: {ctx.name} failed", f"after {ctx.tries} tries: {ctx.exc!r}", "high")
+
+
+async def _succeeded(task: str) -> None:
+    """A periodic task ran fine: forget its failures, and say so if they had been alerted."""
+    if app.state.failures.pop(task, 0):
+        await app.state.alerter.update([ops.Check(task, True, "running again")])

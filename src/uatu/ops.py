@@ -100,7 +100,11 @@ type Send = Callable[[str, str, str, str | None], Awaitable[None]]  # title, mes
 
 
 class Alerter:
-    """Notifies when a check starts failing and when it recovers, rather than on every run."""
+    """Notifies when a check starts failing and when it recovers, rather than on every run.
+
+    A change only counts once its notification is delivered: if the network is down (often
+    the very reason a check fails), the next update tries again.
+    """
 
     def __init__(self, send: Send) -> None:
         self._send = send
@@ -109,18 +113,21 @@ class Alerter:
     async def update(self, checks: list[Check]) -> None:
         for check in checks:
             if not check.ok and check.name not in self._failing:
-                self._failing[check.name] = check.detail
-                await self.notify(f"Uatu: {check.name} failing", check.detail, "high")
+                if await self.notify(f"Uatu: {check.name} failing", check.detail, "high"):
+                    self._failing[check.name] = check.detail
             elif check.ok and check.name in self._failing:
-                del self._failing[check.name]
-                await self.notify(f"Uatu: {check.name} recovered", check.detail, "default")
+                if await self.notify(f"Uatu: {check.name} recovered", check.detail, "default"):
+                    del self._failing[check.name]
 
-    async def notify(self, title: str, message: str, priority: str = "default", link: str | None = None) -> None:
+    async def notify(self, title: str, message: str, priority: str = "default", link: str | None = None) -> bool:
+        """Send a notification; False if it could not be delivered."""
         log.warning("alert", title=title, message=message)
         try:
             await self._send(title, message, priority, link)
         except httpx.HTTPError as e:  # alerting must never take the worker down
             log.error("alert_not_sent", error=repr(e))
+            return False
+        return True
 
 
 def ntfy(http: httpx.AsyncClient, topic_url: str | None) -> Send:

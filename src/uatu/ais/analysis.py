@@ -51,7 +51,8 @@ async def analyse(
         *detect_infrastructure_loitering(tracks, infrastructure, coast.at, proj, p),
         *detect_jumps(tracks, proj, p),
     ]
-    events = downgrade_in_crowds(events, tracks, proj, p)
+    stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days))
+    events = downgrade_in_crowds(events, stopped, proj, p)
     reports = await store.static_reports(engine, now - IDENTITY_HISTORY)
     events += detect_identity_changes(reports, start, await store.last_positions(engine, start))
     events += await store.sanctioned_present(engine, start, now)
@@ -116,8 +117,10 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
     return title, message, link
 
 
-def digest(events: list[Event], names: dict[int, str], hours: int) -> tuple[str, str]:
-    """A summary notification of notable events, newest kinds first."""
+def digest(
+    events: list[Event], names: dict[int, str], hours: int, gaps: list[tuple[datetime, datetime]] = ()
+) -> tuple[str, str]:
+    """A summary notification of notable events and of the periods Uatu recorded no AIS."""
     labels = {
         "ais_gap": "apagones de AIS",
         "encounter": "encuentros en el mar",
@@ -130,8 +133,14 @@ def digest(events: list[Event], names: dict[int, str], hours: int) -> tuple[str,
     counts: dict[str, int] = {}
     for e in events:
         counts[e.kind] = counts.get(e.kind, 0) + 1
-    lines = [", ".join(f"{n} {labels.get(kind, kind)}" for kind, n in counts.items())]
-    lines += [f"• {describe(e, names)[0]}" for e in events[:8]]
-    if len(events) > 8:
-        lines.append(f"… y {len(events) - 8} más")
+    lines = []
+    if gaps:
+        blind = sum((end - start for start, end in gaps), timedelta())
+        spans = ", ".join(f"{start:%H:%M}-{end:%H:%M}" for start, end in gaps)
+        lines.append(f"⚠ Sin AIS {blind.total_seconds() / 60:.0f} min ({spans} UTC)")
+    if events:
+        lines.append(", ".join(f"{n} {labels.get(kind, kind)}" for kind, n in counts.items()))
+        lines += [f"• {describe(e, names)[0]}" for e in events[:8]]
+        if len(events) > 8:
+            lines.append(f"… y {len(events) - 8} más")
     return f"Uatu: resumen AIS de las últimas {hours} h", "\n".join(lines)
