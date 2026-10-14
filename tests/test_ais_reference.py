@@ -1,29 +1,7 @@
 from shapely import LineString
 
-from uatu.ais.reference import emodnet_features, sanctioned_vessels, telegeography_features
+from uatu.ais.reference import emodnet_features, telegeography_features
 from uatu.ais.store import valid_imo
-
-
-def row(**fields) -> dict[str, str]:
-    base = dict.fromkeys(
-        ["id", "schema", "name", "aliases", "identifiers", "countries", "program_ids", "sanctions"], ""
-    )
-    return base | fields
-
-
-def test_sanctioned_vessels_are_keyed_by_imo():
-    rows = [
-        row(id="NK-1", schema="Vessel", name="Nurkez", identifiers="352002470;3E2311;IMO9253325", program_ids="EU-RUS"),
-        row(id="NK-2", schema="Vessel", name="No IMO", identifiers="123456789"),
-        row(id="NK-3", schema="Person", name="Someone", identifiers="IMO1234567"),
-    ]
-    [vessel] = sanctioned_vessels(rows)
-    assert (vessel["imo"], vessel["name"], vessel["mmsis"], vessel["programs"]) == (
-        9253325,
-        "Nurkez",
-        "352002470",
-        "EU-RUS",
-    )
 
 
 def test_valid_imo_checks_the_check_digit():

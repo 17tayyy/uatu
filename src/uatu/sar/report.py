@@ -22,7 +22,7 @@ from uatu.sar.pipeline import SceneOutput
 from uatu.sar.raster import Grid
 
 if TYPE_CHECKING:
-    from uatu.sar.store import SceneReport
+    from uatu.sar.store import Candidate, SceneReport
 
 WEB_MERCATOR = "EPSG:3857"
 
@@ -181,6 +181,14 @@ def _write(path: Path, features: list[dict]) -> None:
     path.write_text(json.dumps({"type": "FeatureCollection", "features": features}, default=str, indent=1))
 
 
+def _listed(c: Candidate) -> str:
+    if c.suspect_sanctioned:
+        return f" ⚠ SANCIONADO ({c.suspect_sanctioned})"
+    if c.suspect_risk == "sanctioned_owner":
+        return " ⚠ ARMADOR O GESTOR SANCIONADO"
+    return " ⚠ EN LISTAS DE VIGILANCIA" if c.suspect_risk == "watchlisted" else ""
+
+
 def _count(n: int, singular: str, plural: str | None = None) -> str:
     return f"{n} {singular if n == 1 else plural or singular + 's'}"
 
@@ -209,16 +217,16 @@ def scene_notification(r: SceneReport, late: bool = False) -> tuple[str, str, st
         if c.kind == "went_silent":
             hours, minutes = divmod(round(c.suspect_silent_minutes or 0), 60)
             name = c.suspect_name or f"MMSI {c.suspected_mmsi}"
-            sanctioned = f" ⚠ SANCIONADO ({c.suspect_sanctioned})" if c.suspect_sanctioned else ""
             lines.append(
-                f"• Se calló: {name}{sanctioned}, {hours} h {minutes:02d} min sin emitir,"
+                f"• Se calló: {name}{_listed(c)}, {hours} h {minutes:02d} min sin emitir,"
                 f" a {(c.suspect_distance_m or 0) / 1000:.1f} km ({where})"
             )
         else:
             lines.append(f"• Sin identificar ({where})")
     if len(interesting) > 6:
         lines.append(f"… y {len(interesting) - 6} más")
-    priority = "high" if any(c.suspect_sanctioned for c in interesting) else "default"
+    urgent = any(c.suspect_sanctioned or c.suspect_risk == "sanctioned_owner" for c in interesting)
+    priority = "high" if urgent else "default"
     link = None
     if interesting:
         c = interesting[0]

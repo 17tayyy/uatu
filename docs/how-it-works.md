@@ -134,6 +134,16 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
 - **Sanctions**: IMO numbers (and listed MMSIs) checked against OpenSanctions' collection of EU,
   UK, US, Swiss, Canadian and Australian lists. Ships change names and flags; their IMO number
   stays.
+- **Who is behind a vessel**: lists name a few thousand vessels, and the companies behind them
+  run more. Sanctions lists tie vessels to their owners; Ukraine's military intelligence (GUR)
+  names the owners and the commercial and ISM managers of the shadow fleet, sanctioned or not;
+  the Paris MoU's ban list and port state detentions name the ISM company. OpenSanctions
+  resolves one company across all of them to one id, so they join. A vessel off the lists is an
+  alert when a company that owns or manages it is sanctioned. It is notable when the company
+  runs at least 2 sanctioned vessels and they are at least half its known fleet, when it is on
+  GUR's lists or banned from European ports. A share, not a count: one sanctioned hull in a
+  large fleet says little about the rest, most of a fleet sanctioned says a lot. Detentions
+  older than 3 years are left out, as ISM companies change.
 - **Identity changes, shared IMO numbers, impossible jumps** (spoofing or broken GPS).
 
 Where 4 or more vessels have sat stopped within 8 km over the past week, an anchorage or waiting

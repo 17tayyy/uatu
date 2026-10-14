@@ -43,6 +43,49 @@ const SEVERITY = {
   1: { label: "Info", color: C.muted },
 };
 
+// Who owns and manages vessels (OpenSanctions): roles, sources and other watchlists, in Spanish.
+const ROLE = {
+  owner: "Propietario",
+  commercial_manager: "Gestor comercial",
+  ism_manager: "Gestor ISM (seguridad)",
+  linked: "Vinculada",
+  insurer: "Aseguradora P&I",
+};
+const SOURCE = {
+  sanctions: "listas de sanciones",
+  ua_war_sanctions: "GUR (Ucrania)",
+  paris_mou_banned: "Paris MoU",
+  tokyo_mou_detention: "detención, MoU de Tokio",
+  black_sea_mou_detention: "detención, MoU del mar Negro",
+};
+const WATCHLIST = {
+  shadow_fleet: "Flota en la sombra rusa, según la inteligencia ucraniana (GUR)",
+  war_and_sanctions: "En la lista de la inteligencia ucraniana (GUR) de barcos que trabajan para Rusia",
+  port_ban: "Vetado en los puertos europeos (Paris MoU)",
+};
+const regionName = (() => {
+  const names = new Intl.DisplayNames(["es"], { type: "region" });
+  return (code) => {
+    try {
+      return names.of(code.toUpperCase());
+    } catch {
+      return code.toUpperCase();
+    }
+  };
+})();
+
+/** How a vessel stands with sanctions: 2 sanctioned or run by a sanctioned company, 1 on other watchlists. */
+function listing(p) {
+  if (p.sanctioned === true) return { level: 2, label: "Sancionado" };
+  if (p.risk === "sanctioned_owner") return { level: 2, label: "Gestor sancionado" };
+  if (p.risk === "watchlisted") return { level: 1, label: "Vigilado" };
+  return { level: 0, label: null };
+}
+const listingTag = (p) => {
+  const l = listing(p);
+  return l.level ? tag("arrow", l.level === 2 ? C.critical : C.serious, l.label) : null;
+};
+
 const RECEPTION = {
   good: { label: "Buena (≥ 3 mensajes por barco)", color: C.coverage.good },
   patchy: { label: "Irregular (1,5–3)", color: C.coverage.patchy },
@@ -77,6 +120,7 @@ const state = {
   events: EMPTY,
   eventFilter: { minSeverity: 2, hours: 48 },
   vessel: null, // the vessel whose track is drawn
+  lastVessel: null, // the last vessel opened, for the way back from one of its companies
   vesselQuery: "",
   layers: loadLayerPrefs(),
   coverageLoaded: false,
@@ -151,6 +195,9 @@ const fmtTime = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, hour: "2-digit"
 const fmtDay = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, day: "numeric", month: "short" });
 const fmtFull = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, dateStyle: "long", timeStyle: "short" });
 const fmtNumber = new Intl.NumberFormat("es-ES");
+const fmtMonth = new Intl.DateTimeFormat("es-ES", { timeZone: "UTC", month: "short", year: "numeric" });
+const month = (isoDate) => fmtMonth.format(new Date(isoDate));
+const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function when(iso) {
   const d = new Date(iso);
@@ -322,11 +369,19 @@ function diamondIcon(fill) {
 
 const kindColor = ["match", ["get", "kind"], ...Object.entries(KIND).flatMap(([k, v]) => [k, v.color]), C.muted];
 const kindRank = ["match", ["get", "kind"], ...Object.entries(KIND).flatMap(([k, v]) => [k, -v.rank]), -9];
+// As listing() above, for map styles.
+const vesselListing = [
+  "case",
+  ["any", ["==", ["get", "sanctioned"], true], ["==", ["get", "risk"], "sanctioned_owner"]], 2,
+  ["==", ["get", "risk"], "watchlisted"], 1,
+  0,
+];
 
 function addLayers() {
   for (const [name, image] of [
     ["arrow", arrowIcon(C.ink2)],
     ["arrow-sanctioned", arrowIcon(C.critical)],
+    ["arrow-watch", arrowIcon(C.serious)],
     ["diamond-3", diamondIcon(C.critical)],
     ["diamond-2", diamondIcon(C.serious)],
     ["diamond-1", diamondIcon(C.muted)],
@@ -443,8 +498,8 @@ function addLayers() {
     source: "vessels",
     filter: ["any", ["==", ["get", "cog"], null], ["<", ["coalesce", ["get", "sog"], 0], 0.5]],
     paint: {
-      "circle-radius": ["case", ["get", "sanctioned"], 4.5, 2.5],
-      "circle-color": ["case", ["get", "sanctioned"], C.critical, C.ink2],
+      "circle-radius": ["match", vesselListing, 0, 2.5, 4.5],
+      "circle-color": ["match", vesselListing, 2, C.critical, 1, C.serious, C.ink2],
       "circle-stroke-width": 1,
       "circle-stroke-color": C.page,
     },
@@ -455,17 +510,17 @@ function addLayers() {
     source: "vessels",
     filter: ["all", ["!=", ["get", "cog"], null], [">=", ["coalesce", ["get", "sog"], 0], 0.5]],
     layout: {
-      "icon-image": ["case", ["get", "sanctioned"], "arrow-sanctioned", "arrow"],
+      "icon-image": ["match", vesselListing, 2, "arrow-sanctioned", 1, "arrow-watch", "arrow"],
       "icon-size": [
         "interpolate", ["linear"], ["zoom"],
-        7, ["case", ["get", "sanctioned"], 0.9, 0.6],
-        12, ["case", ["get", "sanctioned"], 1.4, 1],
+        7, ["match", vesselListing, 0, 0.6, 0.9],
+        12, ["match", vesselListing, 0, 1, 1.4],
       ],
       "icon-rotate": ["get", "cog"],
       "icon-rotation-alignment": "map",
       "icon-allow-overlap": true,
       "icon-ignore-placement": true,
-      "symbol-sort-key": ["case", ["get", "sanctioned"], 1, 0],
+      "symbol-sort-key": vesselListing,
     },
   });
   map.addLayer({
@@ -846,7 +901,8 @@ function wireMapEvents() {
     map.on("mousemove", id, (e) => {
       const p = e.features[0].properties;
       const speed = p.sog != null && p.sog !== "null" ? ` · ${p.sog} nudos` : "";
-      tooltip(e, `${p.name && p.name !== "null" ? p.name : `MMSI ${p.mmsi}`}${speed} · ahora`);
+      const listed = listing(p).label ? ` · ${listing(p).label}` : "";
+      tooltip(e, `${p.name && p.name !== "null" ? p.name : `MMSI ${p.mmsi}`}${speed} · ahora${listed}`);
     });
   }
   map.on("mousemove", "detections", (e) => {
@@ -936,7 +992,7 @@ function renderLegend() {
     parts.push(h("h3", null, "Eventos AIS"), [3, 2, 1].filter((s) => s >= state.eventFilter.minSeverity).map((s) => legendItem("diamond", SEVERITY[s].color, SEVERITY[s].label)));
   }
   if (state.layers.vessels) {
-    parts.push(h("h3", null, "Barcos en vivo"), legendItem("arrow", C.ink2, "Navegando (rumbo)"), legendItem("circle", C.ink2, "Parado"), legendItem("arrow", C.critical, "Sancionado"));
+    parts.push(h("h3", null, "Barcos en vivo"), legendItem("arrow", C.ink2, "Navegando (rumbo)"), legendItem("circle", C.ink2, "Parado"), legendItem("arrow", C.critical, "Sancionado o con gestor sancionado"), legendItem("arrow", C.serious, "En listas de vigilancia"));
   }
   if (state.layers.infrastructure) {
     parts.push(h("h3", null, "Infraestructura"), legendItem("dash", C.infra, "Cable submarino"), legendItem("line", C.infra, "Gasoducto u oleoducto"));
@@ -996,6 +1052,7 @@ function navigate(path) {
 
 function parseRoute() {
   const [tab, id] = location.hash.replace(/^#\/?/, "").split("/");
+  if (tab === "companies" && id) return { tab, id: decodeURIComponent(id) }; // under the vessels tab
   return { tab: ["passes", "events", "vessels"].includes(tab) ? tab : "passes", id: id || null };
 }
 
@@ -1010,7 +1067,7 @@ function backButton(tab, label) {
 async function render() {
   route = parseRoute();
   for (const button of document.querySelectorAll(".tabs button")) {
-    button.setAttribute("aria-selected", String(button.dataset.tab === route.tab));
+    button.setAttribute("aria-selected", String(button.dataset.tab === (route.tab === "companies" ? "vessels" : route.tab)));
   }
   if (!(route.tab === "vessels" && route.id)) clearVessel();
   applyFocus();
@@ -1019,6 +1076,7 @@ async function render() {
   try {
     if (route.tab === "passes") await (route.id ? renderPass(route.id) : renderPasses());
     else if (route.tab === "events") renderEvents();
+    else if (route.tab === "companies") await renderCompany(route.id);
     else await (route.id ? renderVessel(Number(route.id)) : renderVessels());
   } catch (error) {
     fill(view, message("error-note", `No se pudo cargar: ${error.message}`));
@@ -1298,7 +1356,7 @@ function liveRow(f) {
         "div",
         { class: "row-top" },
         h("span", { class: "row-title" }, p.name ?? `MMSI ${p.mmsi}`),
-        p.sanctioned && tag("arrow", C.critical, "Sancionado"),
+        listingTag(p),
         h("span", { class: "row-time num" }, moving ? `${p.sog} nudos` : "parado"),
       ),
       facts && h("div", { class: "row-meta" }, facts),
@@ -1325,10 +1383,10 @@ let searchSeq = 0;
 async function renderVesselResults(list) {
   const q = state.vesselQuery.trim();
   if (q.length < 2) {
-    // Sanctioned first, then by name; vessels with no name yet last.
+    // Sanctioned first, then on watchlists, then by name; vessels with no name yet last.
     const live = [...state.live.features].sort(
       (a, b) =>
-        Number(b.properties.sanctioned) - Number(a.properties.sanctioned) ||
+        listing(b.properties).level - listing(a.properties).level ||
         Number(a.properties.name == null) - Number(b.properties.name == null) ||
         (a.properties.name ?? String(a.properties.mmsi)).localeCompare(b.properties.name ?? String(b.properties.mmsi)),
     );
@@ -1378,6 +1436,7 @@ async function renderVessel(mmsi) {
   const v = await api(`/vessels/${mmsi}?track_hours=24`);
   if (Number(route.id) !== mmsi) return;
   state.vessel = v;
+  state.lastVessel = { mmsi: v.mmsi, name: v.name ?? `MMSI ${v.mmsi}` };
   setData("track", v.track ? { type: "Feature", geometry: v.track, properties: {} } : EMPTY);
   const last = v.last_position;
   if (v.track) fitToArea(bounds(v.track.coordinates));
@@ -1397,6 +1456,7 @@ async function renderVessel(mmsi) {
         v.sanction.programs ? ` (${v.sanction.programs.replaceAll(";", ", ")})` : "",
         ". Fuente: OpenSanctions.",
       ),
+    v.risk && riskCallout(v.risk),
     kv([
       ["MMSI", String(v.mmsi)],
       ["IMO", v.imo ? String(v.imo) : null],
@@ -1415,6 +1475,27 @@ async function renderVessel(mmsi) {
       externalLink("MarineTraffic", `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${v.mmsi}`),
     ),
     !v.track && h("p", { class: "note" }, "Sin derrota en las últimas 24 h."),
+    h("h3", { class: "section-title" }, `Propietario y gestores (${v.companies.length})`),
+    v.companies.length
+      ? h("ul", { class: "list" }, v.companies.map(companyRow))
+      : h(
+          "p",
+          { class: "note" },
+          v.imo
+            ? "Las fuentes abiertas no dicen quién lo gestiona: solo cubren barcos sancionados, vigilados o detenidos."
+            : "Sin IMO no se puede saber quién lo gestiona.",
+        ),
+    v.watchlists.length > 0 && [
+      h("h3", { class: "section-title" }, "Lo que dicen las listas"),
+      v.watchlists.map((w) =>
+        h(
+          "details",
+          { class: "source-note" },
+          h("summary", null, WATCHLIST[w.watchlist] ?? w.watchlist),
+          w.note ? h("p", { lang: "en" }, w.note) : h("p", null, "Sin más detalle."),
+        ),
+      ),
+    ],
     h("h3", { class: "section-title" }, `Eventos (${v.events.length})`),
     v.events.length
       ? h(
@@ -1459,6 +1540,112 @@ async function renderVessel(mmsi) {
           ),
         )
       : h("p", { class: "note" }, "Ninguna pasada lo ha captado todavía."),
+  );
+}
+
+function riskCallout(risk) {
+  const watch = risk.level === "watchlisted";
+  return h(
+    "div",
+    { class: watch ? "callout watch" : "callout" },
+    h("strong", null, svg("arrow", watch ? C.serious : C.critical), watch ? "En listas de vigilancia" : "Armador o gestor sancionado"),
+    !watch && "No figura en listas de sanciones, pero:",
+    h("ul", { class: "reasons" }, risk.reasons.map((r) => h("li", null, capitalise(r)))),
+    "Fuente: OpenSanctions.",
+  );
+}
+
+/** A company behind a vessel, its roles there and the share of its fleet under sanctions. */
+function companyRow(c) {
+  const when = c.since ? `desde ${month(c.since)}` : c.as_of ? `inspección de ${month(c.as_of)}` : null;
+  const facts = [c.roles.map((r) => ROLE[r] ?? r).join(", "), when, c.sources.map((s) => SOURCE[s] ?? s).join(", ")];
+  const fleet = c.sanctioned_vessels > 0 && c.vessels > 1 ? `${c.sanctioned_vessels} de sus ${c.vessels} barcos conocidos, sancionados` : null;
+  return h(
+    "li",
+    null,
+    h(
+      "button",
+      { class: "row", onclick: () => navigate(`companies/${encodeURIComponent(c.id)}`) },
+      h(
+        "div",
+        { class: "row-top" },
+        h("span", { class: "row-title" }, c.name),
+        c.sanctioned && tag("square", C.critical, c.kind === "person" ? "Sancionado" : "Sancionada"),
+      ),
+      h("div", { class: "row-meta" }, facts.filter(Boolean).join(" · ")),
+      fleet && h("div", { class: "row-meta" }, fleet),
+    ),
+  );
+}
+
+function fleetRow(v) {
+  const renamed = v.ais_name && v.ais_name.toUpperCase() !== v.name.toUpperCase();
+  const facts = [
+    `IMO ${v.imo}`,
+    renamed && `en las listas como ${v.name}`,
+    v.roles.map((r) => ROLE[r] ?? r).join(", "),
+    v.sources.map((s) => SOURCE[s] ?? s).join(", "),
+  ];
+  const top = h(
+    "div",
+    { class: "row-top" },
+    h("span", { class: "row-title" }, v.ais_name ?? v.name),
+    listingTag(v),
+    h("span", { class: "grow" }),
+    v.mmsi != null && h("span", { class: "row-time" }, v.last_seen_at ? `oído ${ago(v.last_seen_at)}` : "oído"),
+  );
+  if (v.mmsi != null) {
+    const meta = h("div", { class: "row-meta" }, facts.filter(Boolean).join(" · "));
+    return h("li", null, h("button", { class: "row", onclick: () => navigate(`vessels/${v.mmsi}`) }, top, meta));
+  }
+  const link = externalLink("VesselFinder", `https://www.vesselfinder.com/vessels/details/${v.imo}`);
+  return h("li", null, h("div", { class: "row" }, top, h("div", { class: "row-meta" }, facts.filter(Boolean).join(" · "), " · ", link)));
+}
+
+async function renderCompany(id) {
+  const back = state.lastVessel ? backButton(`vessels/${state.lastVessel.mmsi}`, state.lastVessel.name) : backButton("vessels", "Barcos");
+  fill(view, back, message("loading", "Cargando empresa…"));
+  const c = await api(`/companies/${encodeURIComponent(id)}`);
+  if (route.id !== id) return;
+  const heard = c.fleet.filter((v) => v.mmsi != null).length;
+  const sub = [
+    c.kind === "person" ? "Persona" : "Empresa",
+    c.countries.map(regionName).join(", "),
+    c.imos.length > 0 && `IMO de empresa ${c.imos.join(", ")}`,
+  ];
+  const sanctionedFleet = !c.sanctioned && c.sanctioned_vessels >= 2 && 2 * c.sanctioned_vessels >= c.vessels;
+  fill(
+    view,
+    back,
+    h("div", { class: "detail-head" }, h("h2", { class: "detail-title" }, c.name), h("div", { class: "detail-sub" }, sub.filter(Boolean).join(" · "))),
+    c.sanctioned &&
+      h(
+        "div",
+        { class: "callout" },
+        h("strong", null, svg("square", C.critical), "En listas de sanciones"),
+        c.programs ? `Programas: ${c.programs.replaceAll(";", ", ")}. ` : "",
+        "Fuente: OpenSanctions.",
+      ),
+    sanctionedFleet &&
+      h(
+        "div",
+        { class: "callout watch" },
+        h("strong", null, svg("square", C.serious), "Gestiona una flota sancionada"),
+        `${c.sanctioned_vessels} de sus ${c.vessels} barcos conocidos están en listas de sanciones.`,
+      ),
+    h(
+      "h3",
+      { class: "section-title" },
+      `Flota conocida (${c.fleet.length}: ${c.sanctioned_vessels} ${c.sanctioned_vessels === 1 ? "sancionado" : "sancionados"},` +
+        ` ${heard} ${heard === 1 ? "oído" : "oídos"} por Uatu)`,
+    ),
+    h("ul", { class: "list" }, c.fleet.map(fleetRow)),
+    h(
+      "p",
+      { class: "note" },
+      "Según OpenSanctions: listas de sanciones, inteligencia ucraniana (GUR), vetos del Paris MoU y detenciones " +
+        "de los MoU de Tokio y del mar Negro de los últimos 3 años. Puede que ya no gestione alguno de estos barcos.",
+    ),
   );
 }
 

@@ -19,6 +19,7 @@ from uatu.db import create_engine
 from uatu.log import configure_logging
 from uatu.web.basemap import service as basemap_service
 from uatu.web.basemap.router import router as basemap_router
+from uatu.web.companies.router import router as companies_router
 from uatu.web.config import WebSettings, get_settings
 from uatu.web.coverage.router import router as coverage_router
 from uatu.web.errors import COMMON_ERROR_RESPONSES, register_exception_handlers
@@ -100,6 +101,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         optical_router,
         events_router,
         vessels_router,
+        companies_router,
         coverage_router,
         basemap_router,
     ):

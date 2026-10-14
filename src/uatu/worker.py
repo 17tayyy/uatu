@@ -15,9 +15,11 @@ Operations
                         changes through ntfy, and pings a dead man's switch if configured.
 AIS
     ais.analyse         every 10 minutes: AIS gaps, encounters, loitering, vessels over cables, sanctioned
-                        vessels, identity changes... into ais_events; pushes the serious ones at once.
+                        vessels and vessels of sanctioned companies, identity changes... into ais_events;
+                        pushes the serious ones at once.
     ais.digest          08:00 and 20:00 UTC: a summary notification of the notable events of 12 h.
-    ref.sanctions       daily: sanctioned vessels from OpenSanctions.
+    ref.sanctions       daily: from OpenSanctions, sanctioned vessels, who owns and manages vessels
+                        (sanctions lists, Ukraine's GUR, port state control) and other watchlists.
     ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports.
 
     ardiq run uatu.worker:app
@@ -38,7 +40,7 @@ from pydantic import Field
 
 from uatu import db, ops
 from uatu.ais import analysis as ais_analysis
-from uatu.ais import reference
+from uatu.ais import reference, sanctions
 from uatu.ais import store as ais_store
 from uatu.ais.bathymetry import Bathymetry, load_bathymetry
 from uatu.config import BBox, ZoneSettings
@@ -137,10 +139,10 @@ async def _bathymetry(http: httpx.AsyncClient, bbox: BBox, cache: Path) -> Bathy
 
 async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
     """First start: don't wait for the scheduled refresh to have sanctions and infrastructure."""
-    sanctions, infrastructure = await ais_store.reference_loaded(engine)
+    listed, infrastructure = await ais_store.reference_loaded(engine)
     try:
-        if not sanctions:
-            await reference.refresh_sanctions(engine, http)
+        if not listed:
+            await sanctions.refresh_sanctions(engine, http)
         if not infrastructure:
             await reference.refresh_infrastructure(engine, http)
     except httpx.HTTPError as e:  # the scheduled refresh will try again
@@ -304,7 +306,7 @@ async def ais_digest() -> int:
 
 @app.cron("0 4 * * *", name="ref.sanctions", max_retries=2, backoff_ms=30 * 60_000, timeout=900)
 async def refresh_sanctions() -> int:
-    return await reference.refresh_sanctions(app.state.engine, app.state.http)
+    return len((await sanctions.refresh_sanctions(app.state.engine, app.state.http)).sanctioned)
 
 
 @app.cron("30 4 * * 1", name="ref.infrastructure", max_retries=2, backoff_ms=30 * 60_000, timeout=900)

@@ -280,6 +280,18 @@ div.row:hover { background: none; }
 
 .callout svg { flex: none; width: 12px; height: 12px; }
 
+.callout.watch { border-left-color: var(--serious); }
+
+.callout .reasons { margin: 6px 0; padding-left: 18px; }
+
+.callout .reasons li + li { margin-top: 3px; }
+
+.source-note { margin: 0 20px 10px; color: var(--ink-2); font-size: 13px; }
+
+.source-note summary { cursor: pointer; color: var(--ink); }
+
+.source-note p { margin: 6px 0 0; color: var(--muted); line-height: 1.45; }
+
 .note { padding: 12px 20px; color: var(--muted); font-size: 13px; }
 
 .links { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0 20px 14px; font-size: 13px; }
@@ -490,6 +502,7 @@ div.row:hover { background: none; }
   .tabs { padding: 0 8px; }
 
   .row, .toolbar, .kv, .stats, .detail-head, .note, .section-title, .links { padding-left: 16px; padding-right: 16px; }
+  .source-note { margin-left: 16px; margin-right: 16px; }
 
   .back { margin-left: 16px; }
 

@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from uatu.web.companies.schemas import CompanyRole
 from uatu.web.events.schemas import EventProperties
 from uatu.web.schemas import Degrees, Feature, Geometry, OneDecimal, OutputSchema, Whole
 
@@ -7,6 +8,18 @@ from uatu.web.schemas import Degrees, Feature, Geometry, OneDecimal, OutputSchem
 class Sanction(OutputSchema):
     listed_as: str
     programs: str | None
+
+
+class Risk(OutputSchema):
+    """Why a vessel off the sanctions lists is worth a look."""
+
+    level: str  # sanctioned_owner | watchlisted
+    reasons: list[str]  # in Spanish
+
+
+class Watchlisting(OutputSchema):
+    watchlist: str  # shadow_fleet | war_and_sanctions (Ukraine's GUR) | port_ban (Paris MoU)
+    note: str | None  # what the source says, in its words
 
 
 class LiveVesselProperties(OutputSchema):
@@ -20,6 +33,7 @@ class LiveVesselProperties(OutputSchema):
     heading: int | None
     received_at: datetime
     sanctioned: bool
+    risk: str | None  # off the sanctions lists: sanctioned_owner | watchlisted
 
 
 class VesselSummary(OutputSchema):
@@ -50,6 +64,9 @@ class VesselDetail(OutputSchema):
     beam_m: int | None
     destination: str | None
     sanction: Sanction | None
+    risk: Risk | None
+    watchlists: list[Watchlisting]
+    companies: list[CompanyRole]  # who owns and manages it, as far as the sources tell
     last_position: Feature[LiveVesselProperties] | None
     track: Geometry | None  # LineString of the last hours
     events: list[EventProperties]

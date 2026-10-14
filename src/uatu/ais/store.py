@@ -16,16 +16,26 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.ais.events import Event, LocalProjection, StaticReport, Track, ais_day
 from uatu.config import BBox
-from uatu.db.models import AisEvent, Infrastructure, Position, SanctionedVessel, SarDetection, Vessel
+from uatu.db.models import (
+    AisEvent,
+    Infrastructure,
+    Position,
+    SanctionedVessel,
+    SarDetection,
+    ShipCompany,
+    Vessel,
+    VesselRisk,
+)
 from uatu.db.models import StaticReport as Report
 
 # Events that span time and are re-detected on every run: a new detection that overlaps (or
 # follows within this gap) one already stored extends it instead of adding another.
-SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", "sanctioned_vessel"}
+LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel"}
+SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", *LISTED}
 MERGE_GAP = timedelta(minutes=30)
-# A sanctioned vessel's visit lasts until it has been gone this long: one alert per visit, even
+# A listed vessel's visit lasts until it has been gone this long: one alert per visit, even
 # across midnight or a stretch with no reception.
-MERGE_GAPS = {"sanctioned_vessel": timedelta(hours=12)}
+MERGE_GAPS = dict.fromkeys(LISTED, timedelta(hours=12))
 
 
 async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> list[Track]:
@@ -122,8 +132,8 @@ def valid_imo(imo: int | None) -> bool:
     return sum(d * (7 - i) for i, d in enumerate(digits[:6])) % 10 == digits[6]
 
 
-async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime) -> list[Event]:
-    """Sanctioned vessels (by IMO, or by an MMSI the lists give for them) seen in the window."""
+def _seen(start: datetime, end: datetime) -> tuple[Any, Any]:
+    """(first report, last position) of each Vessel in the window, to select alongside it."""
     last = (
         select(Position.lat, Position.lon, Position.received_at)
         .where(Position.mmsi == Vessel.mmsi, Position.received_at.between(start, end))
@@ -136,6 +146,12 @@ async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime
         .where(Position.mmsi == Vessel.mmsi, Position.received_at.between(start, end))
         .scalar_subquery()
     )
+    return first_seen, last
+
+
+async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime) -> list[Event]:
+    """Sanctioned vessels (by IMO, or by an MMSI the lists give for them) seen in the window."""
+    first_seen, last = _seen(start, end)
     by_mmsi = func.strpos(SanctionedVessel.mmsis, cast(Vessel.mmsi, Text)) > 0
     stmt = (
         select(
@@ -167,6 +183,37 @@ async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime
         }
         severity = 3 if r.by_imo else 2  # MMSIs get reassigned; an IMO stays with the hull
         events.append(Event("sanctioned_vessel", severity, r.mmsi, r.first_seen, r.lat, r.lon, details, r.received_at))
+    return events
+
+
+async def network_present(engine: AsyncEngine, start: datetime, end: datetime) -> list[Event]:
+    """Vessels off the sanctions lists seen in the window that their companies or other lists flag.
+
+    A sanctioned owner or manager is an alert; the rest (see sanctions.assess) is notable.
+    """
+    first_seen, last = _seen(start, end)
+    stmt = (
+        select(
+            first_seen.label("first_seen"),
+            Vessel.mmsi,
+            Vessel.name,
+            Vessel.imo,
+            VesselRisk.level,
+            VesselRisk.reasons,
+            last.c.lat,
+            last.c.lon,
+            last.c.received_at,
+        )
+        .join(VesselRisk, VesselRisk.imo == Vessel.imo)
+        .join(last, true())
+    )
+    async with engine.connect() as conn:
+        rows = (await conn.execute(stmt)).all()
+    events = []
+    for r in rows:
+        kind, severity = ("sanctioned_owner", 3) if r.level == "sanctioned_owner" else ("watchlisted_vessel", 2)
+        details = {"name": r.name, "imo": r.imo, "reasons": r.reasons}
+        events.append(Event(kind, severity, r.mmsi, r.first_seen, r.lat, r.lon, details, r.received_at))
     return events
 
 
@@ -380,8 +427,9 @@ async def notable_since(engine: AsyncEngine, since: datetime, min_severity: int)
 
 
 async def reference_loaded(engine: AsyncEngine) -> tuple[bool, bool]:
-    """(sanctions loaded, infrastructure loaded)."""
+    """(sanctions and the companies behind vessels loaded, infrastructure loaded)."""
     async with engine.connect() as conn:
         sanctions = await conn.scalar(select(func.count()).select_from(SanctionedVessel))
+        companies = await conn.scalar(select(func.count()).select_from(ShipCompany))
         infrastructure = await conn.scalar(select(func.count()).select_from(Infrastructure))
-    return bool(sanctions), bool(infrastructure)
+    return bool(sanctions and companies), bool(infrastructure)

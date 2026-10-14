@@ -9,8 +9,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.ais.analysis import describe
 from uatu.ais.events import Event
+from uatu.ais.sanctions import explain
 from uatu.config import BBox
-from uatu.db.models import AisEvent, Position, SanctionedVessel, SarDetection, SarScene, Vessel
+from uatu.db.models import (
+    AisEvent,
+    Position,
+    SanctionedVessel,
+    SarDetection,
+    SarScene,
+    Vessel,
+    VesselRisk,
+    WatchlistedVessel,
+)
+from uatu.web.companies.service import vessel_companies
 from uatu.web.errors import NotFoundError
 from uatu.web.events.schemas import EventProperties
 from uatu.web.geo import inside
@@ -20,9 +31,11 @@ from uatu.web.vessels.labels import flag, ship_type
 from uatu.web.vessels.schemas import (
     LiveVesselProperties,
     RadarSighting,
+    Risk,
     Sanction,
     VesselDetail,
     VesselSummary,
+    Watchlisting,
 )
 
 
@@ -51,6 +64,7 @@ def _live(row: Any) -> Feature[LiveVesselProperties]:
             heading=row.heading,
             received_at=row.received_at,
             sanctioned=row.programs is not None,
+            risk=row.level,
         ),
     )
 
@@ -61,12 +75,13 @@ async def live_vessels(
     """The last position of every vessel heard in the zone in the last `minutes`."""
     latest = _latest_positions(datetime.now(UTC) - timedelta(minutes=minutes), bbox)
     position = (latest.c.mmsi, latest.c.lat, latest.c.lon, latest.c.sog, latest.c.cog, latest.c.heading)
-    vessel = (Vessel.name, Vessel.ship_type, Vessel.length_m, SanctionedVessel.programs)
+    vessel = (Vessel.name, Vessel.ship_type, Vessel.length_m, SanctionedVessel.programs, VesselRisk.level)
     columns = (*position, latest.c.received_at, *vessel)
     rows = await db.execute(
         select(*columns)
         .outerjoin(Vessel, Vessel.mmsi == latest.c.mmsi)
         .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
+        .outerjoin(VesselRisk, VesselRisk.imo == Vessel.imo)
         .order_by(latest.c.mmsi)
         .limit(limit)
     )
@@ -99,11 +114,22 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
     if vessel is None and not heard:
         raise NotFoundError("Vessel")
 
-    sanction = None
+    sanction, risk, watchlists, companies = None, None, [], []
     if vessel is not None and vessel.imo is not None:
         listed = await db.scalar(select(SanctionedVessel).where(SanctionedVessel.imo == vessel.imo))
         if listed is not None:
             sanction = Sanction(listed_as=listed.name, programs=listed.programs)
+        if (flagged := await db.get(VesselRisk, vessel.imo)) is not None:
+            risk = Risk(level=flagged.level, reasons=[explain(r) for r in flagged.reasons])
+        watchlists = [
+            Watchlisting(watchlist=w.watchlist, note=w.note)
+            for w in await db.scalars(
+                select(WatchlistedVessel)
+                .where(WatchlistedVessel.imo == vessel.imo)
+                .order_by(WatchlistedVessel.watchlist)
+            )
+        ]
+        companies = await vessel_companies(db, vessel.imo)
 
     since = datetime.now(UTC) - timedelta(hours=track_hours)
     fixes = (
@@ -132,6 +158,7 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
                 heading=last.heading,
                 received_at=last.received_at,
                 sanctioned=sanction is not None,
+                risk=risk.level if risk else None,
             ),
         )
 
@@ -165,6 +192,9 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
         beam_m=vessel.beam_m if vessel else None,
         destination=vessel.destination if vessel else None,
         sanction=sanction,
+        risk=risk,
+        watchlists=watchlists,
+        companies=companies,
         last_position=last_position,
         track=Geometry(type="LineString", coordinates=[[round(f.lon, 5), round(f.lat, 5)] for f in fixes])
         if len(fixes) > 1

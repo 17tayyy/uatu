@@ -1,7 +1,7 @@
 """Uatu's database schema. Change it here, then generate a migration with `alembic revision --autogenerate`."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, ClassVar
 
 from geoalchemy2 import Geography, WKBElement
@@ -279,6 +279,61 @@ class SanctionedVessel(Base):
     sanctions: Mapped[str | None]
     source_id: Mapped[str] = mapped_column(comment="OpenSanctions entity id")
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ShipCompany(Base):
+    """A company, or person, that owns, manages or insures vessels (from OpenSanctions)."""
+
+    __tablename__ = "ship_companies"
+
+    id: Mapped[str] = mapped_column(primary_key=True, comment="OpenSanctions entity id")
+    name: Mapped[str]
+    kind: Mapped[str] = mapped_column(comment="company | person")
+    countries: Mapped[str | None] = mapped_column(comment="';'-separated")
+    imos: Mapped[str | None] = mapped_column(comment="IMO company numbers, ';'-separated")
+    sanctioned: Mapped[bool]
+    programs: Mapped[str | None] = mapped_column(comment="sanctions programmes, ';'-separated")
+    vessels: Mapped[int] = mapped_column(comment="vessels it owns or manages, as far as the sources tell")
+    sanctioned_vessels: Mapped[int] = mapped_column(comment="of those, on sanctions lists")
+
+
+class ShipLink(Base):
+    """One source saying that a company owns, manages or insures a vessel."""
+
+    __tablename__ = "ship_links"
+    __table_args__ = (Index("ix_ship_links_vessel_imo", "vessel_imo"),)
+
+    id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
+    vessel_imo: Mapped[int]
+    vessel_name: Mapped[str] = mapped_column(comment="as the source names it")
+    company_id: Mapped[str] = mapped_column(ForeignKey("ship_companies.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(comment="owner | commercial_manager | ism_manager | insurer | linked")
+    role_label: Mapped[str | None] = mapped_column(comment="the role in the source's words")
+    since: Mapped[date | None] = mapped_column(comment="start of the relationship, when the source gives it")
+    as_of: Mapped[date | None] = mapped_column(comment="date of the record it comes from (an inspection...)")
+    source: Mapped[str] = mapped_column(comment="OpenSanctions dataset")
+
+
+class WatchlistedVessel(Base):
+    """A vessel on a list other than sanctions: the shadow fleet, banned from European ports..."""
+
+    __tablename__ = "watchlisted_vessels"
+
+    imo: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    watchlist: Mapped[str] = mapped_column(primary_key=True, comment="shadow_fleet | war_and_sanctions | port_ban")
+    name: Mapped[str]
+    note: Mapped[str | None] = mapped_column(comment="what the source says about it")
+    source_id: Mapped[str] = mapped_column(comment="OpenSanctions entity id")
+
+
+class VesselRisk(Base):
+    """A vessel off the sanctions lists that its owners, managers or other lists make worth a look."""
+
+    __tablename__ = "vessel_risks"
+
+    imo: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    level: Mapped[str] = mapped_column(comment="sanctioned_owner | watchlisted")
+    reasons: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, comment="see uatu.ais.sanctions.assess")
 
 
 class Infrastructure(Base):
