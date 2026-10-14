@@ -14,10 +14,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from uatu.config import bbox_polygon
 from uatu.db import create_engine
 from uatu.log import configure_logging
-from uatu.sar.raster import Grid
 from uatu.web.basemap import service as basemap_service
 from uatu.web.basemap.router import router as basemap_router
 from uatu.web.config import WebSettings, get_settings
@@ -30,20 +28,24 @@ from uatu.web.passes.router import router as passes_router
 from uatu.web.schemas import FeatureCollection
 from uatu.web.status.router import router as status_router
 from uatu.web.vessels.router import router as vessels_router
+from uatu.web.zones.router import router as zones_router
+from uatu.zones import grid_of, land_path
 
 log = structlog.get_logger(component="web")
 
 STATIC_DIR = Path(__file__).parent / "static"
-SAR_RESOLUTION_M = 10.0  # the grid the worker builds the land mask on
 
 
 def load_land(settings: WebSettings) -> FeatureCollection:
-    """Land outlines: detailed where the worker has built its land mask, coarse around it (and until then)."""
-    grid = Grid.covering(bbox_polygon(settings.sar_bbox), SAR_RESOLUTION_M)
-    path = settings.sar_data_dir / "cache" / f"land_{grid.key}.tif"
-    if not path.exists():
-        log.warning("web.no_land_mask", path=str(path))
-    return basemap_service.land(grid, path if path.exists() else None)
+    """Land outlines: detailed in the zones whose land mask the worker has built, coarse elsewhere."""
+    masks = []
+    for zone in settings.zones:
+        path = land_path(zone, settings.sar_data_dir / "cache")
+        if path.exists():
+            masks.append((grid_of(zone), path, zone.bbox))
+        else:
+            log.warning("web.no_land_mask", zone=zone.key, path=str(path))
+    return basemap_service.land(masks)
 
 
 @asynccontextmanager
@@ -85,7 +87,15 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.add_middleware(RequestContextMiddleware)  # outermost: its request id covers everything
 
     api = APIRouter(prefix="/api/v1")
-    for router in (status_router, passes_router, events_router, vessels_router, coverage_router, basemap_router):
+    for router in (
+        zones_router,
+        status_router,
+        passes_router,
+        events_router,
+        vessels_router,
+        coverage_router,
+        basemap_router,
+    ):
         api.include_router(router)
     app.include_router(api)
     app.include_router(health_router)

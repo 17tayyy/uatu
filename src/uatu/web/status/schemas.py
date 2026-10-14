@@ -7,6 +7,7 @@ class LatestPass(OutputSchema):
     id: str  # see passes
     acquired_at: datetime
     platform: str
+    zone: str
 
 
 class Status(OutputSchema):

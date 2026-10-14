@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from geoalchemy2 import Geometry as GeometryType
+from shapely.geometry import shape
 from sqlalchemy import Select, and_, case, cast, func, not_, or_, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from uatu.config import BBox, bbox_polygon
-from uatu.db.models import IngestSession, SarAisCheck, SarDetection, SarFixedObject, SarScene, Vessel
+from uatu.config import ZONES, bbox_polygon
+from uatu.db.models import RecordedZone, SarAisCheck, SarDetection, SarFixedObject, SarScene, Vessel
 from uatu.sar.analysis import DEFAULT_PAIRING
 from uatu.sar.store import RECEPTION_GAP_MINUTES
 from uatu.web.errors import NotFoundError
@@ -29,7 +30,7 @@ from uatu.web.passes.schemas import (
 )
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
 
-PASS_ID_PATTERN = r"^S1[A-Z]-[0-9A-F]{6}$"  # platform-datatake, e.g. S1C-013AD6
+PASS_ID_PATTERN = r"^S1[A-Z]-[0-9A-F]{6}-[a-z]{3,16}$"  # platform-datatake-zone, e.g. S1C-013AD6-estrecho
 _AT_FIXED = func.coalesce(
     SarDetection.fixed_object_id.in_(select(SarFixedObject.id).where(SarFixedObject.fixed)), False
 )
@@ -44,8 +45,13 @@ _KIND = case(
 )
 
 
-def pass_id(platform: str, datatake: str) -> str:
-    return f"{platform}-{datatake}"
+def pass_id(platform: str, datatake: str, zone: str) -> str:
+    return f"{platform}-{datatake}-{zone}"
+
+
+def _parse(id_: str) -> tuple[str, str, str]:
+    platform, datatake, zone = id_.split("-")
+    return platform, datatake, zone
 
 
 def _detection_counts() -> Any:
@@ -69,10 +75,8 @@ def _detection_counts() -> Any:
     )
 
 
-def _summaries(bbox: BBox) -> Select:
+def _summaries() -> Select:
     counts = _detection_counts()
-    recording_since = select(func.min(IngestSession.connected_at)).scalar_subquery()
-    area = func.ST_GeomFromText(bbox_polygon(bbox).wkt, 4326)
     # The frames of a pass abut with slivers of ~100 m between their footprints: close them (< 1 km).
     union = func.ST_Union(cast(SarScene.footprint, GeometryType))
     footprint = func.ST_Buffer(func.ST_Buffer(union, 0.005, "join=mitre"), -0.005, "join=mitre")
@@ -80,64 +84,78 @@ def _summaries(bbox: BBox) -> Select:
         select(
             SarScene.platform,
             SarScene.datatake,
+            SarScene.zone,
             func.min(SarScene.acquired_from).label("acquired_at"),
             func.min(SarScene.orbit_direction).label("orbit_direction"),
             func.array_agg(aggregate_order_by(SarScene.id, SarScene.acquired_from)).label("frame_ids"),
             func.array_agg(aggregate_order_by(SarScene.name, SarScene.acquired_from)).label("frame_names"),
             func.ST_AsGeoJSON(footprint, 5).label("footprint_json"),
-            # Like each frame's own coverage: share of the area's lon/lat polygon, frames' overlap counted once.
-            (func.ST_Area(func.ST_Intersection(footprint, area)) / func.ST_Area(area)).label("coverage"),
             *(func.coalesce(func.sum(counts.c[k]), 0).label(k) for k in counts.c.keys() if k != "scene_id"),
         )
+        .join(RecordedZone, RecordedZone.key == SarScene.zone)
         .outerjoin(counts, counts.c.scene_id == SarScene.id)
-        .where(SarScene.status == "processed", SarScene.acquired_from >= recording_since)
-        .group_by(SarScene.platform, SarScene.datatake)
+        .where(SarScene.status == "processed", SarScene.acquired_from >= RecordedZone.since)
+        .group_by(SarScene.platform, SarScene.datatake, SarScene.zone)
     )
 
 
-def _overlay_dir(data_dir: Path, scene_name: str) -> Path:
-    return data_dir / scene_name.removesuffix(".SAFE")
+def _overlay_dir(data_dir: Path, zone: str, scene_name: str) -> Path:
+    return data_dir / zone / scene_name.removesuffix(".SAFE")
+
+
+def _coverage(footprint: Geometry, zone: str) -> float:
+    """Share of the zone's lon/lat box that the pass imaged, like each frame's own coverage."""
+    if zone not in ZONES:
+        return 0.0
+    area = bbox_polygon(ZONES[zone].bbox)
+    return round(min(shape(footprint.model_dump()).intersection(area).area / area.area, 1.0), 2)
 
 
 def _summary(row: Any, data_dir: Path) -> PassSummary:
+    footprint = Geometry.model_validate_json(row.footprint_json)
     return PassSummary(
-        id=pass_id(row.platform, row.datatake),
+        id=pass_id(row.platform, row.datatake, row.zone),
         platform=row.platform,
+        zone=row.zone,
         acquired_at=row.acquired_at,
         orbit_direction=row.orbit_direction,
-        coverage=round(min(row.coverage or 0.0, 1.0), 2),
+        coverage=_coverage(footprint, row.zone),
         frames=len(row.frame_names),
         detections=row.detections,
         matched=row.matched,
         no_coverage=row.no_coverage,
         fixed=row.fixed,
         candidates=row.candidates,
-        footprint=Geometry.model_validate_json(row.footprint_json),
-        has_image=any((_overlay_dir(data_dir, n) / "backscatter.png").exists() for n in row.frame_names),
+        footprint=footprint,
+        has_image=any((_overlay_dir(data_dir, row.zone, n) / "backscatter.png").exists() for n in row.frame_names),
     )
 
 
-async def list_passes(db: AsyncSession, data_dir: Path, bbox: BBox, limit: int) -> list[PassSummary]:
+async def list_passes(db: AsyncSession, data_dir: Path, zones: list[str], limit: int) -> list[PassSummary]:
+    """Passes over the zones since AIS was recorded in each, latest first."""
     stmt = (
-        _summaries(bbox)
-        .order_by(func.min(SarScene.acquired_from).desc(), SarScene.platform, SarScene.datatake)
+        _summaries()
+        .where(SarScene.zone.in_(zones))
+        .order_by(func.min(SarScene.acquired_from).desc(), SarScene.platform, SarScene.datatake, SarScene.zone)
         .limit(limit)
     )
     return [_summary(row, data_dir) for row in (await db.execute(stmt)).all()]
 
 
-async def _pass_row(db: AsyncSession, bbox: BBox, id_: str) -> Any:
-    platform, datatake = id_.split("-")
+async def _pass_row(db: AsyncSession, id_: str) -> Any:
+    platform, datatake, zone = _parse(id_)
     row = (
-        await db.execute(_summaries(bbox).where(SarScene.platform == platform, SarScene.datatake == datatake))
+        await db.execute(
+            _summaries().where(SarScene.platform == platform, SarScene.datatake == datatake, SarScene.zone == zone)
+        )
     ).first()
     if row is None:
         raise NotFoundError("Pass")
     return row
 
 
-async def get_pass(db: AsyncSession, data_dir: Path, bbox: BBox, id_: str) -> PassDetail:
-    row = await _pass_row(db, bbox, id_)
+async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
+    row = await _pass_row(db, id_)
     summary = _summary(row, data_dir)
 
     paired, suspect = Vessel.__table__.alias("paired"), Vessel.__table__.alias("suspect")
@@ -170,7 +188,7 @@ async def get_pass(db: AsyncSession, data_dir: Path, bbox: BBox, id_: str) -> Pa
 
     images = []
     for frame, name in enumerate(row.frame_names):
-        png, corners = (_overlay_dir(data_dir, name) / f for f in ("backscatter.png", "backscatter.json"))
+        png, corners = (_overlay_dir(data_dir, row.zone, name) / f for f in ("backscatter.png", "backscatter.json"))
         if png.exists() and corners.exists():
             version = int(png.stat().st_mtime)  # browsers cache it: a new image, a new URL
             images.append(
@@ -233,17 +251,22 @@ async def get_pass(db: AsyncSession, data_dir: Path, bbox: BBox, id_: str) -> Pa
 
 
 async def get_pass_image(db: AsyncSession, data_dir: Path, id_: str, frame: int) -> Path:
-    platform, datatake = id_.split("-")
+    platform, datatake, zone = _parse(id_)
     names = (
         await db.scalars(
             select(SarScene.name)
-            .where(SarScene.platform == platform, SarScene.datatake == datatake, SarScene.status == "processed")
+            .where(
+                SarScene.platform == platform,
+                SarScene.datatake == datatake,
+                SarScene.zone == zone,
+                SarScene.status == "processed",
+            )
             .order_by(SarScene.acquired_from)
         )
     ).all()
     if frame >= len(names):
         raise NotFoundError("Pass image")
-    path = _overlay_dir(data_dir, names[frame]) / "backscatter.png"
+    path = _overlay_dir(data_dir, zone, names[frame]) / "backscatter.png"
     if not path.exists():
         raise NotFoundError("Pass image")
     return path
