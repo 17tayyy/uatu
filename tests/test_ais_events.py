@@ -83,8 +83,10 @@ def test_no_gap_without_coverage_near_the_edge_or_in_port():
     edge = track(1, range(0, 61), lat=35.55, lon=-5.6)  # 5 km from the area's southern edge
     others = neighbours(4, range(0, 181), offset_deg=-0.44)
     assert detect_gaps([edge, *others], now, STRAIT_OF_GIBRALTAR, at_sea(10), PROJ) == []
-    [in_port] = detect_gaps([silent, *neighbours(4, range(0, 181))], now, STRAIT_OF_GIBRALTAR, at_sea(1), PROJ)
-    assert in_port.severity == 1
+    # In a harbour vessels go quiet all the time: not kept at all. A little further out, kept.
+    assert detect_gaps([silent, *neighbours(4, range(0, 181))], now, STRAIT_OF_GIBRALTAR, at_sea(1), PROJ) == []
+    [inshore] = detect_gaps([silent, *neighbours(4, range(0, 181))], now, STRAIT_OF_GIBRALTAR, at_sea(3), PROJ)
+    assert inshore.mmsi == 1 and inshore.details["coast_km"] == 3
 
 
 def test_a_gap_that_ends_records_where_the_vessel_reappeared():
@@ -123,6 +125,8 @@ def test_no_encounter_when_apart_moving_brief_or_in_port():
         [a, track(2, minutes, lat=LAT0 + 0.002, sog=0.3)], T0, T0 + 180 * 60, at_sea(2), PROJ
     )
     assert bunkering.severity == 1  # near the coast: most likely routine
+    moored = track(2, minutes, lat=LAT0 + 0.002, sog=0.0)
+    assert meet(a, moored, coast_km=0.5) == []  # in a harbour: side by side for days, not a meeting
 
 
 # --- loitering, infrastructure ---------------------------------------------------------------------

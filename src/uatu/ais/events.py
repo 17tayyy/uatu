@@ -63,7 +63,9 @@ class Params:
     local_coverage_radius_m: float = 5_000
     min_reports_per_vessel: float = 3.0
     edge_margin_m: float = 10_000  # a vessel silent this close to the area's edge simply left it
-    in_port_m: float = 2_000  # closer to the coast than this: harbour or anchorage
+    # Closer to the coast than this: a harbour or an anchorage by it. Vessels moored side by side and
+    # going quiet there are harbour life: hundreds of pairs a day in Barcelona's marinas alone.
+    in_port_m: float = 2_000
     moving_sog: float = 2.0  # a vessel going silent at this speed or more was under way
     # Vessels stopped around a place make it an anchorage or waiting area. Ships waiting east of
     # Gibraltar drift kilometres apart: 8 km and 4 vessels found that area on the first day's data.
@@ -130,7 +132,8 @@ def detect_gaps(
     it (so neither aisstream's coverage nor Uatu was blind there), and if, sailing on at its
     last speed and course, the vessel would not simply have left the area. Silences matter
     most for a vessel under way at sea; heading into port (where aisstream hears little),
-    stopped, or with patchy reception all along, they are only informative.
+    stopped, or with patchy reception all along, they are only informative. In a harbour they
+    are not kept at all.
     """
     all_t, all_x, all_y, all_mmsi = _all_fixes(tracks, proj)
 
@@ -155,6 +158,9 @@ def detect_gaps(
             if heard < p.coverage_min_vessels:
                 continue
             covered_here = _well_covered(*_heard_around(*fixes, x[0], y[0], p.local_coverage_radius_m), p)
+            coast_m = float(coast(tr.lon[i : i + 1], tr.lat[i : i + 1])[0])
+            if coast_m < p.in_port_m:  # NaN (unknown) counts as at sea
+                continue
             course = _dead_reckoning(tr, i, p.gap_min_s, proj)
             heard_ahead = None
             covered_ahead = True
@@ -168,7 +174,6 @@ def detect_gaps(
                 # hole in aisstream's coverage (like the one west of Tarifa) rather than switching off.
                 heard_ahead, reports_ahead = _heard_around(*fixes, cx[-1], cy[-1], p.local_coverage_radius_m)
                 covered_ahead = _well_covered(heard_ahead, reports_ahead, p)
-            coast_m = float(coast(tr.lon[i : i + 1], tr.lat[i : i + 1])[0])
             details: dict = {
                 "sog": _num(tr.sog[i]),
                 "cog": _num(tr.cog[i]),
@@ -194,9 +199,8 @@ def detect_gaps(
             if not covered_ahead:
                 details["poor_reception_ahead"] = True
             under_way = tr.sog[i] >= p.moving_sog
-            at_sea = not coast_m < p.in_port_m  # NaN (unknown) counts as at sea
             covered = covered_here and covered_ahead
-            severity = 2 if under_way and at_sea and not heading_to_port and covered else 1
+            severity = 2 if under_way and not heading_to_port and covered else 1
             resumed_at = _utc(resumed) if resumed is not None else None
             lat, lon = float(tr.lat[i]), float(tr.lon[i])
             events.append(Event("ais_gap", severity, tr.mmsi, _utc(start), lat, lon, details, resumed_at))
@@ -252,7 +256,8 @@ def detect_encounters(
     tracks: Sequence[Track], start: float, end: float, coast: CoastFn, proj: LocalProjection, p: Params = DEFAULT_PARAMS
 ) -> list[Event]:
     """Pairs of vessels both nearly stopped within encounter_distance_m of each other for a while:
-    the signature of ship-to-ship transfers (and, near ports, of routine bunkering)."""
+    the signature of ship-to-ship transfers (and, near ports, of routine bunkering). Not kept in a
+    harbour, where vessels lie side by side for days."""
     bins = np.arange(start + p.bin_s, end + 1, p.bin_s)
     together: dict[tuple[int, int], list[tuple[int, float, float, float]]] = defaultdict(list)
     for b, at in enumerate(bins):
@@ -286,6 +291,8 @@ def detect_encounters(
             lon = float(np.mean([s[2] for s in during]))
             lat = float(np.mean([s[3] for s in during]))
             coast_m = float(coast(np.array([lon]), np.array([lat]))[0])
+            if coast_m < p.in_port_m:
+                continue
             severity = 2 if coast_m >= p.offshore_m else 1
             details = {
                 "hours": round(duration / 3600, 1),

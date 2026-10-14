@@ -125,7 +125,9 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
   others around it are still heard. Others must also be heard where it was heading, or it may
   just have sailed out of coverage.
 - **Encounters**: two vessels within 500 m, both under 2 knots, for over 2 hours, away from the
-  coast. That is the signature of a ship-to-ship transfer.
+  coast. That is the signature of a ship-to-ship transfer. Within 2 km of the coast they are not
+  kept: the first day of Catalonia brought 1,600 "encounters" of yachts moored side by side in
+  Barcelona's marinas.
 - **Loitering**: nearly stopped for over 3 hours, away from the coast.
 - **Vessels over infrastructure**: under 3 knots for over 30 minutes within 1 km of a submarine
   cable or pipeline. It is an alert only where the water is at most 200 m deep (EMODnet
