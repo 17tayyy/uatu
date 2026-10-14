@@ -5,12 +5,15 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from uatu.config import BBox
 from uatu.db.models import AisEvent, IngestSession, Position, SarScene
+from uatu.web.geo import inside
 from uatu.web.passes.service import pass_id
 from uatu.web.status.schemas import LatestPass, Status
 
 
-async def status(db: AsyncSession) -> Status:
+async def status(db: AsyncSession, bbox: BBox) -> Status:
+    """Recording is global; what was seen is counted within the zone."""
     now = datetime.now(UTC)
     session = (
         await db.execute(
@@ -21,13 +24,16 @@ async def status(db: AsyncSession) -> Status:
     ).first()
     last_ais_at = await db.scalar(select(func.max(IngestSession.last_message_at)))
     vessels = await db.scalar(
-        select(func.count(distinct(Position.mmsi))).where(Position.received_at >= now - timedelta(hours=1))
+        select(func.count(distinct(Position.mmsi))).where(
+            Position.received_at >= now - timedelta(hours=1), inside(Position.lat, Position.lon, bbox)
+        )
     )
     day_ago = now - timedelta(hours=24)
     events = await db.execute(
         select(AisEvent.severity, func.count())
         .where(
             AisEvent.severity >= 2,
+            inside(AisEvent.lat, AisEvent.lon, bbox),
             or_(AisEvent.start_at >= day_ago, AisEvent.end_at.is_(None), AisEvent.end_at >= day_ago),
         )
         .group_by(AisEvent.severity)

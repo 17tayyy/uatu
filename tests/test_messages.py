@@ -135,3 +135,12 @@ def test_malformed_messages_are_invalid(bad):
 )
 def test_parse_time_utc(value, expected):
     assert parse_time_utc(value) == expected
+
+
+def test_the_recorder_subscribes_to_every_zone(monkeypatch):
+    from uatu.recorder.config import RecorderSettings
+
+    monkeypatch.setenv("AISSTREAM_API_KEY", "test")
+    monkeypatch.setenv("ZONES", "estrecho,cataluna")
+    boxes = RecorderSettings(_env_file=None).bounding_boxes
+    assert boxes == [[[35.5, -6.5], [36.5, -4.5]], [[40.5, 0.5], [41.7, 2.7]]]

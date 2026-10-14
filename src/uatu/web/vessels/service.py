@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.ais.analysis import describe
 from uatu.ais.events import Event
+from uatu.config import BBox
 from uatu.db.models import AisEvent, Position, SanctionedVessel, SarDetection, SarScene, Vessel
 from uatu.web.errors import NotFoundError
 from uatu.web.events.schemas import EventProperties
+from uatu.web.geo import inside
 from uatu.web.passes.service import pass_id
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
 from uatu.web.vessels.labels import flag, ship_type
@@ -24,10 +26,11 @@ from uatu.web.vessels.schemas import (
 )
 
 
-def _latest_positions(since: datetime) -> Any:
+def _latest_positions(since: datetime, bbox: BBox) -> Any:
+    """Each vessel's latest position within the zone since `since`."""
     return (
         select(Position)
-        .where(Position.received_at >= since)
+        .where(Position.received_at >= since, inside(Position.lat, Position.lon, bbox))
         .ext(distinct_on(Position.mmsi))
         .order_by(Position.mmsi, Position.received_at.desc())
         .subquery()
@@ -52,9 +55,11 @@ def _live(row: Any) -> Feature[LiveVesselProperties]:
     )
 
 
-async def live_vessels(db: AsyncSession, minutes: float, limit: int) -> FeatureCollection[LiveVesselProperties]:
-    """The last position of every vessel heard in the last `minutes`."""
-    latest = _latest_positions(datetime.now(UTC) - timedelta(minutes=minutes))
+async def live_vessels(
+    db: AsyncSession, bbox: BBox, minutes: float, limit: int
+) -> FeatureCollection[LiveVesselProperties]:
+    """The last position of every vessel heard in the zone in the last `minutes`."""
+    latest = _latest_positions(datetime.now(UTC) - timedelta(minutes=minutes), bbox)
     position = (latest.c.mmsi, latest.c.lat, latest.c.lon, latest.c.sog, latest.c.cog, latest.c.heading)
     vessel = (Vessel.name, Vessel.ship_type, Vessel.length_m, SanctionedVessel.programs)
     columns = (*position, latest.c.received_at, *vessel)

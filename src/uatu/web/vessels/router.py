@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
-from uatu.web.dependencies import DbSession
+from uatu.web.dependencies import DbSession, Settings
 from uatu.web.schemas import DataResponse, FeatureCollection
 from uatu.web.vessels import service as vessel_service
 from uatu.web.vessels.schemas import LiveVesselProperties, VesselDetail, VesselSummary
@@ -13,11 +13,12 @@ router = APIRouter(prefix="/vessels", tags=["vessels"])
 @router.get("/live")
 async def live_vessels(
     db: DbSession,
+    settings: Settings,
     minutes: Annotated[float, Query(gt=0, le=24 * 60)] = 60,
     limit: Annotated[int, Query(ge=1, le=2000)] = 1000,
 ) -> DataResponse[FeatureCollection[LiveVesselProperties]]:
-    """Last position of every vessel heard in the last `minutes`."""
-    return DataResponse(data=await vessel_service.live_vessels(db, minutes, limit))
+    """Last position of every vessel heard in the area in the last `minutes`."""
+    return DataResponse(data=await vessel_service.live_vessels(db, settings.ais_bbox, minutes, limit))
 
 
 @router.get("")

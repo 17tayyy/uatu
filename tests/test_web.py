@@ -48,6 +48,7 @@ needs_db = pytest.mark.skipif(
 )
 
 MMSI_A, MMSI_B, MMSI_C, MMSI_SILENT = 999_000_101, 999_000_102, 999_000_103, 999_000_104
+MMSI_BARCELONA = 999_000_105  # in another zone: never in the Strait's dashboard
 NOW = datetime.now(UTC)
 SCENE_ID, SCENE2_ID = uuid.uuid4(), uuid.uuid4()  # two frames of one pass
 SCENE_NAME = f"S1C_IW_GRDH_1SDV_TEST_{SCENE_ID.hex[:8]}_COG.SAFE"
@@ -93,6 +94,7 @@ async def rows():
                         "cog": 270.04,
                     }
                 )
+        positions.append(positions[0] | {"mmsi": MMSI_BARCELONA, "lat": 41.35, "lon": 2.2})
         await conn.execute(insert(Position), positions)
         frame = {"platform": "S1C", "datatake": DATATAKE, "orbit_direction": "DESCENDING", "relative_orbit": 1}
         await conn.execute(
@@ -191,11 +193,23 @@ async def rows():
                 details={"imo": 9_999_901, "name": "TEST ALFA", "listed_as": "IMO 9999901", "programs": "TEST-1"},
             )
         )
+        await conn.execute(
+            insert(AisEvent).values(
+                key=f"{EVENT_KEY}:barcelona",
+                kind="loitering",
+                severity=3,
+                mmsi=MMSI_BARCELONA,
+                start_at=NOW - timedelta(minutes=30),
+                lat=41.35,
+                lon=2.2,
+                details={"hours": 3.0, "coast_km": 5.0},
+            )
+        )
     yield
     async with engine.begin() as conn:
-        mmsis = [MMSI_A, MMSI_B, MMSI_C, MMSI_SILENT]
+        mmsis = [MMSI_A, MMSI_B, MMSI_C, MMSI_SILENT, MMSI_BARCELONA]
         await conn.execute(delete(SarScene).where(SarScene.id.in_([SCENE_ID, SCENE2_ID])))  # and their detections
-        await conn.execute(delete(AisEvent).where(AisEvent.key == EVENT_KEY))
+        await conn.execute(delete(AisEvent).where(AisEvent.key.like(f"{EVENT_KEY}%")))
         await conn.execute(delete(Position).where(Position.mmsi.in_(mmsis)))
         await conn.execute(delete(Vessel).where(Vessel.mmsi.in_(mmsis)))
         await conn.execute(delete(IngestSession).where(IngestSession.id == SESSION_ID))
@@ -266,6 +280,7 @@ async def test_events(client):
     ours = next(f for f in events["features"] if f["properties"]["mmsi"] == MMSI_A)
     assert ours["properties"]["title"] == "Barco sancionado en la zona: TEST ALFA"
     assert ours["geometry"] == {"type": "Point", "coordinates": [CELL[1], CELL[0]]}
+    assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in events["features"])
 
 
 @needs_db
@@ -275,6 +290,7 @@ async def test_vessels(client):
     assert alfa["name"] == "TEST ALFA"
     assert alfa["sog"] == 12.3
     assert alfa["cog"] == 270
+    assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in live["features"])
 
     found = await ok(client, "/api/v1/vessels?q=test%20bra")
     assert [v["mmsi"] for v in found] == [MMSI_B]
