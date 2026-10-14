@@ -63,13 +63,16 @@ configure_logging(settings.log_level, settings.log_format)
 log = structlog.get_logger(component="worker")
 
 # One task at a time: processing a scene takes ~0.8 GB of RAM. Historical scenes go on the
-# "backfill" lane, which is only consumed when nothing else is waiting.
+# "backfill" lane, which is only consumed when nothing else is waiting. No prefetching: a
+# periodic task (health, AIS analysis) then waits at most for the scene being processed,
+# rather than also for one already taken off the queue (a backfill download can take 12 min).
 app = Ardiq(
     redis_url=settings.redis_url,
     queue_name="uatu",
     priorities=["backfill", "default"],
     default_priority="default",
     concurrency=1,
+    prefetch=1,
 )
 AOI = bbox_polygon(settings.sar_bbox)
 LOST_AFTER = timedelta(hours=2)
