@@ -50,7 +50,7 @@ const RECEPTION = {
 };
 
 const LAYERS = {
-  satellite: { label: "Satélite (óptico)", hint: "fondo", on: false, ids: ["satellite"] },
+  satellite: { label: "Satélite (óptico)", hint: "tierra", on: true, ids: ["satellite"] },
   recent: { label: "Radar reciente", hint: "7 días", on: true, ids: ["radar-recent"] },
   radar: { label: "Imagen radar", on: true, ids: ["radar-0", "radar-1", "radar-2", "radar-3"] }, // one per frame
   detections: { label: "Detecciones radar", on: true, ids: ["footprint", "detections"] },
@@ -233,7 +233,7 @@ function scopeArea() {
 function loadLayerPrefs() {
   const prefs = Object.fromEntries(Object.entries(LAYERS).map(([key, layer]) => [key, layer.on]));
   try {
-    Object.assign(prefs, JSON.parse(localStorage.getItem("uatu.layers") ?? "{}"));
+    Object.assign(prefs, JSON.parse(localStorage.getItem("uatu.layers.v2") ?? "{}"));
   } catch {
     // private window or blocked storage: defaults
   }
@@ -242,7 +242,7 @@ function loadLayerPrefs() {
 
 function saveLayerPrefs() {
   try {
-    localStorage.setItem("uatu.layers", JSON.stringify(state.layers));
+    localStorage.setItem("uatu.layers.v2", JSON.stringify(state.layers));
   } catch {
     // not remembered: fine
   }
@@ -340,23 +340,13 @@ function addLayers() {
   // Land under the radar images (which show the land too where the satellite imaged it), the
   // coastline over them.
   map.addLayer({ id: "land", type: "fill", source: "land", paint: { "fill-color": C.land } });
-  // Optical imagery underneath everything, for detail: Sentinel-2 cloudless, a yearly mosaic by EOX.
-  map.addSource("satellite", {
-    type: "raster",
-    tiles: ["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/{z}/{y}/{x}.jpg"],
-    tileSize: 256,
-    maxzoom: 15,
-    attribution:
-      '<a href="https://s2maps.eu" target="_blank" rel="noopener noreferrer">Sentinel-2 cloudless</a> by EOX IT Services GmbH (contiene datos modificados de Copernicus Sentinel 2025)',
-  });
-  map.addLayer({ id: "satellite", type: "raster", source: "satellite", paint: { "raster-fade-duration": 0 } });
   // The latest radar image of every place: the passes of the last days, newest on top.
   map.addSource("radar-recent", { type: "raster", tiles: [recentRadarUrl()], tileSize: 256, minzoom: 5, maxzoom: 14 });
   map.addLayer({
     id: "radar-recent",
     type: "raster",
     source: "radar-recent",
-    paint: { "raster-opacity": 0.9, "raster-brightness-max": 0.7, "raster-fade-duration": 0 },
+    paint: { "raster-opacity": 0.95, "raster-brightness-max": 0.9, "raster-fade-duration": 0 },
   });
   map.addLayer({
     id: "coverage",
@@ -553,7 +543,7 @@ function showRadarImage(pass) {
         type: "raster",
         source: id,
         layout: { visibility: state.layers.radar ? "visible" : "none" },
-        paint: { "raster-opacity": 0.9, "raster-brightness-max": 0.7, "raster-fade-duration": 0 },
+        paint: { "raster-opacity": 0.95, "raster-brightness-max": 0.9, "raster-fade-duration": 0 },
       },
       "coverage",
     );
@@ -1456,6 +1446,27 @@ async function refresh() {
   }
 }
 
+/** Optical imagery on land, under the radar (which shows the sea): MapTiler, or Sentinel-2 cloudless. */
+function addSatellite(layer) {
+  map.addSource("satellite", {
+    type: "raster",
+    tiles: layer.tiles,
+    tileSize: layer.tile_size,
+    maxzoom: layer.max_zoom,
+    attribution: layer.attribution,
+  });
+  map.addLayer(
+    {
+      id: "satellite",
+      type: "raster",
+      source: "satellite",
+      layout: { visibility: state.layers.satellite ? "visible" : "none" },
+      paint: { "raster-fade-duration": 0, "raster-saturation": -0.15 },
+    },
+    "radar-recent",
+  );
+}
+
 function renderZoneSelect() {
   const select = document.getElementById("zone");
   fill(
@@ -1495,7 +1506,8 @@ async function start() {
   addLayers();
   wireMapEvents();
   renderLayers();
-  const [zones, land] = await Promise.all([api("/zones"), api("/map/land")]);
+  const [zones, land, satellite] = await Promise.all([api("/zones"), api("/map/land"), api("/map/satellite")]);
+  addSatellite(satellite);
   state.zones = zones.zones;
   state.wholeCoast = zones.whole_coast;
   if (state.zone !== ALL && !state.zones.some((z) => z.key === state.zone)) state.zone = ALL;

@@ -143,28 +143,31 @@ def write_overlay(grey: np.ndarray, grid: Grid, png_path: Path, corners_path: Pa
 
 
 def radar_image(source: Path, path: Path, block: int = 512) -> None:
-    """The backscatter written by the pipeline (grey levels on the scene's UTM grid, 0 where no data) as a tiled
-    GeoTIFF in Web Mercator, with overviews: what a map server cuts into tiles at any zoom.
+    """The backscatter written by the pipeline (grey or false colour levels on the scene's UTM grid, 0 where no
+    data) as a tiled GeoTIFF in Web Mercator, with overviews: what a map server cuts into tiles at any zoom.
 
-    JPEG-compressed with a lossless mask for where there is data: ~10 MB for a frame at 20 m.
+    JPEG-compressed with a lossless mask for where there is data: 10-25 MB for a frame at 20 m.
     """
     with (
         rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True, GDAL_CACHEMAX=64),
         rasterio.open(source) as src,
         WarpedVRT(src, crs=WEB_MERCATOR, resampling=Resampling.bilinear, src_nodata=0, nodata=0) as vrt,
     ):
+        colour = src.count == 3
         profile = {
-            "driver": "GTiff", "width": vrt.width, "height": vrt.height, "count": 1, "dtype": "uint8",
+            "driver": "GTiff", "width": vrt.width, "height": vrt.height, "count": src.count, "dtype": "uint8",
             "crs": WEB_MERCATOR, "transform": vrt.transform, "tiled": True, "blockxsize": block,
             "blockysize": block, "compress": "JPEG", "jpeg_quality": 85,
+            **({"photometric": "YCBCR", "interleave": "pixel"} if colour else {}),
         }  # fmt: skip
         with rasterio.open(path, "w", **profile) as dst:
             for _, window in dst.block_windows(1):
-                grey = vrt.read(1, window=window)
-                if not grey.any():
+                levels = vrt.read(window=window)
+                has_data = (levels > 0).any(axis=0)
+                if not has_data.any():
                     continue
-                dst.write(grey, 1, window=window)
-                dst.write_mask(np.where(grey > 0, 255, 0).astype(np.uint8), window=window)
+                dst.write(levels, window=window)
+                dst.write_mask(np.where(has_data, 255, 0).astype(np.uint8), window=window)
         with rasterio.open(path, "r+") as dst:
             dst.build_overviews([2, 4, 8, 16, 32, 64], Resampling.average)
 

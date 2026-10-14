@@ -248,10 +248,13 @@ coast or one zone at a time (the selector in the header):
 
 The radar image of each pass is kept at 20 m (the sensor's actual resolution) as a tiled
 Web Mercator GeoTIFF with overviews (`radar.tif`, ~17 MB a frame), and served as map tiles: the
-whole frame from afar, each ship's echo when zoomed in. A "recent radar" layer mosaics the passes
-of the last week, newest on top, so the whole coast shows its latest radar image at once; an
-optional optical layer underneath is [Sentinel-2 cloudless](https://s2maps.eu) by EOX (CC BY-NC-SA
-4.0).
+whole frame from afar, each ship's echo when zoomed in. It is despeckled (Lee filter) and
+coloured from both polarisations: dark navy where the sea is calm, white where something returns
+strongly in VV and VH alike, as ships do. It covers the sea only: land comes from optical imagery,
+[MapTiler](https://www.maptiler.com)'s satellite tiles with a key (`MAPTILER_KEY`, sent to the
+browser: restrict it to the dashboard's origin), else [Sentinel-2 cloudless](https://s2maps.eu) by
+EOX (10 m, CC BY-NC-SA 4.0). A "recent radar" layer mosaics the passes of the last week, newest on
+top, so the whole coast shows its latest radar image at once.
 It draws its own base map with MapLibre GL, no third-party tiles: land from the SAR land mask in
 the watched area (its edge dashed), and from [Natural Earth](https://www.naturalearthdata.com)
 (public domain) around it. The radar image, land included, covers the part of the area inside the
@@ -365,3 +368,4 @@ Environment variables (or `.env`):
 | `AIS_STALE_MINUTES`  | `15`                                  | alert when no AIS arrives for this long    |
 | `MIN_FREE_DISK`      | `0.1`                                 | alert below this fraction of free disk     |
 | `WEB_PORT`           | `8000`                                | dashboard port on the host (docker compose) |
+| `MAPTILER_KEY`       | unset                                 | satellite imagery on land; else Sentinel-2 cloudless |

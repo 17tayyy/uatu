@@ -1,16 +1,14 @@
 """The latest radar image of every place: a mosaic of the recent passes, newest on top."""
 
-import io
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.db.models import RecordedZone, SarScene
-from uatu.web.passes.service import TILE_PX, read_radar_tile, tile_lonlat_bounds
+from uatu.web.passes.service import TILE_PX, read_radar_tile, tile_lonlat_bounds, tile_png
 
 
 async def recent_frames(
@@ -37,19 +35,15 @@ async def recent_frames(
 
 def mosaic_tile(frames: list[Path], z: int, x: int, y: int) -> bytes | None:
     """Each pixel from the newest frame that has data there."""
-    grey = np.zeros((TILE_PX, TILE_PX), dtype=np.uint8)
+    rgb = np.zeros((3, TILE_PX, TILE_PX), dtype=np.uint8)
     alpha = np.zeros((TILE_PX, TILE_PX), dtype=np.uint8)
     for path in frames:
         read = read_radar_tile(path, z, x, y)
         if read is None:
             continue
-        g, a = read
-        fill = (alpha == 0) & (a > 0)
-        grey[fill], alpha[fill] = g[fill], a[fill]
+        levels, mask = read
+        fill = (alpha == 0) & (mask > 0)
+        rgb[:, fill], alpha[fill] = levels[:, fill], mask[fill]
         if alpha.all():
             break
-    if not alpha.any():
-        return None
-    out = io.BytesIO()
-    Image.fromarray(np.dstack([grey, alpha]), mode="LA").save(out, format="PNG", compress_level=3)
-    return out.getvalue()
+    return tile_png(rgb, alpha) if alpha.any() else None

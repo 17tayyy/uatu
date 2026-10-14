@@ -23,9 +23,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uatu.config import BBox, bbox_polygon
 from uatu.db.models import Infrastructure
 from uatu.sar.raster import Grid
-from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, MapArea
+from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, MapArea, SatelliteLayer
 from uatu.web.schemas import Feature, FeatureCollection, Geometry
 from uatu.zones import NATURAL_EARTH_LAND
+
+
+def satellite(maptiler_key: str | None) -> SatelliteLayer:
+    """MapTiler's satellite imagery (up to ~0.5 m) with a key; else Sentinel-2 cloudless (10 m) by EOX."""
+    if maptiler_key:
+        return SatelliteLayer(
+            tiles=[f"https://api.maptiler.com/tiles/satellite-v2/{{z}}/{{x}}/{{y}}.jpg?key={maptiler_key}"],
+            tile_size=512,
+            max_zoom=20,
+            attribution='<a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener noreferrer">'
+            "&copy; MapTiler</a>",
+        )
+    return SatelliteLayer(
+        tiles=["https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/{z}/{y}/{x}.jpg"],
+        tile_size=256,
+        max_zoom=15,
+        attribution='<a href="https://s2maps.eu" target="_blank" rel="noopener noreferrer">Sentinel-2 cloudless</a>'
+        " by EOX IT Services GmbH (contiene datos modificados de Copernicus Sentinel 2025)",
+    )
 
 
 def area(bbox: BBox) -> MapArea:
