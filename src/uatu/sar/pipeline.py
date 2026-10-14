@@ -6,13 +6,17 @@ they would in one piece; a detection belongs to the tile whose core holds its ce
 Sidelobe suppression looks across tiles, so it runs once at the end.
 
 Besides the detections, the scene leaves coarse rasters for display and for pairing with
-AIS: the backscatter, the land, and where the detector searched.
+AIS: the backscatter, the land, and where the detector searched; and, on request, the
+backscatter at 20 m, the sensor's actual resolution, written tile by tile to a GeoTIFF.
 """
 
 import math
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -20,7 +24,7 @@ import structlog
 from rasterio.windows import Window
 
 from uatu.sar.detect import CfarParams, Detection, candidates, sea_mask, suppress_sidelobes
-from uatu.sar.raster import CalibratedBand, Grid, read_land
+from uatu.sar.raster import CalibratedBand, Grid, backscatter_grey, read_land
 
 log = structlog.get_logger(component="sar")
 
@@ -41,9 +45,14 @@ def process(
     params: CfarParams,
     tile: int = 2048,
     coarse_factor: int = 8,
+    image_path: Path | None = None,
+    image_factor: int = 2,
 ) -> SceneOutput:
+    """image_path: also write the backscatter there, `image_factor` times coarser than the grid, as grey levels
+    (see backscatter_grey) on the grid's projection."""
     halo = _halo_px(params, grid.resolution)
     coarse = grid.coarsened(coarse_factor)
+    fine = grid.coarsened(image_factor)
     coarse_vv = np.full(coarse.shape, np.nan, dtype=np.float32)
     coarse_land = np.zeros(coarse.shape, dtype=bool)
     coarse_searched = np.zeros(coarse.shape, dtype=bool)
@@ -55,6 +64,7 @@ def process(
         rasterio.Env(GDAL_CACHEMAX=64),
         CalibratedBand(zip_path, "VV") as vv_band,
         CalibratedBand(zip_path, "VH") as vh_band,
+        _image(image_path, fine) as image,
     ):
         for core in grid.tiles(tile):
             padded = _pad(core, halo, grid)
@@ -75,6 +85,10 @@ def process(
 
             valid = sea_mask(vv, land, part, params.coast_buffer_m)
             coarse_vv[coarse_window] = _block_mean(vv[inner], coarse_factor)
+            if image is not None:
+                grey = backscatter_grey(_block_mean(vv[inner], image_factor))
+                image.write(grey, 1, window=Window(core.col_off // image_factor, core.row_off // image_factor,
+                                                   grey.shape[1], grey.shape[0]))  # fmt: skip
             coarse_searched[coarse_window] = _block_mean(valid[inner], coarse_factor) > 0.5
             if not valid[inner].any():
                 continue  # no sea searched here
@@ -106,6 +120,16 @@ def _pad(window: Window, halo: int, grid: Grid) -> Window:
 def _inside(d: Detection, grid: Grid, core: Window) -> bool:
     col, row = ~grid.transform @ (d.x, d.y)
     return core.row_off <= row < core.row_off + core.height and core.col_off <= col < core.col_off + core.width
+
+
+@contextmanager
+def _image(path: Path | None, grid: Grid) -> Iterator[Any]:
+    """A GeoTIFF on the grid to write the backscatter into, or None. Never-written blocks stay 0: no data."""
+    if path is None:
+        yield None
+        return
+    with rasterio.open(path, "w", **grid.profile(dtype="uint8", nodata=0, blockxsize=512, blockysize=512)) as dst:
+        yield dst
 
 
 def _block_mean(a: np.ndarray, factor: int) -> np.ndarray:

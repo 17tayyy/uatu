@@ -10,8 +10,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import rasterio
 from PIL import Image
 from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
 from rasterio.warp import calculate_default_transform, reproject, transform
 
 from uatu.sar.detect import Detection
@@ -138,6 +140,33 @@ def write_overlay(grey: np.ndarray, grid: Grid, png_path: Path, corners_path: Pa
     x1, y1 = x0 + width * dst_transform.a, y0 + height * dst_transform.e
     lons, lats = transform(WEB_MERCATOR, "EPSG:4326", [x0, x1, x1, x0], [y0, y0, y1, y1])
     corners_path.write_text(json.dumps([[round(lon, 6), round(lat, 6)] for lon, lat in zip(lons, lats, strict=True)]))
+
+
+def radar_image(source: Path, path: Path, block: int = 512) -> None:
+    """The backscatter written by the pipeline (grey levels on the scene's UTM grid, 0 where no data) as a tiled
+    GeoTIFF in Web Mercator, with overviews: what a map server cuts into tiles at any zoom.
+
+    JPEG-compressed with a lossless mask for where there is data: ~10 MB for a frame at 20 m.
+    """
+    with (
+        rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True, GDAL_CACHEMAX=64),
+        rasterio.open(source) as src,
+        WarpedVRT(src, crs=WEB_MERCATOR, resampling=Resampling.bilinear, src_nodata=0, nodata=0) as vrt,
+    ):
+        profile = {
+            "driver": "GTiff", "width": vrt.width, "height": vrt.height, "count": 1, "dtype": "uint8",
+            "crs": WEB_MERCATOR, "transform": vrt.transform, "tiled": True, "blockxsize": block,
+            "blockysize": block, "compress": "JPEG", "jpeg_quality": 85,
+        }  # fmt: skip
+        with rasterio.open(path, "w", **profile) as dst:
+            for _, window in dst.block_windows(1):
+                grey = vrt.read(1, window=window)
+                if not grey.any():
+                    continue
+                dst.write(grey, 1, window=window)
+                dst.write_mask(np.where(grey > 0, 255, 0).astype(np.uint8), window=window)
+        with rasterio.open(path, "r+") as dst:
+            dst.build_overviews([2, 4, 8, 16, 32, 64], Resampling.average)
 
 
 def _point(lon: float, lat: float, properties: dict) -> dict:

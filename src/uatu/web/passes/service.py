@@ -4,11 +4,20 @@ A pass is one satellite going over the area. Its product comes in frames (consec
 of the same datatake), processed one by one but shown together: one row, one image per frame.
 """
 
+import asyncio
+import io
 import json
+import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import rasterio
 from geoalchemy2 import Geometry as GeometryType
+from PIL import Image
+from rasterio.enums import Resampling
+from rasterio.warp import transform_bounds
+from rasterio.windows import from_bounds
 from shapely.geometry import shape
 from sqlalchemy import Select, and_, case, cast, func, not_, or_, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
@@ -31,6 +40,7 @@ from uatu.web.passes.schemas import (
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
 from uatu.zones import sea_of
 
+TILE_PX = 256
 PASS_ID_PATTERN = r"^S1[A-Z]-[0-9A-F]{6}-[a-z]{3,16}$"  # platform-datatake-zone, e.g. S1C-013AD6-estrecho
 _AT_FIXED = func.coalesce(
     SarDetection.fixed_object_id.in_(select(SarFixedObject.id).where(SarFixedObject.fixed)), False
@@ -192,10 +202,17 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
         png, corners = (_overlay_dir(data_dir, row.zone, name) / f for f in ("backscatter.png", "backscatter.json"))
         if png.exists() and corners.exists():
             version = int(png.stat().st_mtime)  # browsers cache it: a new image, a new URL
+            radar = _overlay_dir(data_dir, row.zone, name) / "radar.tif"
+            tiles = bounds = None
+            if radar.exists():
+                tiles = f"/api/v1/passes/{summary.id}/images/{frame}/tiles/{{z}}/{{x}}/{{y}}.png?v={version}"
+                bounds = await asyncio.to_thread(_lonlat_bounds, radar)
             images.append(
                 ImageOverlay(
                     url=f"/api/v1/passes/{summary.id}/images/{frame}?v={version}",
                     coordinates=json.loads(corners.read_text()),
+                    tiles=tiles,
+                    bounds=bounds,
                 )
             )
 
@@ -249,6 +266,45 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
             ]
         ),
     )
+
+
+def _lonlat_bounds(radar: Path) -> list[float]:
+    with rasterio.open(radar) as src:
+        return [round(v, 5) for v in transform_bounds(src.crs, "EPSG:4326", *src.bounds)]
+
+
+def _tile_bounds(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+    """A web map tile's left, bottom, right, top in Web Mercator metres."""
+    half = math.pi * 6378137.0
+    size = 2 * half / 2**z
+    left, top = -half + x * size, half - y * size
+    return left, top - size, left + size, top
+
+
+def radar_tile(radar: Path, z: int, x: int, y: int) -> bytes | None:
+    """The 256 px PNG (grey and transparency) of a frame's radar image over one map tile; None if it has none."""
+    left, bottom, right, top = _tile_bounds(z, x, y)
+    with rasterio.open(radar) as src:
+        b = src.bounds
+        if right <= b.left or left >= b.right or top <= b.bottom or bottom >= b.top:
+            return None
+        window = from_bounds(left, bottom, right, top, src.transform)
+        shape = (TILE_PX, TILE_PX)
+        grey = src.read(1, window=window, out_shape=shape, boundless=True, fill_value=0, resampling=Resampling.bilinear)
+        mask = src.read_masks(1, window=window, out_shape=shape, boundless=True, resampling=Resampling.nearest)
+    if not mask.any():
+        return None
+    out = io.BytesIO()
+    Image.fromarray(np.dstack([grey, mask]), mode="LA").save(out, format="PNG", compress_level=3)
+    return out.getvalue()
+
+
+async def get_radar_tiles(db: AsyncSession, data_dir: Path, id_: str, frame: int) -> Path:
+    """A frame's radar image to cut map tiles from."""
+    path = (await get_pass_image(db, data_dir, id_, frame)).with_name("radar.tif")
+    if not path.exists():
+        raise NotFoundError("Pass radar tiles")
+    return path
 
 
 async def get_pass_image(db: AsyncSession, data_dir: Path, id_: str, frame: int) -> Path:

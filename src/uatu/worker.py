@@ -222,8 +222,11 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     log.info("scene_started", scene=scene.name, zone=zs.zone, historical=historical)
     path = await download(state.http, state.auth, scene, settings.sar_data_dir)
     engine = None if historical else state.engine  # no AIS to pair with
-    analysis = await analyse(path, geo.grid, geo.land, CfarParams(), engine, geo.zone.bbox)
-    await asyncio.to_thread(write_outputs, analysis, settings.sar_data_dir / zs.zone / analysis.name)
+    out_dir = settings.sar_data_dir / zs.zone / scene.name.removesuffix(".SAFE")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    image = None if historical else out_dir / "radar_utm.tif"  # map tiles, for the passes shown
+    analysis = await analyse(path, geo.grid, geo.land, CfarParams(), engine, geo.zone.bbox, image_path=image)
+    await asyncio.to_thread(write_outputs, analysis, out_dir)
     summary = await store.save_results(state.engine, zs.id, analysis)
     if not settings.sar_keep_scenes and not await store.product_still_needed(state.engine, zs):
         path.unlink(missing_ok=True)
