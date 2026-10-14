@@ -15,7 +15,7 @@ async def live_vessels(
     db: DbSession,
     scope: ZoneScope,
     minutes: Annotated[float, Query(gt=0, le=24 * 60)] = 60,
-    limit: Annotated[int, Query(ge=1, le=2000)] = 1000,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 3000,  # the whole coast hears ~1,300 an hour
 ) -> DataResponse[FeatureCollection[LiveVesselProperties]]:
     """Last position of every vessel heard in the area in the last `minutes`."""
     return DataResponse(data=await vessel_service.live_vessels(db, scope.bbox, minutes, limit))
