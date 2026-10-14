@@ -637,19 +637,18 @@ function receptionBox(p) {
     "div",
     { class: "reception" },
     h("div", { class: "reception-title" }, `AIS alrededor (${metres(rule.radius_m)}, ±${fmt(rule.window_hours)} h)`),
-    h(
-      "div",
-      { class: "reception-row num" },
-      h("span", null, `${plural(p.ais_vessels_nearby, "barco oído", "barcos oídos")}`),
-      h("span", { class: "need" }, `hacen falta ${rule.min_vessels}`),
-    ),
-    h(
-      "div",
-      { class: "reception-row num" },
-      h("span", null, `${fmt(perVessel)} mensajes por barco`),
-      h("span", { class: "need" }, `hacen falta ${fmt(rule.min_reports_per_vessel)}`),
-    ),
+    receptionRow(plural(p.ais_vessels_nearby, "barco oído", "barcos oídos"), rule.min_vessels, p.ais_vessels_nearby >= rule.min_vessels),
+    receptionRow(`${fmt(perVessel)} mensajes por barco`, fmt(rule.min_reports_per_vessel), perVessel >= rule.min_reports_per_vessel),
     h("div", { class: "reception-verdict" }, ok ? "Recepción buena: su silencio cuenta." : "Recepción insuficiente: su silencio no dice nada."),
+  );
+}
+
+function receptionRow(value, minimum, met) {
+  return h(
+    "div",
+    { class: "reception-row num" },
+    h("span", null, value),
+    h("span", { class: "need" }, `mínimo ${minimum} `, h("span", { class: met ? "met" : "unmet" }, met ? "✓" : "✗")),
   );
 }
 

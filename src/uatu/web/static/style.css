@@ -410,6 +410,10 @@ div.row:hover { background: none; }
 
 .reception-row .need { color: var(--muted); }
 
+.reception-row .met { color: var(--ink); }
+
+.reception-row .unmet { color: var(--critical); font-weight: 600; }
+
 .reception-verdict { margin-top: 4px; color: var(--ink-2); }
 
 .hover-popup .maplibregl-popup-content { padding: 6px 10px; }
