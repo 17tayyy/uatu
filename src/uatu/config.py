@@ -1,5 +1,6 @@
 """Settings shared by every Uatu component, read from environment variables (or a .env file)."""
 
+from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BeforeValidator, field_validator
@@ -9,6 +10,25 @@ from shapely import Polygon, box
 type BBox = tuple[float, float, float, float]  # lat_min, lon_min, lat_max, lon_max
 
 STRAIT_OF_GIBRALTAR: BBox = (35.5, -6.5, 36.5, -4.5)
+CATALAN_COAST: BBox = (40.5, 0.5, 41.7, 2.7)  # from the Ebro delta to Barcelona and the Maresme
+
+
+@dataclass(frozen=True)
+class Zone:
+    """An area Uatu watches."""
+
+    key: str
+    name: str  # for people, in Spanish
+    bbox: BBox
+
+
+ZONES: dict[str, Zone] = {
+    z.key: z
+    for z in [
+        Zone("estrecho", "Estrecho de Gibraltar", STRAIT_OF_GIBRALTAR),
+        Zone("cataluna", "Costa catalana", CATALAN_COAST),
+    ]
+}
 
 
 def _parse_bbox(value: object) -> object:
@@ -26,6 +46,23 @@ def _check_bbox(bbox: BBox) -> BBox:
 
 # A bounding box written in env vars as "lat_min,lon_min,lat_max,lon_max".
 BBoxSetting = Annotated[BBox, NoDecode, BeforeValidator(_parse_bbox), AfterValidator(_check_bbox)]
+
+
+def _parse_zones(value: object) -> object:
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",") if part.strip()]
+    return value
+
+
+def _check_zones(keys: list[str]) -> list[str]:
+    unknown = [k for k in keys if k not in ZONES]
+    if unknown or not keys:
+        raise ValueError(f"expected some of {', '.join(ZONES)}, got {', '.join(keys) or 'none'}")
+    return keys
+
+
+# Zones by key, written in env vars as "estrecho,cataluna".
+ZonesSetting = Annotated[list[str], NoDecode, BeforeValidator(_parse_zones), AfterValidator(_check_zones)]
 
 
 def bbox_polygon(bbox: BBox) -> Polygon:

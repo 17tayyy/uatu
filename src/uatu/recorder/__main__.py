@@ -22,7 +22,7 @@ log = structlog.get_logger(component="recorder")
 async def run(settings: RecorderSettings) -> int:
     log.info(
         "starting",
-        bbox=settings.ais_bbox,
+        zones=settings.zones,
         raw_archive_dir=str(settings.raw_archive_dir) if settings.raw_archive_dir else None,
     )
     engine = db.create_engine(settings.database_url)

@@ -4,7 +4,9 @@ Dark vessel detection in the Strait of Gibraltar: finding ships that appear on S
 radar imagery but are not broadcasting AIS.
 
 **Status:** running 24/7 on a homelab. The AIS recorder stores everything aisstream.io
-sends for the area (it only streams live data: any day not recorded is lost); a worker
+sends for the Strait and, since 14 October 2026, the Catalan coast from the Ebro delta to
+Barcelona (it only streams live data: any day not recorded is lost); analysis of the Catalan
+coast is on its way. A worker
 looks for suspicious behaviour in that AIS every 10 minutes, and picks up every new
 Sentinel-1 pass to detect ships and pair them with it.
 
@@ -262,7 +264,8 @@ Environment variables (or `.env`):
 | -------------------- | ------------------------------------- | ------------------------------------------ |
 | `AISSTREAM_API_KEY`  | required                              |                                            |
 | `DATABASE_URL`       | `postgresql+asyncpg://uatu:uatu@localhost:5432/uatu` | set by docker compose       |
-| `AIS_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`; recorder and AIS analysis |
+| `ZONES`              | `estrecho,cataluna`                   | zones the recorder records (defined in `uatu/config.py`) |
+| `AIS_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`; AIS analysis and dashboard |
 | `RAW_ARCHIVE_DIR`    | unset (disabled)                      | `/data/raw` volume in docker compose       |
 | `BATCH_SIZE`         | `1000`                                | rows per database transaction              |
 | `FLUSH_INTERVAL_S`   | `2`                                   | max wait before writing a partial batch    |

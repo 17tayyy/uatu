@@ -7,13 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.ais.analysis import describe
 from uatu.ais.events import Event
+from uatu.config import BBox
 from uatu.db.models import AisEvent, Vessel
 from uatu.web.events.schemas import EventProperties
+from uatu.web.geo import inside
 from uatu.web.schemas import Feature, FeatureCollection, point
 
 
 async def list_events(
-    db: AsyncSession, hours: float, min_severity: int, limit: int
+    db: AsyncSession, bbox: BBox, hours: float, min_severity: int, limit: int
 ) -> FeatureCollection[EventProperties]:
     """Events going on during the last `hours`, latest first."""
     since = datetime.now(UTC) - timedelta(hours=hours)
@@ -22,6 +24,7 @@ async def list_events(
             select(AisEvent)
             .where(
                 AisEvent.severity >= min_severity,
+                inside(AisEvent.lat, AisEvent.lon, bbox),
                 or_(AisEvent.start_at >= since, AisEvent.end_at.is_(None), AisEvent.end_at >= since),
             )
             .order_by(AisEvent.start_at.desc(), AisEvent.id.desc())

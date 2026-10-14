@@ -39,7 +39,7 @@ class AisStream:
         self._subscription = orjson.dumps(
             {
                 "APIKey": settings.aisstream_api_key.get_secret_value(),
-                "BoundingBoxes": [settings.bounding_box],
+                "BoundingBoxes": settings.bounding_boxes,
             }
         ).decode()
 
