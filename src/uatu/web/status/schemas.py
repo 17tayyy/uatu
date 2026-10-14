@@ -1,11 +1,10 @@
 from datetime import datetime
-from uuid import UUID
 
 from uatu.web.schemas import OutputSchema
 
 
 class LatestPass(OutputSchema):
-    id: UUID
+    id: str  # see passes
     acquired_at: datetime
     platform: str
 

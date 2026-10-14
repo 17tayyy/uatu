@@ -49,8 +49,11 @@ needs_db = pytest.mark.skipif(
 
 MMSI_A, MMSI_B, MMSI_C, MMSI_SILENT = 999_000_101, 999_000_102, 999_000_103, 999_000_104
 NOW = datetime.now(UTC)
-SCENE_ID = uuid.uuid4()
+SCENE_ID, SCENE2_ID = uuid.uuid4(), uuid.uuid4()  # two frames of one pass
 SCENE_NAME = f"S1C_IW_GRDH_1SDV_TEST_{SCENE_ID.hex[:8]}_COG.SAFE"
+SCENE2_NAME = f"S1C_IW_GRDH_1SDV_TEST_{SCENE2_ID.hex[:8]}_COG.SAFE"
+DATATAKE = SCENE_ID.hex[:6].upper()
+PASS_ID = f"S1C-{DATATAKE}"
 EVENT_KEY = f"test:{SCENE_ID.hex}"
 SESSION_ID = uuid.uuid4()
 CELL = (35.931, -5.611)  # inside one 0.02° coverage cell
@@ -91,20 +94,31 @@ async def rows():
                     }
                 )
         await conn.execute(insert(Position), positions)
+        frame = {"platform": "S1C", "datatake": DATATAKE, "orbit_direction": "DESCENDING", "relative_orbit": 1}
         await conn.execute(
-            insert(SarScene).values(
-                id=SCENE_ID,
-                name=SCENE_NAME,
-                platform="S1C",
-                datatake="TEST",
-                orbit_direction="DESCENDING",
-                relative_orbit=1,
-                acquired_from=NOW - timedelta(hours=1),
-                acquired_to=NOW - timedelta(minutes=59),
-                footprint="SRID=4326;POLYGON((-6 35.5,-5 35.5,-5 36.5,-6 36.5,-6 35.5))",
-                aoi_coverage=0.4567,
-                status="processed",
-            )
+            insert(SarScene),
+            [
+                frame
+                | {
+                    "id": SCENE_ID,
+                    "name": SCENE_NAME,
+                    "acquired_from": NOW - timedelta(hours=1),
+                    "acquired_to": NOW - timedelta(minutes=59),
+                    "footprint": "SRID=4326;POLYGON((-6 35.5,-5 35.5,-5 36.5,-6 36.5,-6 35.5))",
+                    "aoi_coverage": 0.5,
+                    "status": "processed",
+                },
+                frame
+                | {  # overlaps the first by 0.2°: together they cover 60% of the area, not 70%
+                    "id": SCENE2_ID,
+                    "name": SCENE2_NAME,
+                    "acquired_from": NOW - timedelta(minutes=59, seconds=35),
+                    "acquired_to": NOW - timedelta(minutes=59, seconds=10),
+                    "footprint": "SRID=4326;POLYGON((-5.2 35.5,-4.8 35.5,-4.8 36.5,-5.2 36.5,-5.2 35.5))",
+                    "aoi_coverage": 0.2,
+                    "status": "processed",
+                },
+            ],
         )
         detection = {
             "scene_id": SCENE_ID,
@@ -133,6 +147,16 @@ async def rows():
                 },
                 detection
                 | {
+                    "scene_id": SCENE2_ID,
+                    "lat": 36.2,
+                    "lon": -4.9,
+                    "status": "no_coverage",
+                    "length_m": 50.0,
+                    "suspected_mmsi": None,
+                    "suspect_silent_minutes": None,
+                },
+                detection
+                | {
                     "lat": 36.1,
                     "lon": -5.4,
                     "status": "dark",
@@ -142,19 +166,14 @@ async def rows():
                 },
             ],
         )
+        check = {"mmsi": MMSI_A, "seen_at": NOW - timedelta(hours=1), "lat": 36.0, "lon": -5.5, "length_m": 250,
+                 "sog": 12.0, "report_gap_s": 10.0, "doppler_shift_m": 0.0}  # fmt: skip
         await conn.execute(
-            insert(SarAisCheck).values(
-                scene_id=SCENE_ID,
-                mmsi=MMSI_A,
-                status="detected",
-                seen_at=NOW - timedelta(hours=1),
-                lat=36.0,
-                lon=-5.5,
-                length_m=250,
-                sog=12.0,
-                report_gap_s=10.0,
-                doppler_shift_m=0.0,
-            )
+            insert(SarAisCheck),
+            [
+                check | {"scene_id": SCENE_ID, "status": "detected"},
+                check | {"scene_id": SCENE2_ID, "status": "undetected"},
+            ],
         )
         await conn.execute(
             insert(AisEvent).values(
@@ -171,7 +190,7 @@ async def rows():
     yield
     async with engine.begin() as conn:
         mmsis = [MMSI_A, MMSI_B, MMSI_C, MMSI_SILENT]
-        await conn.execute(delete(SarScene).where(SarScene.id == SCENE_ID))  # cascades to detections, checks
+        await conn.execute(delete(SarScene).where(SarScene.id.in_([SCENE_ID, SCENE2_ID])))  # and their detections
         await conn.execute(delete(AisEvent).where(AisEvent.key == EVENT_KEY))
         await conn.execute(delete(Position).where(Position.mmsi.in_(mmsis)))
         await conn.execute(delete(Vessel).where(Vessel.mmsi.in_(mmsis)))
@@ -198,33 +217,39 @@ async def ok(client: httpx.AsyncClient, path: str):
 @needs_db
 async def test_passes(client, tmp_path):
     passes = await ok(client, "/api/v1/passes")
-    ours = next(p for p in passes if p["id"] == str(SCENE_ID))
-    expected = {"detections": 2, "matched": 1, "no_coverage": 0, "fixed": 0, "candidates": 1, "coverage": 0.46}
+    ours = next(p for p in passes if p["id"] == PASS_ID)
+    expected = {
+        "frames": 2, "detections": 3, "matched": 1, "no_coverage": 1, "fixed": 0, "candidates": 1, "coverage": 0.6,
+    }  # fmt: skip
     assert {k: ours[k] for k in expected} == expected
     assert ours["has_image"] is False
+    assert ours["footprint"]["type"] == "Polygon"  # the two frames, merged
 
-    detail = await ok(client, f"/api/v1/passes/{SCENE_ID}")
+    detail = await ok(client, f"/api/v1/passes/{PASS_ID}")
     kinds = {f["properties"]["kind"]: f["properties"] for f in detail["detections_geojson"]["features"]}
-    assert set(kinds) == {"matched", "went_silent"}
+    assert set(kinds) == {"matched", "went_silent", "no_coverage"}
     assert kinds["matched"]["vessel_name"] == "TEST ALFA"
     assert kinds["matched"]["length_m"] == 240
     assert kinds["matched"]["vh_db"] == -9.9
     assert kinds["went_silent"]["suspect_name"] == "TEST SILENT"
-    assert detail["ais_geojson"]["features"][0]["properties"]["name"] == "TEST ALFA"
-    assert detail["image"] is None
+    checks = [f["properties"] for f in detail["ais_geojson"]["features"]]
+    assert [(c["name"], c["status"]) for c in checks] == [("TEST ALFA", "detected")]  # seen in one frame: seen
+    assert detail["images"] == []
 
-    image = await client.get(f"/api/v1/passes/{SCENE_ID}/image")
-    assert image.status_code == 404
-    overlay = tmp_path / SCENE_NAME.removesuffix(".SAFE")
+    assert (await client.get(f"/api/v1/passes/{PASS_ID}/images/1")).status_code == 404
+    overlay = tmp_path / SCENE2_NAME.removesuffix(".SAFE")  # only the second frame has one
     overlay.mkdir()
     (overlay / "backscatter.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (overlay / "backscatter.json").write_text("[[-6, 36.5], [-5, 36.5], [-5, 35.5], [-6, 35.5]]")
-    detail = await ok(client, f"/api/v1/passes/{SCENE_ID}")
-    assert detail["image"]["url"].startswith(f"/api/v1/passes/{SCENE_ID}/image?v=")
-    assert detail["image"]["coordinates"] == [[-6, 36.5], [-5, 36.5], [-5, 35.5], [-6, 35.5]]
-    image = await client.get(detail["image"]["url"])
-    assert image.status_code == 200
-    assert image.headers["content-type"] == "image/png"
+    detail = await ok(client, f"/api/v1/passes/{PASS_ID}")
+    [image] = detail["images"]
+    assert image["url"].startswith(f"/api/v1/passes/{PASS_ID}/images/1?v=")
+    assert image["coordinates"] == [[-6, 36.5], [-5, 36.5], [-5, 35.5], [-6, 35.5]]
+    response = await client.get(image["url"])
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert (await client.get(f"/api/v1/passes/{PASS_ID}/images/0")).status_code == 404
+    assert (await client.get(f"/api/v1/passes/{PASS_ID}/images/5")).status_code == 404
 
 
 @needs_db
@@ -250,7 +275,7 @@ async def test_vessels(client):
     assert detail["name"] == "TEST ALFA"
     assert detail["track"]["type"] == "LineString"
     assert [e["kind"] for e in detail["events"]] == ["sanctioned_vessel"]
-    assert detail["radar_sightings"][0]["pass_id"] == str(SCENE_ID)
+    assert detail["radar_sightings"][0]["pass_id"] == PASS_ID
 
     silent = await ok(client, f"/api/v1/vessels/{MMSI_SILENT}")
     assert silent["radar_sightings"][0]["as_suspect"] is True
@@ -281,8 +306,8 @@ async def test_coverage_and_status(client):
 @needs_db
 async def test_errors_share_one_shape(client):
     for path, status, code in [
-        (f"/api/v1/passes/{uuid.uuid4()}", 404, "not_found"),
-        ("/api/v1/passes/not-a-uuid", 422, "invalid_input"),
+        ("/api/v1/passes/S1Z-FFFFFF", 404, "not_found"),
+        ("/api/v1/passes/not-a-pass", 422, "invalid_input"),
         ("/api/v1/events?hours=0", 422, "invalid_input"),
         ("/api/v1/nothing-here", 404, "not_found"),
     ]:

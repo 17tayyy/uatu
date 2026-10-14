@@ -1,5 +1,4 @@
 from datetime import datetime
-from uuid import UUID
 
 from uatu.web.events.schemas import EventProperties
 from uatu.web.schemas import Degrees, Feature, Geometry, OneDecimal, OutputSchema, Whole
@@ -32,7 +31,7 @@ class VesselSummary(OutputSchema):
 
 
 class RadarSighting(OutputSchema):
-    pass_id: UUID
+    pass_id: str  # see passes
     seen_at: datetime
     lat: Degrees
     lon: Degrees
