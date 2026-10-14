@@ -11,13 +11,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from rasterio.enums import Resampling
+from rasterio.warp import calculate_default_transform, reproject, transform
 
 from uatu.sar.detect import Detection
 from uatu.sar.match import MatchResult
 from uatu.sar.pipeline import SceneOutput
+from uatu.sar.raster import Grid
 
 if TYPE_CHECKING:
     from uatu.sar.store import SceneReport
+
+WEB_MERCATOR = "EPSG:3857"
 
 
 def detections_geojson(detections: list[Detection], result: MatchResult | None, path: Path) -> None:
@@ -95,18 +100,44 @@ def quicklook(output: SceneOutput, result: MatchResult | None, title: str, path:
 
 
 def backscatter_overlay(output: SceneOutput, png_path: Path, corners_path: Path) -> None:
-    """The scene's coarse VV backscatter as a grayscale PNG with transparency outside the scene, and the
-    lon/lat of its four corners (top-left, top-right, bottom-right, bottom-left) to lay it on a map."""
+    """The scene's coarse VV backscatter as a map overlay: see `write_overlay`."""
     with np.errstate(divide="ignore", invalid="ignore"):
         db = 10 * np.log10(output.vv)
-    grey = np.nan_to_num(np.clip((db + 25) / 25 * 255, 0, 255))  # -25 dB (calm sea) .. 0 dB (ships, land)
-    alpha = np.where(np.isfinite(db), 255, 0)
-    Image.fromarray(np.dstack([grey, alpha]).astype(np.uint8), mode="LA").save(png_path, optimize=True)
+    grey = np.clip((db + 25) / 25 * 255, 0, 255)  # -25 dB (calm sea) .. 0 dB (ships, land); NaN outside the scene
+    write_overlay(grey, output.coarse, png_path, corners_path)
 
-    left, bottom, right, top = output.coarse.bounds
-    lons, lats = output.coarse.to_lonlat(np.array([left, right, right, left]), np.array([top, top, bottom, bottom]))
-    corners = [[round(float(lon), 6), round(float(lat), 6)] for lon, lat in zip(lons, lats, strict=True)]
-    corners_path.write_text(json.dumps(corners))
+
+def write_overlay(grey: np.ndarray, grid: Grid, png_path: Path, corners_path: Path) -> None:
+    """`grey` (0-255 on `grid`, NaN where transparent) as a PNG in Web Mercator, plus the lon/lat of its
+    corners (top-left, top-right, bottom-right, bottom-left).
+
+    Web maps stretch an image linearly between its corners in Web Mercator. Left in UTM, the image would
+    land up to ~700 m off across the Strait, ships beside their detections rather than under them.
+    """
+    left, bottom, right, top = grid.bounds
+    dst_transform, width, height = calculate_default_transform(
+        grid.crs, WEB_MERCATOR, grid.width, grid.height, left, bottom, right, top
+    )
+    mercator = np.full((height, width), np.nan, dtype=np.float32)
+    reproject(
+        grey.astype(np.float32),
+        mercator,
+        src_transform=grid.transform,
+        src_crs=grid.crs,
+        src_nodata=np.nan,
+        dst_transform=dst_transform,
+        dst_crs=WEB_MERCATOR,
+        dst_nodata=np.nan,
+        resampling=Resampling.bilinear,
+    )
+    alpha = np.where(np.isfinite(mercator), 255, 0)
+    la = np.dstack([np.nan_to_num(mercator), alpha]).astype(np.uint8)
+    Image.fromarray(la, mode="LA").save(png_path, optimize=True)
+
+    x0, y0 = dst_transform.c, dst_transform.f
+    x1, y1 = x0 + width * dst_transform.a, y0 + height * dst_transform.e
+    lons, lats = transform(WEB_MERCATOR, "EPSG:4326", [x0, x1, x1, x0], [y0, y0, y1, y1])
+    corners_path.write_text(json.dumps([[round(lon, 6), round(lat, 6)] for lon, lat in zip(lons, lats, strict=True)]))
 
 
 def _point(lon: float, lat: float, properties: dict) -> dict:

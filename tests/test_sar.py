@@ -1,11 +1,14 @@
+import json
 import math
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
 from affine import Affine
+from PIL import Image
 from rasterio.crs import CRS
 from rasterio.windows import Window
 
+from uatu.config import STRAIT_OF_GIBRALTAR, bbox_polygon
 from uatu.sar.ais import AisVessel, Coverage, Report, predict
 from uatu.sar.annotation import AcquisitionGeometry
 from uatu.sar.catalog import _scene, group_passes
@@ -13,6 +16,7 @@ from uatu.sar.detect import CfarParams, Detection, detect, suppress_sidelobes
 from uatu.sar.match import Expected, expected_positions, match, split_by_coverage
 from uatu.sar.pipeline import _block_mean, _inside, _pad
 from uatu.sar.raster import Grid, SigmaLut
+from uatu.sar.report import write_overlay
 
 T0 = datetime(2026, 10, 13, 18, 25, tzinfo=UTC)
 GRID = Grid(CRS.from_epsg(32630), Affine(10, 0, 280_000, 0, -10, 3_990_000), 400, 400)
@@ -280,3 +284,29 @@ def test_a_ferry_slowing_into_port_is_paired_on_its_fastest_speed():
                        t0, estimate.gap_s, estimate.max_sog)  # fmt: skip
     [e] = expected_positions([vessel], geometry(heading_deg=193), GRID)
     assert e.tolerance_m > 1600  # 1 km + a quarter of 195 s at 29 kn, not at 7 kn
+
+
+def test_overlay_lands_where_web_maps_put_it(tmp_path):
+    """Web maps stretch an overlay linearly in Web Mercator between its corners: a bright pixel must
+    come out where its true lon/lat is, not hundreds of metres off as a UTM image would."""
+    grid = Grid.covering(bbox_polygon(STRAIT_OF_GIBRALTAR), 10.0).coarsened(8)
+    grey = np.zeros(grid.shape, dtype=np.float32)
+    row, col = int(grid.height * 0.8), int(grid.width * 0.9)  # far from the zone's central meridian
+    grey[row, col] = 255
+    lon, lat = grid.to_lonlat(*grid.to_map(np.array([row]), np.array([col])))
+    write_overlay(grey, grid, tmp_path / "o.png", tmp_path / "o.json")
+
+    (west, north), (east, north2), (east2, south), (west2, south2) = json.loads((tmp_path / "o.json").read_text())
+    assert (north, east, south, west) == (north2, east2, south2, west2)  # north-up rectangle
+
+    def mercator_y(lat_deg):
+        return math.log(math.tan(math.pi / 4 + math.radians(lat_deg) / 2))
+
+    image = np.asarray(Image.open(tmp_path / "o.png"))[..., 0]
+    peak_row, peak_col = np.unravel_index(np.argmax(image), image.shape)
+    height, width = image.shape
+    map_lon = west + (peak_col + 0.5) / width * (east - west)
+    map_lat_y = mercator_y(north) + (peak_row + 0.5) / height * (mercator_y(south) - mercator_y(north))
+    map_lat = math.degrees(2 * math.atan(math.exp(map_lat_y)) - math.pi / 2)
+    metres = math.hypot((map_lon - lon[0]) * 111_320 * math.cos(math.radians(lat[0])), (map_lat - lat[0]) * 110_574)
+    assert metres < 80  # within one pixel
