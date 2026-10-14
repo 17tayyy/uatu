@@ -50,6 +50,17 @@ def test_services_know_nothing_of_http(path: Path):
                 assert not name.startswith(("fastapi", "starlette")), f"{path.parent.name}/service.py imports {name}"
 
 
+def test_the_whole_coast_is_everything_recorded_even_with_few_zones_analysed():
+    from uatu.config import ZONES
+    from uatu.web.scope import scope
+
+    strait = [ZONES["estrecho"]]
+    whole = scope("todas", strait)
+    assert whole is not None and whole.keys == ["estrecho"]  # passes and events: the analysed zones
+    assert whole.bbox == (35.2, -6.5, 42.5, 4.4)  # vessels: wherever the recorder listens
+    assert scope("cataluna", strait) is None  # recorded, but not analysed yet
+
+
 # --- API ----------------------------------------------------------------------------------------
 
 needs_db = pytest.mark.skipif(

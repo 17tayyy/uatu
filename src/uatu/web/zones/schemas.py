@@ -12,4 +12,4 @@ class ZoneInfo(MapArea):
 
 class Zones(OutputSchema):
     zones: list[ZoneInfo]  # south-west to north-east
-    whole_coast: MapArea  # all of them
+    whole_coast: MapArea  # every zone recorded, analysed or not yet
