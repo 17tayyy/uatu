@@ -5,7 +5,8 @@ at 06:30 and 18:30. So the optical image is hours apart from the radar's at best
 moving ship is where it was then. Anchored ships, platforms, fish farms and moorings stay put.
 
 Scenes come from Element 84's Earth Search catalogue of the Copernicus data, as Cloud Optimised GeoTIFFs
-on AWS: a 4 km chip reads a few hundred kilobytes, without downloading the 1 GB scene.
+on AWS: a 5 km chip reads a few hundred kilobytes, without downloading the 1 GB scene. It comes with its
+corners, to be laid on a map where it belongs.
 """
 
 import asyncio
@@ -17,7 +18,7 @@ import httpx
 import numpy as np
 import rasterio
 import structlog
-from PIL import Image, ImageDraw
+from PIL import Image
 from rasterio.errors import RasterioIOError
 from rasterio.warp import transform
 from rasterio.windows import from_bounds
@@ -36,8 +37,9 @@ class Chip:
     platform: str  # sentinel-2a
     acquired_at: datetime
     cloud: float  # share of the chip
-    png: bytes  # true colour, contrast stretched, with a ring at the centre
+    jpeg: bytes  # true colour, contrast stretched
     size_m: float
+    corners: list[list[float]]  # [lon, lat] of its top left, top right, bottom right and bottom left
 
 
 async def scenes_around(http: httpx.AsyncClient, lon: float, lat: float, at: datetime, days: float) -> list[dict]:
@@ -55,19 +57,23 @@ async def scenes_around(http: httpx.AsyncClient, lon: float, lat: float, at: dat
     return sorted(items, key=lambda f: abs(_time(f) - at))
 
 
-def read_chip(item: dict, lon: float, lat: float, half_m: float) -> tuple[np.ndarray, float, float]:
-    """The scene's true colour around the point (3 x h x w), and the shares of the chip that are cloud and data."""
+def read_chip(item: dict, lon: float, lat: float, half_m: float) -> tuple[np.ndarray, float, float, list[list[float]]]:
+    """The scene's true colour around the point (3 x h x w), the shares of the chip that are cloud and data,
+    and its corners (see Chip)."""
     with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
                       GDAL_HTTP_MAX_RETRY="2", GDAL_HTTP_TIMEOUT="20"):  # fmt: skip
         with rasterio.open(item["assets"]["visual"]["href"]) as src:
             xs, ys = transform("EPSG:4326", src.crs, [lon], [lat])
             bounds = (xs[0] - half_m, ys[0] - half_m, xs[0] + half_m, ys[0] + half_m)
             rgb = src.read(window=from_bounds(*bounds, src.transform), boundless=True, fill_value=0)
+            left, bottom, right, top = bounds
+            lons, lats = transform(src.crs, "EPSG:4326", [left, right, right, left], [top, top, bottom, bottom])
         with rasterio.open(item["assets"]["scl"]["href"]) as src:
             scl = src.read(1, window=from_bounds(*bounds, src.transform), boundless=True, fill_value=0)
     data = float((scl > 0).mean())
     cloud = float(np.isin(scl, CLOUDY).sum() / max((scl > 0).sum(), 1))
-    return rgb, cloud, data
+    corners = [[round(x, 6), round(y, 6)] for x, y in zip(lons, lats, strict=True)]
+    return rgb, cloud, data, corners
 
 
 def stretch(rgb: np.ndarray, low: float = 2, high: float = 99.5, min_range: float = 60) -> np.ndarray:
@@ -81,23 +87,19 @@ def stretch(rgb: np.ndarray, low: float = 2, high: float = 99.5, min_range: floa
     return out
 
 
-def chip_png(rgb: np.ndarray) -> bytes:
-    image = Image.fromarray(np.moveaxis(rgb, 0, -1), mode="RGB")
-    draw = ImageDraw.Draw(image)
-    cx, cy, r = image.width / 2, image.height / 2, image.width / 20  # where the radar saw it
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(208, 59, 59), width=2)
+def chip_jpeg(rgb: np.ndarray) -> bytes:
     out = io.BytesIO()
-    image.save(out, format="PNG", optimize=True)
+    Image.fromarray(np.moveaxis(rgb, 0, -1), mode="RGB").save(out, format="JPEG", quality=90)
     return out.getvalue()
 
 
 async def best_chip(
-    http: httpx.AsyncClient, lon: float, lat: float, at: datetime, days: float = 3, half_m: float = 2000, tries: int = 6
+    http: httpx.AsyncClient, lon: float, lat: float, at: datetime, days: float = 3, half_m: float = 2500, tries: int = 6
 ) -> Chip | None:
     """The closest scene in time showing the place mostly free of cloud, as a chip; None if none in `days`."""
     for item in (await scenes_around(http, lon, lat, at, days))[:tries]:
         try:
-            rgb, cloud, data = await asyncio.to_thread(read_chip, item, lon, lat, half_m)
+            rgb, cloud, data, corners = await asyncio.to_thread(read_chip, item, lon, lat, half_m)
         except RasterioIOError as e:  # a missing or unreadable asset: try the next scene
             log.warning("chip_unreadable", scene=item["id"], error=str(e))
             continue
@@ -108,8 +110,9 @@ async def best_chip(
             platform=item["properties"].get("platform", ""),
             acquired_at=_time(item),
             cloud=round(cloud, 3),
-            png=await asyncio.to_thread(chip_png, stretch(rgb)),
+            jpeg=await asyncio.to_thread(chip_jpeg, stretch(rgb)),
             size_m=2 * half_m,
+            corners=corners,
         )
     return None
 

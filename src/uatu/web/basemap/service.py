@@ -58,7 +58,8 @@ def land(masks: list[tuple[Grid, Path, BBox]]) -> FeatureCollection[LandProperti
     for grid, path, bbox in masks:
         box = bbox_polygon(bbox)
         for f in land_outlines(grid, path).features:
-            clipped = shape(f.geometry.model_dump()).intersection(box)
+            # Outlines traced from a raster can touch themselves, which GEOS rejects: mend them first.
+            clipped = shape(f.geometry.model_dump()).buffer(0).intersection(box)
             if not clipped.is_empty:
                 features.append(
                     Feature(geometry=Geometry.model_validate(_rounded(mapping(clipped))), properties=LandProperties())

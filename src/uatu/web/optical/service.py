@@ -15,6 +15,7 @@ from uatu.web.errors import NotFoundError
 from uatu.web.optical.schemas import OpticalImage
 
 RECHECK_AFTER = timedelta(hours=6)  # scenes keep arriving for a few days after a pass
+VERSION = "v2"  # of the kept files: v2 chips are 5 km, with corners, as JPEG
 
 
 async def optical(db: AsyncSession, http: httpx.AsyncClient, cache: Path, detection_id: int) -> OpticalImage | None:
@@ -32,8 +33,8 @@ async def optical(db: AsyncSession, http: httpx.AsyncClient, cache: Path, detect
     return image
 
 
-def optical_png(cache: Path, detection_id: int) -> Path:
-    path = cache / f"{detection_id}.png"
+def optical_jpeg(cache: Path, detection_id: int) -> Path:
+    path = cache / f"{detection_id}.{VERSION}.jpg"
     if not path.exists():
         raise NotFoundError("Optical image")
     return path
@@ -41,19 +42,20 @@ def optical_png(cache: Path, detection_id: int) -> Path:
 
 def _image(detection_id: int, chip: Chip, seen_at: datetime) -> OpticalImage:
     return OpticalImage(
-        url=f"/api/v1/detections/{detection_id}/optical.png",
+        url=f"/api/v1/detections/{detection_id}/optical.jpg",
         scene=chip.scene,
         platform=chip.platform,
         acquired_at=chip.acquired_at,
         minutes_from_radar=round((chip.acquired_at - seen_at).total_seconds() / 60),
         cloud=chip.cloud,
         size_m=round(chip.size_m),
+        corners=chip.corners,
     )
 
 
 def _cached(cache: Path, detection_id: int) -> tuple[bool, OpticalImage | None]:
     """(kept, image): not kept when never looked up, or when a 'none found' is old enough to look again."""
-    meta = cache / f"{detection_id}.json"
+    meta = cache / f"{detection_id}.{VERSION}.json"
     if not meta.exists():
         return False, None
     kept = json.loads(meta.read_text())
@@ -65,6 +67,6 @@ def _cached(cache: Path, detection_id: int) -> tuple[bool, OpticalImage | None]:
 def _keep(cache: Path, detection_id: int, chip: Chip | None, image: OpticalImage | None) -> None:
     cache.mkdir(parents=True, exist_ok=True)
     if chip is not None:
-        (cache / f"{detection_id}.png").write_bytes(chip.png)
+        (cache / f"{detection_id}.{VERSION}.jpg").write_bytes(chip.jpeg)
     kept = {"checked_at": datetime.now(UTC).isoformat(), "image": image.model_dump(mode="json") if image else None}
-    (cache / f"{detection_id}.json").write_text(json.dumps(kept))
+    (cache / f"{detection_id}.{VERSION}.json").write_text(json.dumps(kept))

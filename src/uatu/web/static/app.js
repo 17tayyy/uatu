@@ -401,6 +401,7 @@ function addLayers() {
     id: "radar-recent",
     type: "raster",
     source: "radar-recent",
+    layout: { visibility: "none" }, // until start() knows the latest pass, which versions its tiles
     paint: { "raster-opacity": 0.95, "raster-brightness-max": 0.9, "raster-fade-duration": 0 },
   });
   map.addLayer({
@@ -610,8 +611,14 @@ function recentRadarUrl() {
   return `${location.origin}${API}/radar/tiles/{z}/{x}/{y}.png?zone=${encodeURIComponent(state.zone)}&days=7&v=${latest}`;
 }
 
+let recentUrl = null;
+
+/** New tiles for a new pass or zone; the same URL again would fetch them all again. */
 function updateRecentRadar() {
-  map.getSource("radar-recent")?.setTiles([recentRadarUrl()]);
+  const url = recentRadarUrl();
+  if (url === recentUrl) return;
+  recentUrl = url;
+  map.getSource("radar-recent")?.setTiles([url]);
 }
 
 /** Each zone's edge, the selected one brighter. */
@@ -749,47 +756,95 @@ function detectionPopup(p, lngLat) {
     kv(rows),
     reception,
     actions.length && h("div", { class: "actions" }, actions),
-    opticalBox(p.id),
+    opticalBox(p.id, lngLat),
   ]);
   if (ais) link(lngLat, ais.geometry.coordinates);
 }
 
-/** A button that looks for a Sentinel-2 photo of the detection's place, and then shows it. */
-function opticalBox(detectionId) {
+/** A button that looks for a Sentinel-2 photo of the detection's place, and lays it on the map. */
+function opticalBox(detectionId, lngLat) {
   const box = h("div", { class: "optical" });
   const look = async () => {
-    fill(box, h("div", { class: "optical-caption" }, "Buscando una imagen sin nubes… (unos segundos)"));
+    fill(box, h("div", { class: "optical-caption busy" }, h("span", { class: "spinner small" }), "Buscando la foto más clara de ±3 días…"));
     try {
       const image = await api(`/detections/${detectionId}/optical`);
       if (!image) {
-        fill(box, h("div", { class: "optical-caption" }, "No hay imagen óptica sin nubes de ese sitio en ±3 días."));
+        fill(box, h("div", { class: "optical-caption" }, "No hay ninguna foto de Sentinel-2 sin nubes de este sitio en ±3 días."));
         return;
       }
-      const img = h("img", { class: "optical-img", src: image.url, alt: "Imagen Sentinel-2 del lugar de la detección" });
-      img.addEventListener("load", () => {
-        // Grown: bring the detection near the top of the map, so the popup has room below it.
-        if (popup && !phone.matches) {
-          const room = map.getContainer().clientHeight / 2 - 70;
-          map.easeTo({ center: popup.getLngLat(), offset: [0, -room], duration: 400 });
-        }
-        img.scrollIntoView({ block: "nearest" });
-      });
-      fill(
-        box,
-        img,
-        h("div", { class: "optical-caption" }, opticalCaption(image)),
-        h(
-          "div",
-          { class: "optical-caption" },
-          "El círculo rojo marca dónde lo vio el radar. Un barco en marcha ya estará en otro sitio; uno fondeado, una plataforma o una granja, no.",
-        ),
-      );
+      showOptical(image, lngLat);
     } catch (error) {
       fill(box, h("div", { class: "optical-caption" }, `No se pudo buscar: ${error.message}`));
     }
   };
-  fill(box, h("button", { class: "optical-button", onclick: look }, "Ver foto óptica (Sentinel-2)"));
+  const shown = optical?.lngLat?.[0] === lngLat[0] && optical?.lngLat?.[1] === lngLat[1];
+  fill(
+    box,
+    shown
+      ? h("div", { class: "optical-caption" }, "Su foto óptica está en el mapa.")
+      : [
+          h("button", { class: "optical-button", onclick: look }, "Ver foto óptica en el mapa (Sentinel-2)"),
+          h(
+            "div",
+            { class: "optical-caption" },
+            "Sentinel-2 pasa hacia mediodía, horas antes o después del radar: un barco en marcha ya no estará ahí; uno fondeado, una plataforma o una granja, sí.",
+          ),
+        ],
+  );
   return box;
+}
+
+// The Sentinel-2 photo of a detection's place, laid on the map where it belongs: zoom in to look.
+let optical = null; // { image, lngLat }
+
+function showOptical(image, lngLat) {
+  const source = map.getSource("optical");
+  if (source) source.updateImage({ url: image.url, coordinates: image.corners });
+  else {
+    map.addSource("optical", { type: "image", url: image.url, coordinates: image.corners });
+    // Over the radar, under the coastline, the detections and the ring on this one.
+    map.addLayer({ id: "optical", type: "raster", source: "optical", paint: { "raster-fade-duration": 0 } }, "coast");
+  }
+  optical = { image, lngLat };
+  popup?.remove();
+  select(lngLat);
+  renderOpticalCard();
+  // The whole photo in view, clear of the card above it (and of the layers card, beside it on a wide screen).
+  const card = document.getElementById("optical-card").getBoundingClientRect();
+  const top = Math.max(20, card.bottom - map.getContainer().getBoundingClientRect().top + 12);
+  const lons = image.corners.map((c) => c[0]);
+  const lats = image.corners.map((c) => c[1]);
+  map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], {
+    padding: { top, bottom: 20, left: 20, right: phone.matches ? 20 : 240 },
+    duration: 700,
+  });
+}
+
+function hideOptical() {
+  if (!optical) return;
+  if (map.getLayer("optical")) map.removeLayer("optical");
+  if (map.getSource("optical")) map.removeSource("optical");
+  optical = null;
+  select(null);
+  renderOpticalCard();
+}
+
+function renderOpticalCard() {
+  const card = document.getElementById("optical-card");
+  card.hidden = !optical;
+  if (!optical) return fill(card);
+  const opacity = h("input", { type: "range", min: 0, max: 100, value: 100, "aria-label": "Opacidad de la foto" });
+  opacity.addEventListener("input", () => map.setPaintProperty("optical", "raster-opacity", opacity.value / 100));
+  fill(
+    card,
+    h(
+      "div",
+      { class: "optical-card-top" },
+      h("span", null, h("strong", null, "Foto óptica "), opticalCaption(optical.image)),
+      h("button", { class: "close", onclick: hideOptical, "aria-label": "Quitar la foto", title: "Quitar la foto" }, "×"),
+    ),
+    h("label", { class: "optical-opacity" }, "Opacidad", opacity),
+  );
 }
 
 function opticalCaption(image) {
@@ -1140,6 +1195,7 @@ async function renderPasses() {
 async function loadPass(id) {
   if (state.pass?.id === id) return state.pass;
   const pass = await api(`/passes/${id}`);
+  hideOptical();
   state.pass = pass;
   state.passNote = null;
   byId.detections = new Map(pass.detections_geojson.features.map((f) => [f.properties.id, f.properties]));
@@ -1156,6 +1212,7 @@ async function loadPass(id) {
 
 /** Take the pass off the map, saying why. */
 function clearPass(note) {
+  hideOptical();
   state.pass = null;
   state.passNote = note;
   byId.detections = new Map();
@@ -1745,12 +1802,14 @@ async function start() {
   phone.addEventListener("change", fitPadding);
   addLayers();
   wireMapEvents();
+  watchMapLoading();
   renderLayers();
   const [zones, land, satellite] = await Promise.all([api("/zones"), api("/map/land"), api("/map/satellite")]);
   addSatellite(satellite);
   state.zones = zones.zones;
   state.wholeCoast = zones.whole_coast;
   if (state.zone !== ALL && !state.zones.some((z) => z.key === state.zone)) state.zone = ALL;
+  state.status = await api(inZone("/status")).catch(() => null); // the latest pass versions the radar tiles
   const coast = zones.whole_coast;
   map.setMaxBounds([[coast.west - 3, coast.south - 2], [coast.east + 3, coast.north + 2]]);
   setData("land", land);
@@ -1764,14 +1823,19 @@ async function start() {
   }
 
   // The passes, to find the one an event happened under from any view.
+  splashText("Cargando barcos y eventos…");
   state.passes = await api(inZone("/passes?limit=60")).catch(() => null);
   await refresh();
   // Show the latest pass on the map from the start, without leaving the current view.
   if (state.status?.latest_pass && !(parseRoute().tab === "passes" && parseRoute().id)) {
+    splashText("Cargando la última pasada del radar…");
     await loadPass(state.status.latest_pass.id).catch(() => {});
   }
   await render();
   renderLegend();
+  splashText("Cargando el mapa…");
+  await mapSettled(8000);
+  hideSplash();
   setInterval(refresh, REFRESH_MS);
   document.addEventListener("visibilitychange", () => !document.hidden && refresh());
 }
@@ -1787,9 +1851,54 @@ document.getElementById("handle").addEventListener("click", () => {
   document.getElementById("handle").setAttribute("aria-label", panel.classList.contains("expanded") ? "Reducir panel" : "Expandir panel");
 });
 
+// --- loading ----------------------------------------------------------------------------------
+
+function splashText(text) {
+  document.getElementById("splash-text").textContent = text;
+}
+
+function hideSplash() {
+  const splash = document.getElementById("splash");
+  if (!splash || splash.classList.contains("gone")) return;
+  splash.classList.add("gone");
+  setTimeout(() => splash.remove(), 400);
+}
+
+/** Once the map has drawn what it is loading, or after `ms` at most. */
+function mapSettled(ms) {
+  return new Promise((resolve) => {
+    if (map.loaded()) return resolve();
+    const timer = setTimeout(resolve, ms);
+    map.once("idle", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/** A small "loading" chip while the map fetches tiles or data for longer than a moment. */
+function watchMapLoading() {
+  const busy = document.getElementById("map-busy");
+  let timer = null;
+  map.on("dataloading", () => {
+    if (timer || !busy.hidden) return;
+    timer = setTimeout(() => {
+      timer = null;
+      if (!map.loaded()) busy.hidden = false;
+    }, 400);
+  });
+  map.on("idle", () => {
+    clearTimeout(timer);
+    timer = null;
+    busy.hidden = true;
+  });
+}
+
 map.on("load", () =>
-  start().catch((error) => {
-    renderStatus(true);
-    fill(view, message("error-note", `No se pudo cargar: ${error.message}`));
-  }),
+  start()
+    .catch((error) => {
+      renderStatus(true);
+      fill(view, message("error-note", `No se pudo cargar: ${error.message}`));
+    })
+    .finally(hideSplash),
 );

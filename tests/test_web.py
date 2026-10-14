@@ -503,3 +503,20 @@ def test_the_satellite_layer_is_maptiler_with_a_key_and_sentinel_2_without():
     assert (maptiler.tile_size, "MapTiler" in maptiler.attribution) == (512, True)
     eox = satellite(None)
     assert "s2cloudless" in eox.tiles[0] and eox.tile_size == 256
+
+
+def test_land_outlines_that_touch_themselves_are_mended(monkeypatch):
+    """Traced from a raster, simplified and rounded, an outline can touch itself: GEOS refuses to clip it."""
+    from uatu.web.basemap import service
+    from uatu.web.schemas import Feature, FeatureCollection
+    from uatu.web.schemas import Geometry as GeoJSON
+
+    # A bow tie: two triangles meeting at one point, crossing there. Invalid.
+    bow_tie = GeoJSON(
+        type="Polygon", coordinates=[[[-2.0, 37.0], [-1.9, 37.1], [-1.9, 37.0], [-2.0, 37.1], [-2.0, 37.0]]]
+    )
+    outlines = FeatureCollection(features=[Feature(geometry=bow_tie, properties=service.LandProperties())])
+    monkeypatch.setattr(service, "land_outlines", lambda grid, path: outlines)
+    monkeypatch.setattr(service, "context_land", lambda covered: FeatureCollection(features=[]))
+    land = service.land([(None, None, (36.9, -2.1, 37.2, -1.8))])
+    assert len(land.features) == 1 and land.features[0].geometry.type in ("Polygon", "MultiPolygon")

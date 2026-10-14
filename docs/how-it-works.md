@@ -160,6 +160,10 @@ area learnt from the record itself, stopping is routine and only informative.
 - **A zone's box is not its sea.** In Catalonia more than half the box is land. Frames were first
   chosen by how much of the box they covered, and 45 of 135 historical frames covered under 10%
   of the sea: 1–2 GB downloads for no ship. They are now chosen by sea covered.
+- **A library default can cost a thousand times.** Radar map tiles took 2–6 s each from afar,
+  a minute for the first screen. A window read past the image's edge (a "boundless" read in
+  rasterio) goes through a warped VRT, which ignores the overviews and resamples the full 20 m
+  image. Reading only the part inside the image and placing it takes 0.03 s.
 - **Only something outside can say everything is down.** When the home router lost its
   connection one night, every component was fine, and silent. An external dead man's switch is
   the only alarm that works then.

@@ -33,6 +33,8 @@
     <main class="map-wrap">
       <div id="map" role="region" aria-label="Mapa"></div>
       <div class="map-context" id="map-context" aria-live="polite" hidden></div>
+      <div class="optical-card" id="optical-card" hidden></div>
+      <div class="map-busy" id="map-busy" role="status" hidden><span class="spinner small"></span>Cargando mapa…</div>
       <div class="overlay">
         <div class="card layers" id="layers">
           <button class="card-title" id="layers-toggle" aria-expanded="true">Capas</button>
@@ -41,6 +43,11 @@
         <div class="card legend" id="legend"></div>
       </div>
     </main>
+  </div>
+  <div class="splash" id="splash" role="status" aria-live="polite">
+    <div class="splash-brand">Uatu</div>
+    <span class="spinner"></span>
+    <div class="splash-text" id="splash-text">Cargando…</div>
   </div>
 </body>
 </html>
