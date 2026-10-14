@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.ais.analysis import describe
 from uatu.ais.events import Event
-from uatu.db.models import AisEvent, Position, SanctionedVessel, SarDetection, Vessel
+from uatu.db.models import AisEvent, Position, SanctionedVessel, SarDetection, SarScene, Vessel
 from uatu.web.errors import NotFoundError
 from uatu.web.events.schemas import EventProperties
+from uatu.web.passes.service import pass_id
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
 from uatu.web.vessels.labels import flag, ship_type
 from uatu.web.vessels.schemas import (
@@ -140,12 +141,13 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
     names = {mmsi: vessel.name} if vessel and vessel.name else {}
     sightings = (
         await db.execute(
-            select(SarDetection)
+            select(SarDetection, SarScene.platform, SarScene.datatake)
+            .join(SarScene, SarScene.id == SarDetection.scene_id)
             .where(or_(SarDetection.mmsi == mmsi, SarDetection.suspected_mmsi == mmsi))
             .order_by(SarDetection.seen_at.desc(), SarDetection.id.desc())
             .limit(50)
         )
-    ).scalars()
+    ).all()
 
     return VesselDetail(
         mmsi=mmsi,
@@ -165,14 +167,14 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
         events=[_event(e, names) for e in events],
         radar_sightings=[
             RadarSighting(
-                pass_id=str(d.scene_id),
+                pass_id=pass_id(platform, datatake),
                 seen_at=d.seen_at,
                 lat=d.lat,
                 lon=d.lon,
                 as_suspect=d.mmsi != mmsi,
                 distance_m=d.distance_m if d.mmsi == mmsi else d.suspect_distance_m,
             )
-            for d in sightings
+            for d, platform, datatake in sightings
         ],
     )
 

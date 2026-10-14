@@ -6,6 +6,7 @@ from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.db.models import AisEvent, IngestSession, Position, SarScene
+from uatu.web.passes.service import pass_id
 from uatu.web.status.schemas import LatestPass, Status
 
 
@@ -32,11 +33,13 @@ async def status(db: AsyncSession) -> Status:
         .group_by(AisEvent.severity)
     )
     severities: dict[int, int] = {severity: n for severity, n in events}
+    started = func.min(SarScene.acquired_from)
     latest = (
         await db.execute(
-            select(SarScene.id, SarScene.acquired_from, SarScene.platform)
+            select(SarScene.platform, SarScene.datatake, started.label("acquired_at"))
             .where(SarScene.status == "processed")
-            .order_by(SarScene.acquired_from.desc(), SarScene.id.desc())
+            .group_by(SarScene.platform, SarScene.datatake)
+            .order_by(started.desc(), SarScene.platform, SarScene.datatake)
             .limit(1)
         )
     ).first()
@@ -46,7 +49,9 @@ async def status(db: AsyncSession) -> Status:
         vessels_last_hour=vessels or 0,
         events_24h=sum(severities.values()),
         alerts_24h=severities.get(3, 0),
-        latest_pass=LatestPass(id=latest.id, acquired_at=latest.acquired_from, platform=latest.platform)
+        latest_pass=LatestPass(
+            id=pass_id(latest.platform, latest.datatake), acquired_at=latest.acquired_at, platform=latest.platform
+        )
         if latest
         else None,
     )

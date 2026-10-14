@@ -50,7 +50,7 @@ const RECEPTION = {
 };
 
 const LAYERS = {
-  radar: { label: "Imagen radar", on: true, ids: ["radar"] },
+  radar: { label: "Imagen radar", on: true, ids: ["radar-0", "radar-1", "radar-2", "radar-3"] }, // one per frame
   detections: { label: "Detecciones radar", on: true, ids: ["footprint", "detections"] },
   passAis: { label: "AIS en la pasada", on: false, ids: ["pass-ais"] },
   vessels: { label: "Barcos en vivo", on: true, ids: ["vessels-moving", "vessels-stopped"] },
@@ -473,21 +473,26 @@ function applyLayerVisibility() {
   }
 }
 
+/** The pass's radar image: one per frame it came in. */
 function showRadarImage(pass) {
-  if (map.getLayer("radar")) map.removeLayer("radar");
-  if (map.getSource("radar")) map.removeSource("radar");
-  if (!pass?.image) return;
-  map.addSource("radar", { type: "image", url: pass.image.url, coordinates: pass.image.coordinates });
-  map.addLayer(
-    {
-      id: "radar",
-      type: "raster",
-      source: "radar",
-      layout: { visibility: state.layers.radar ? "visible" : "none" },
-      paint: { "raster-opacity": 0.9, "raster-brightness-max": 0.7, "raster-fade-duration": 0 },
-    },
-    "coverage",
-  );
+  for (const id of LAYERS.radar.ids) {
+    if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource(id)) map.removeSource(id);
+  }
+  (pass?.images ?? []).slice(0, LAYERS.radar.ids.length).forEach((image, i) => {
+    const id = LAYERS.radar.ids[i];
+    map.addSource(id, { type: "image", url: image.url, coordinates: image.coordinates });
+    map.addLayer(
+      {
+        id,
+        type: "raster",
+        source: id,
+        layout: { visibility: state.layers.radar ? "visible" : "none" },
+        paint: { "raster-opacity": 0.9, "raster-brightness-max": 0.7, "raster-fade-duration": 0 },
+      },
+      "coverage",
+    );
+  });
 }
 
 /** The world minus the watched area: a polygon with the area as its hole. */
@@ -570,6 +575,10 @@ function kv(pairs) {
     { class: "kv" },
     pairs.filter(([, v]) => v != null && v !== "").flatMap(([k, v]) => [h("dt", null, k), h("dd", null, v)]),
   );
+}
+
+function externalLink(label, href) {
+  return h("a", { href, target: "_blank", rel: "noopener noreferrer" }, `${label} ↗`);
 }
 
 function vesselButton(mmsi, label = "Ver barco") {
@@ -1007,6 +1016,7 @@ async function renderPass(id) {
         "div",
         { class: "detail-sub" },
         `Sentinel-${pass.platform.slice(1)} · ${pass.orbit_direction === "ASCENDING" ? "ascendente" : "descendente"} · ${Math.round(pass.coverage * 100)} % de la zona`,
+        pass.frames > 1 ? ` · ${pass.frames} tomas` : "",
       ),
     ),
     h(
@@ -1019,7 +1029,7 @@ async function renderPass(id) {
       stat(pass.fixed, "objetos fijos", svg("circle", C.fixed)),
       stat(undetected, "AIS no vistos", svg("ring", C.ink2)),
     ),
-    !pass.image && h("p", { class: "note" }, "Esta pasada no tiene imagen radar guardada."),
+    !pass.images.length && h("p", { class: "note" }, "Esta pasada no tiene imagen radar guardada."),
     h("h3", { class: "section-title" }, `Para revisar (${review.length})`),
     review.length
       ? h("ul", { class: "list" }, review.map(detectionRow))
@@ -1227,6 +1237,13 @@ async function renderVessel(mmsi) {
       ["Velocidad", lp?.sog != null ? `${lp.sog} nudos` : null],
       ["Rumbo", lp?.cog != null ? `${lp.cog}°` : null],
     ]),
+    // Photos, registry data and port calls live there; we link rather than copy (their terms forbid it).
+    h(
+      "div",
+      { class: "links" },
+      externalLink("VesselFinder", `https://www.vesselfinder.com/vessels/details/${v.imo ?? v.mmsi}`),
+      externalLink("MarineTraffic", `https://www.marinetraffic.com/en/ais/details/ships/mmsi:${v.mmsi}`),
+    ),
     !v.track && h("p", { class: "note" }, "Sin derrota en las últimas 24 h."),
     h("h3", { class: "section-title" }, `Eventos (${v.events.length})`),
     v.events.length

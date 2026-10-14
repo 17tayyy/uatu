@@ -267,6 +267,8 @@ div.row:hover { background: none; }
 
 .note { padding: 12px 20px; color: var(--muted); font-size: 13px; }
 
+.links { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0 20px 14px; font-size: 13px; }
+
 /* Map overlay -------------------------------------------------------------------------------- */
 
 .overlay {
@@ -448,7 +450,7 @@ div.row:hover { background: none; }
 
   .tabs { padding: 0 8px; }
 
-  .row, .toolbar, .kv, .stats, .detail-head, .note, .section-title { padding-left: 16px; padding-right: 16px; }
+  .row, .toolbar, .kv, .stats, .detail-head, .note, .section-title, .links { padding-left: 16px; padding-right: 16px; }
 
   .back { margin-left: 16px; }
 

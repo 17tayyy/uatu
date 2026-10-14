@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import StrEnum
-from uuid import UUID
 
 from uatu.web.schemas import FeatureCollection, Geometry, OneDecimal, OutputSchema, Whole
 
@@ -18,12 +17,12 @@ class DetectionKind(StrEnum):
 
 
 class PassSummary(OutputSchema):
-    id: UUID
-    name: str
+    id: str  # platform-datatake, e.g. S1C-013AD6
     platform: str
     acquired_at: datetime
     orbit_direction: str
-    coverage: float  # fraction of the area of interest in the frame
+    coverage: float  # fraction of the area of interest imaged, all frames together
+    frames: int  # products the pass came in
     detections: int
     matched: int
     no_coverage: int
@@ -63,6 +62,6 @@ class ImageOverlay(OutputSchema):
 
 
 class PassDetail(PassSummary):
-    image: ImageOverlay | None
+    images: list[ImageOverlay]  # one per frame with a radar overlay
     detections_geojson: FeatureCollection[DetectionProperties]
     ais_geojson: FeatureCollection[AisCheckProperties]
