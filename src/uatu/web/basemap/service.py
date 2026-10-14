@@ -1,9 +1,12 @@
-"""The map's own base layers: land outlines from the SAR land mask, and maritime infrastructure.
+"""The map's own base layers: land outlines, and maritime infrastructure.
 
 No third-party tiles: the dashboard draws only what Uatu knows, and works without internet access
-beyond the map library itself.
+beyond the map library itself. Land inside the watched area comes from the SAR land mask (ESA
+WorldCover, 10 m); around it, for context, from Natural Earth's 10 m land (public domain), cut to
+Iberia and northern Morocco and simplified to ~200 m (natural_earth_land.geojson).
 """
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +14,7 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.features import shapes
 from rasterio.warp import transform_geom
-from shapely.geometry import mapping, shape
+from shapely.geometry import Polygon, mapping, shape
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +28,33 @@ from uatu.web.schemas import Feature, FeatureCollection, Geometry
 def area(bbox: BBox) -> MapArea:
     lat_min, lon_min, lat_max, lon_max = bbox
     return MapArea(west=lon_min, south=lat_min, east=lon_max, north=lat_max)
+
+
+NATURAL_EARTH_LAND = Path(__file__).parent / "natural_earth_land.geojson"
+
+
+def land(grid: Grid, land_path: Path | None) -> FeatureCollection[LandProperties]:
+    """Land for the map: the land mask where there is one, Natural Earth around it (or everywhere without it)."""
+    if land_path is None:
+        return context_land(None)
+    detailed = land_outlines(grid, land_path)
+    covered = Polygon(zip(*grid.outline_lonlat(), strict=True))
+    return FeatureCollection(features=detailed.features + context_land(covered).features)
+
+
+def context_land(covered: Polygon | None) -> FeatureCollection[LandProperties]:
+    """Natural Earth land, minus the part `covered` by a better source."""
+    features = []
+    for f in json.loads(NATURAL_EARTH_LAND.read_text())["features"]:
+        geometry = shape(f["geometry"])
+        if covered is not None:
+            geometry = geometry.difference(covered)
+        if geometry.is_empty:
+            continue
+        features.append(
+            Feature(geometry=Geometry.model_validate(_rounded(mapping(geometry))), properties=LandProperties())
+        )
+    return FeatureCollection(features=features)
 
 
 def land_outlines(grid: Grid, land_path: Path, resolution_m: float = 100.0) -> FeatureCollection[LandProperties]:

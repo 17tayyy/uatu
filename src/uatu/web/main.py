@@ -10,6 +10,7 @@ from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -17,8 +18,8 @@ from uatu.config import bbox_polygon
 from uatu.db import create_engine
 from uatu.log import configure_logging
 from uatu.sar.raster import Grid
+from uatu.web.basemap import service as basemap_service
 from uatu.web.basemap.router import router as basemap_router
-from uatu.web.basemap.service import land_outlines
 from uatu.web.config import WebSettings, get_settings
 from uatu.web.coverage.router import router as coverage_router
 from uatu.web.errors import COMMON_ERROR_RESPONSES, register_exception_handlers
@@ -37,13 +38,12 @@ SAR_RESOLUTION_M = 10.0  # the grid the worker builds the land mask on
 
 
 def load_land(settings: WebSettings) -> FeatureCollection:
-    """Land outlines from the worker's land mask cache; none (sea everywhere) until the worker has built it."""
+    """Land outlines: detailed where the worker has built its land mask, coarse around it (and until then)."""
     grid = Grid.covering(bbox_polygon(settings.sar_bbox), SAR_RESOLUTION_M)
     path = settings.sar_data_dir / "cache" / f"land_{grid.key}.tif"
     if not path.exists():
         log.warning("web.no_land_mask", path=str(path))
-        return FeatureCollection(features=[])
-    return land_outlines(grid, path)
+    return basemap_service.land(grid, path if path.exists() else None)
 
 
 @asynccontextmanager
@@ -80,6 +80,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     register_exception_handlers(app)
+    app.add_middleware(GZipMiddleware, minimum_size=1024)  # land, coverage and pass GeoJSON shrink ~5x
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)  # outermost: its request id covers everything
 
