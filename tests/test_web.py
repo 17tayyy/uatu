@@ -96,13 +96,15 @@ async def rows():
                 )
         positions.append(positions[0] | {"mmsi": MMSI_BARCELONA, "lat": 41.35, "lon": 2.2})
         await conn.execute(insert(Position), positions)
-        frame = {"platform": "S1C", "datatake": DATATAKE, "orbit_direction": "DESCENDING", "relative_orbit": 1}
+        frame = {"zone": "estrecho", "platform": "S1C", "datatake": DATATAKE, "orbit_direction": "DESCENDING",
+                 "relative_orbit": 1}  # fmt: skip
         await conn.execute(
             insert(SarScene),
             [
                 frame
                 | {
                     "id": SCENE_ID,
+                    "product_id": SCENE_ID,
                     "name": SCENE_NAME,
                     "acquired_from": NOW - timedelta(hours=1),
                     "acquired_to": NOW - timedelta(minutes=59),
@@ -113,6 +115,7 @@ async def rows():
                 frame
                 | {  # overlaps the first by 0.2°: together 1.2° x 1° of the 2° x 1.2° area, 50%
                     "id": SCENE2_ID,
+                    "product_id": SCENE2_ID,
                     "name": SCENE2_NAME,
                     "acquired_from": NOW - timedelta(minutes=59, seconds=35),
                     "acquired_to": NOW - timedelta(minutes=59, seconds=10),

@@ -3,7 +3,7 @@
 uatu-sar search [--days 7]               passes over the area of interest
 uatu-sar download (--latest | DATATAKE)  download every frame of a pass
 uatu-sar detect SCENE.zip [--ais]        detect ships, optionally pairing them with recorded AIS
-uatu-sar backfill [--days 90]            have the worker process the passes before AIS recording began
+uatu-sar backfill ZONE [--days 90]       have the worker process a zone's passes before AIS recording began there
 uatu-sar candidates [--days 7]           dark vessel candidates of recent passes
 """
 
@@ -19,7 +19,7 @@ import structlog
 from pydantic import ValidationError
 
 from uatu import db
-from uatu.config import bbox_polygon
+from uatu.config import ZONES, bbox_polygon
 from uatu.log import configure_logging
 from uatu.sar.analysis import PairingParams, analyse, write_outputs
 from uatu.sar.catalog import group_passes, search
@@ -115,12 +115,12 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
 async def cmd_backfill(settings: SarSettings, args: argparse.Namespace) -> int:
     from uatu.worker import backfill  # the worker's app: same Redis and queue
 
-    job = await backfill.enqueue(args.days)
-    result = await job.result(timeout=600)
+    job = await backfill.enqueue(args.days, args.zone)
+    result = await job.result(timeout=900)
     if not result.success:
         print(f"backfill failed: {result.value}", file=sys.stderr)
         return 1
-    print(f"{result.value} scenes queued on the backfill lane")
+    print(f"{result.value} scenes of {args.zone} queued on the backfill lane")
     return 0
 
 
@@ -178,6 +178,7 @@ def main() -> None:
     detect_cmd.set_defaults(run=cmd_detect)
 
     backfill_cmd = commands.add_parser("backfill", help="queue historical passes for the worker")
+    backfill_cmd.add_argument("zone", choices=list(ZONES), help="zone key, see uatu.config.ZONES")
     backfill_cmd.add_argument("--days", type=float, default=90, help="before AIS recording began (default: 90)")
     backfill_cmd.set_defaults(run=cmd_backfill)
 

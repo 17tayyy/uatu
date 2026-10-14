@@ -16,15 +16,14 @@ from pydantic import ValidationError
 
 from uatu import db
 from uatu.ais import analysis, reference, store
-from uatu.ais.coast import CoastDistance
-from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, bbox_polygon
+from uatu.config import ZoneSettings
 from uatu.log import configure_logging
 from uatu.sar.config import SarSettings
-from uatu.sar.raster import Grid, land_cache
+from uatu.zones import geography
 
 
-class AisSettings(SarSettings):
-    ais_bbox: BBoxSetting = STRAIT_OF_GIBRALTAR
+class AisSettings(SarSettings, ZoneSettings):
+    pass
 
 
 async def cmd_around(settings: AisSettings, args: argparse.Namespace) -> int:
@@ -72,12 +71,11 @@ async def cmd_events(settings: AisSettings, args: argparse.Namespace) -> int:
 
 
 async def cmd_analyse(settings: AisSettings, args: argparse.Namespace) -> int:
-    grid = Grid.covering(bbox_polygon(settings.sar_bbox), 10.0)
     cache = settings.sar_data_dir / "cache"
-    coast = CoastDistance(grid, land_cache(grid, cache), cache)
+    areas = [analysis.Area(z.bbox, geography(z, cache).coast) for z in settings.zones]
     engine = db.create_engine(settings.database_url)
     try:
-        outcome = await analysis.analyse(engine, datetime.now(UTC), settings.ais_bbox, coast)
+        outcome = await analysis.analyse(engine, datetime.now(UTC), areas)
     finally:
         await engine.dispose()
     print(f"{outcome.tracks} tracks, {outcome.detected} events detected, {len(outcome.new)} new")

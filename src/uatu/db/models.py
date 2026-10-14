@@ -17,6 +17,8 @@ from sqlalchemy import (
     Index,
     MetaData,
     SmallInteger,
+    String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -112,6 +114,15 @@ class Vessel(Base):
     last_static_at: Mapped[datetime]
 
 
+class RecordedZone(Base):
+    """A zone the recorder subscribes to, and since when: scenes acquired before have no AIS to pair with."""
+
+    __tablename__ = "recorded_zones"
+
+    key: Mapped[str] = mapped_column(String(16), primary_key=True, comment="see uatu.config.ZONES")
+    since: Mapped[datetime]
+
+
 class IngestSession(Base):
     """One websocket connection to aisstream.io.
 
@@ -130,13 +141,21 @@ class IngestSession(Base):
 
 
 class SarScene(Base):
-    """A Sentinel-1 frame over the area, from discovery to its pairing with AIS."""
+    """A Sentinel-1 frame over a zone, from discovery to its pairing with AIS.
+
+    A frame over two zones is two scenes: it is downloaded once and analysed on each zone's grid.
+    """
 
     __tablename__ = "sar_scenes"
-    __table_args__ = (Index("ix_sar_scenes_footprint", "footprint", postgresql_using="gist"),)
+    __table_args__ = (
+        Index("ix_sar_scenes_footprint", "footprint", postgresql_using="gist"),
+        UniqueConstraint("name", "zone"),
+    )
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, comment="Copernicus Data Space product id")
-    name: Mapped[str] = mapped_column(unique=True)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, comment="the product id for scenes before zones")
+    product_id: Mapped[uuid.UUID] = mapped_column(comment="Copernicus Data Space product id")
+    zone: Mapped[str] = mapped_column(String(16), comment="key of the zone it was analysed for, see uatu.config")
+    name: Mapped[str]
     platform: Mapped[str] = mapped_column(CHAR(3))
     datatake: Mapped[str] = mapped_column(comment="satellite pass; shared by the frames of one pass")
     orbit_direction: Mapped[str]

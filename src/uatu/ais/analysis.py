@@ -35,32 +35,37 @@ class Outcome:
     gaps_closed: int
 
 
-async def analyse(
-    engine: AsyncEngine,
-    now: datetime,
-    bbox: BBox,
-    coast: CoastDistance,
-    p: Params = DEFAULT_PARAMS,
-    bathymetry: Bathymetry | None = None,
-) -> Outcome:
-    start = now - WINDOW
-    lat_min, lon_min, lat_max, lon_max = bbox
-    proj = LocalProjection((lon_min + lon_max) / 2, (lat_min + lat_max) / 2)
-    tracks = await store.tracks(engine, start, now, bbox)
-    infrastructure = await store.infrastructure_lines(engine, proj)
-    t0, t1 = start.timestamp(), now.timestamp()
+@dataclass(frozen=True)
+class Area:
+    """A zone as the track detectors need it."""
 
-    events = [
-        *detect_gaps(tracks, t1, bbox, coast.at, proj, p),
-        *detect_encounters(tracks, t0, t1, coast.at, proj, p),
-        *detect_loitering(tracks, coast.at, p),
-        *detect_infrastructure_loitering(
-            tracks, infrastructure, coast.at, proj, p, bathymetry.depth_at if bathymetry else None
-        ),
-        *detect_jumps(tracks, proj, p),
-    ]
+    bbox: BBox
+    coast: CoastDistance
+    bathymetry: Bathymetry | None = None  # without it, every vessel over a cable is an alert
+
+
+async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Params = DEFAULT_PARAMS) -> Outcome:
+    """Track detectors zone by zone (they need its coast and seabed); the rest once, everywhere recorded."""
+    start = now - WINDOW
+    t0, t1 = start.timestamp(), now.timestamp()
     stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days))
-    events = downgrade_in_crowds(events, stopped, proj, p)
+    events: list[Event] = []
+    tracked = 0
+    for area in areas:
+        lat_min, lon_min, lat_max, lon_max = area.bbox
+        proj = LocalProjection((lon_min + lon_max) / 2, (lat_min + lat_max) / 2)
+        tracks = await store.tracks(engine, start, now, area.bbox)
+        infrastructure = await store.infrastructure_lines(engine, proj)
+        depth = area.bathymetry.depth_at if area.bathymetry else None
+        found = [
+            *detect_gaps(tracks, t1, area.bbox, area.coast.at, proj, p),
+            *detect_encounters(tracks, t0, t1, area.coast.at, proj, p),
+            *detect_loitering(tracks, area.coast.at, p),
+            *detect_infrastructure_loitering(tracks, infrastructure, area.coast.at, proj, p, depth),
+            *detect_jumps(tracks, proj, p),
+        ]
+        events += downgrade_in_crowds(found, stopped, proj, p)
+        tracked += len(tracks)
     reports = await store.static_reports(engine, now - IDENTITY_HISTORY)
     events += detect_identity_changes(reports, start, await store.last_positions(engine, start))
     events += await store.sanctioned_present(engine, start, now)
@@ -68,7 +73,7 @@ async def analyse(
 
     closed = await store.close_resumed_gaps(engine)
     new = await store.save(engine, events)
-    return Outcome(new, len(events), len(tracks), closed)
+    return Outcome(new, len(events), tracked, closed)
 
 
 # --- alerts ----------------------------------------------------------------------------------------

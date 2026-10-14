@@ -96,15 +96,21 @@ async def test_sar_scene_lifecycle(engine):
     from uatu.sar.pipeline import SceneOutput
     from uatu.sar.raster import Grid
 
-    scene_id = "00000000-0000-0000-0000-00000000beef"
+    product_id = "00000000-0000-0000-0000-00000000beef"
     name = "S1C_IW_GRDH_1SDV_20261013T182543_20261013T182608_009870_013AD6_TEST.SAFE"
-    scene = Scene(scene_id, name, T0, T0 + timedelta(seconds=25), "ASCENDING", 147, 0, True, box(-7, 35, -5, 37))
+    scene = Scene(product_id, name, T0, T0 + timedelta(seconds=25), "ASCENDING", 147, 0, True, box(-7, 35, -5, 37))
+    scene_id = str(store.scene_id(product_id, "estrecho"))
     try:
-        assert await store.queue_new(engine, [scene], {scene_id: 0.42}) == [scene]
-        assert await store.queue_new(engine, [scene], {scene_id: 0.42}) == []  # already known
-        assert [s.id for s in await store.queued(engine)] == [scene_id]
+        queued = await store.queue_new(engine, [scene], {product_id: 0.42}, "estrecho")
+        assert queued == [store.ZoneScene(uuid.UUID(scene_id), "estrecho", scene)]
+        assert await store.queue_new(engine, [scene], {product_id: 0.42}, "estrecho") == []  # already known
+        other = await store.queue_new(engine, [scene], {product_id: 0.1}, "alboran")  # the same frame, another zone
+        assert [s.zone for s in other] == ["alboran"]
+        assert sorted(s.zone for s in await store.queued(engine)) == ["alboran", "estrecho"]
         loaded = await store.load(engine, uuid.UUID(scene_id))
-        assert loaded.name == scene.name and loaded.footprint.equals(scene.footprint)
+        assert loaded.zone == "estrecho" and loaded.scene.id == product_id
+        assert loaded.scene.name == scene.name and loaded.scene.footprint.equals(scene.footprint)
+        assert await store.product_still_needed(engine, loaded)  # queued for alboran too: keep the download
 
         def det(lon: float, lat: float) -> Detection:
             return Detection(lon, lat, 0, 0, 20, 150, 20, 10, -8, -20)
@@ -144,11 +150,13 @@ async def test_sar_scene_lifecycle(engine):
         assert [(c.mmsi, c.status) for c in checks] == [(MMSI_A, "detected")]
         assert all(T0 <= d.seen_at <= T0 + timedelta(seconds=25) for d in detections)
 
+        await store.mark_failed(engine, other[0].id, "boom")
+        assert not await store.product_still_needed(engine, loaded)
         await store.mark_failed(engine, uuid.UUID(scene_id), "boom")
         assert await store.queued(engine) == []
     finally:
         async with engine.begin() as conn:
-            await conn.execute(delete(SarScene).where(SarScene.id == uuid.UUID(scene_id)))
+            await conn.execute(delete(SarScene).where(SarScene.product_id == uuid.UUID(product_id)))
 
 
 async def test_ais_health_check_follows_the_recorder(engine):
@@ -248,7 +256,8 @@ async def test_fixed_objects_and_the_scene_report(engine):
     def scene(k: int) -> dict:
         start = T0 - timedelta(days=6 * (3 - k))
         return {
-            "id": scene_ids[k], "name": f"S1C_TEST_{k}", "platform": "S1C", "datatake": f"TEST{k:02d}",
+            "id": scene_ids[k], "product_id": scene_ids[k], "zone": "estrecho", "name": f"S1C_TEST_{k}",
+            "platform": "S1C", "datatake": f"TEST{k:02d}",
             "orbit_direction": "ASCENDING", "relative_orbit": 147, "acquired_from": start,
             "acquired_to": start + timedelta(seconds=25), "footprint": footprint, "aoi_coverage": 0.5,
             "status": "processed",
@@ -303,8 +312,10 @@ async def test_a_frame_published_twice_is_queued_once(engine):
     cog = Scene("00000000-0000-0000-0000-0000000d0002", f"{frame}_434A_COG.SAFE", T0, T0, "DESCENDING", 154, 0,
                 True, box(-7, 35, -5, 37))  # fmt: skip
     try:
-        assert await store.queue_new(engine, [standard], {standard.id: 0.8}) == [standard]
-        assert await store.queue_new(engine, [cog], {cog.id: 0.8}) == []  # published again, as COG, 40 min later
+        assert [s.scene for s in await store.queue_new(engine, [standard], {standard.id: 0.8}, "estrecho")] == [
+            standard
+        ]
+        assert await store.queue_new(engine, [cog], {cog.id: 0.8}, "estrecho") == []  # published again, 40 min later
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(SarScene).where(SarScene.name.like(f"{frame}%")))
@@ -313,7 +324,7 @@ async def test_a_frame_published_twice_is_queued_once(engine):
 async def test_a_pass_is_announced_once_its_frames_are_done(engine):
     from shapely import box
 
-    from uatu.db.models import SarDetection, SarScene
+    from uatu.db.models import RecordedZone, SarDetection, SarScene
     from uatu.sar import store
 
     first, second, late, old = (uuid.UUID(f"00000000-0000-0000-0000-0000000a{k:04d}") for k in range(4))
@@ -321,7 +332,8 @@ async def test_a_pass_is_announced_once_its_frames_are_done(engine):
     def frame(scene_id: uuid.UUID, k: int, datatake: str = "ANN001", start: datetime = T0) -> dict:
         at = start + timedelta(seconds=25 * k)
         return {
-            "id": scene_id, "name": f"S1C_ANNOUNCE_{k}_{datatake}", "platform": "S1C", "datatake": datatake,
+            "id": scene_id, "product_id": scene_id, "zone": "test", "name": f"S1C_ANNOUNCE_{k}_{datatake}",
+            "platform": "S1C", "datatake": datatake,
             "orbit_direction": "ASCENDING", "relative_orbit": 147, "acquired_from": at,
             "acquired_to": at + timedelta(seconds=25), "footprint": f"SRID=4326;{box(-6.0, 35.5, -5.0, 36.5).wkt}",
             "aoi_coverage": 0.4, "status": "queued",
@@ -333,11 +345,7 @@ async def test_a_pass_is_announced_once_its_frames_are_done(engine):
 
     try:
         async with engine.begin() as conn:
-            await conn.execute(
-                insert(IngestSession).values(
-                    id=uuid.uuid4(), connected_at=T0 - timedelta(days=1), close_reason="test:announce"
-                )
-            )
+            await conn.execute(insert(RecordedZone).values(key="test", since=T0 - timedelta(days=1)))
             await conn.execute(
                 insert(SarScene),
                 [frame(first, 0), frame(second, 1), frame(old, 0, "ANN000", datetime(2000, 1, 1, tzinfo=UTC))],
@@ -372,4 +380,4 @@ async def test_a_pass_is_announced_once_its_frames_are_done(engine):
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(SarScene).where(SarScene.id.in_([first, second, late, old])))
-            await conn.execute(delete(IngestSession).where(IngestSession.close_reason == "test:announce"))
+            await conn.execute(delete(RecordedZone).where(RecordedZone.key == "test"))
