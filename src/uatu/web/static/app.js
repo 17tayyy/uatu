@@ -301,6 +301,9 @@ function addLayers() {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
+  // Land under the radar image (which shows the land too where the satellite imaged it), the
+  // coastline over it.
+  map.addLayer({ id: "land", type: "fill", source: "land", paint: { "fill-color": C.land } });
   map.addLayer({
     id: "coverage",
     type: "fill",
@@ -311,7 +314,6 @@ function addLayers() {
       "fill-outline-color": C.page,
     },
   });
-  map.addLayer({ id: "land", type: "fill", source: "land", paint: { "fill-color": C.land } });
   map.addLayer({ id: "coast", type: "line", source: "land", paint: { "line-color": C.coast, "line-width": 0.8 } });
   map.addLayer({
     id: "infra-cables",
@@ -333,9 +335,13 @@ function addLayers() {
     source: "infra",
     paint: { "circle-radius": 2.5, "circle-color": C.infra, "circle-stroke-width": 1, "circle-stroke-color": C.page },
   });
-  // Outside the watched area: dimmed, so its edge (and the radar image beyond it) reads as a boundary.
-  map.addLayer({ id: "outside", type: "fill", source: "outside", paint: { "fill-color": C.page, "fill-opacity": 0.5 } });
-  map.addLayer({ id: "area-edge", type: "line", source: "outside", paint: { "line-color": C.muted, "line-width": 1, "line-opacity": 0.5 } });
+  // The edge of the watched area: AIS is recorded and radar processed inside it only.
+  map.addLayer({
+    id: "area-edge",
+    type: "line",
+    source: "outside",
+    paint: { "line-color": C.muted, "line-width": 1, "line-opacity": 0.6, "line-dasharray": [4, 3] },
+  });
   map.addLayer({
     id: "footprint",
     type: "line",
@@ -776,6 +782,7 @@ function renderLegend() {
   if (state.layers.coverage) {
     parts.push(h("h3", null, "Recepción AIS"), Object.values(RECEPTION).map((r) => legendItem("square", r.color, r.label)));
   }
+  parts.push(h("h3", null, "Mapa"), legendItem("dash", C.muted, "Límite de la zona vigilada"));
   fill(document.getElementById("legend"), parts);
 }
 

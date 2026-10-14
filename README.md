@@ -174,10 +174,11 @@ A map and a side panel at `http://<host>:8000` (the `web` service), in Spanish:
 - Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute.
 
 It draws its own base map with MapLibre GL, no third-party tiles: land from the SAR land mask in
-the watched area, and from [Natural Earth](https://www.naturalearthdata.com) (public domain) around
-it, dimmed. The radar image covers the part of the area inside the satellite's frame, which is
-tilted (Sentinel-1 flies a near-polar orbit and looks sideways), so a pass can leave a corner of the
-area without image.
+the watched area (its edge dashed), and from [Natural Earth](https://www.naturalearthdata.com)
+(public domain) around it. The radar image, land included, covers the part of the area inside the
+satellite's frame, which is tilted (Sentinel-1 flies a near-polar orbit and looks sideways): a pass
+can leave part of the area without image. It is saved in Web Mercator, the projection web maps draw
+in, so that each ship's echo lands under its detection.
 The API behind it is read-only, under `/api/v1` (documented at `/docs`).
 
 **It has no authentication: keep it on the local network, never forward the port.**
