@@ -7,7 +7,9 @@ Sidelobe suppression looks across tiles, so it runs once at the end.
 
 Besides the detections, the scene leaves coarse rasters for display and for pairing with
 AIS: the backscatter, the land, and where the detector searched; and, on request, the
-backscatter at 20 m, the sensor's actual resolution, written tile by tile to a GeoTIFF.
+backscatter at 20 m, the sensor's actual resolution, despeckled and coloured from both
+polarisations (see radar_colour), over the sea only (the map shows land from optical imagery),
+written tile by tile to a GeoTIFF.
 """
 
 import math
@@ -24,7 +26,7 @@ import structlog
 from rasterio.windows import Window
 
 from uatu.sar.detect import CfarParams, Detection, candidates, sea_mask, suppress_sidelobes
-from uatu.sar.raster import CalibratedBand, Grid, backscatter_grey, read_land
+from uatu.sar.raster import CalibratedBand, Grid, despeckle, radar_colour, read_land
 
 log = structlog.get_logger(component="sar")
 
@@ -48,8 +50,8 @@ def process(
     image_path: Path | None = None,
     image_factor: int = 2,
 ) -> SceneOutput:
-    """image_path: also write the backscatter there, `image_factor` times coarser than the grid, as grey levels
-    (see backscatter_grey) on the grid's projection."""
+    """image_path: also write the backscatter there, `image_factor` times coarser than the grid, in colour
+    (see radar_colour) on the grid's projection."""
     halo = _halo_px(params, grid.resolution)
     coarse = grid.coarsened(coarse_factor)
     fine = grid.coarsened(image_factor)
@@ -85,15 +87,21 @@ def process(
 
             valid = sea_mask(vv, land, part, params.coast_buffer_m)
             coarse_vv[coarse_window] = _block_mean(vv[inner], coarse_factor)
+            vh = None
             if image is not None:
-                grey = backscatter_grey(_block_mean(vv[inner], image_factor))
-                image.write(grey, 1, window=Window(core.col_off // image_factor, core.row_off // image_factor,
-                                                   grey.shape[1], grey.shape[0]))  # fmt: skip
+                vh = vh_band.warp(part)
+                rgb = radar_colour(
+                    _block_mean(despeckle(vv)[inner], image_factor), _block_mean(despeckle(vh)[inner], image_factor)
+                )
+                rgb[:, _block_mean(land[inner], image_factor) > 0.5] = 0  # land: no data, transparent
+                image.write(rgb, window=Window(core.col_off // image_factor, core.row_off // image_factor,
+                                               rgb.shape[2], rgb.shape[1]))  # fmt: skip
             coarse_searched[coarse_window] = _block_mean(valid[inner], coarse_factor) > 0.5
             if not valid[inner].any():
                 continue  # no sea searched here
 
-            vh = vh_band.warp(part)
+            if vh is None:
+                vh = vh_band.warp(part)
             in_tile = [d for d in candidates(vv, vh, valid, part, params) if _inside(d, grid, core)]
             found += in_tile
             log.debug("tile_done", window=f"{core.row_off},{core.col_off}", detections=len(in_tile))
@@ -128,7 +136,8 @@ def _image(path: Path | None, grid: Grid) -> Iterator[Any]:
     if path is None:
         yield None
         return
-    with rasterio.open(path, "w", **grid.profile(dtype="uint8", nodata=0, blockxsize=512, blockysize=512)) as dst:
+    profile = grid.profile(dtype="uint8", count=3, nodata=0, blockxsize=512, blockysize=512, photometric="RGB")
+    with rasterio.open(path, "w", **profile) as dst:
         yield dst
 
 

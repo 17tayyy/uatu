@@ -11,6 +11,15 @@ class InfrastructureProperties(OutputSchema):
     status: str | None
 
 
+class SatelliteLayer(OutputSchema):
+    """Optical imagery for the map's background, as raster tiles."""
+
+    tiles: list[str]  # {z}/{x}/{y} URL templates
+    tile_size: int
+    max_zoom: int
+    attribution: str  # HTML
+
+
 class MapArea(OutputSchema):
     """The area Uatu watches, as a lon/lat box."""
 

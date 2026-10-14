@@ -399,3 +399,13 @@ async def test_page_and_health(client):
     land = await ok(client, "/api/v1/map/land")  # no land mask here: Natural Earth everywhere
     assert land["features"]
     assert all(f["geometry"]["type"] in ("Polygon", "MultiPolygon") for f in land["features"])
+
+
+def test_the_satellite_layer_is_maptiler_with_a_key_and_sentinel_2_without():
+    from uatu.web.basemap.service import satellite
+
+    maptiler = satellite("secret-key")
+    assert maptiler.tiles == ["https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=secret-key"]
+    assert (maptiler.tile_size, "MapTiler" in maptiler.attribution) == (512, True)
+    eox = satellite(None)
+    assert "s2cloudless" in eox.tiles[0] and eox.tile_size == 256

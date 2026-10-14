@@ -23,6 +23,7 @@ from rasterio.errors import RasterioIOError
 from rasterio.transform import GCPTransformer
 from rasterio.warp import Resampling, reproject, transform, transform_bounds
 from rasterio.windows import Window
+from scipy.ndimage import uniform_filter
 from shapely import Geometry
 
 WORLDCOVER_URL = "/vsicurl/https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_{}_Map.tif"
@@ -241,6 +242,43 @@ def _member_paths(zip_path: Path, polarisation: str) -> tuple[str, str]:
     measurement = next(n for n in names if "/measurement/" in n and pol in n and n.endswith(".tiff"))
     calibration = next(n for n in names if "/annotation/calibration/calibration-" in n and pol in n)
     return measurement, calibration
+
+
+def despeckle(sigma0: np.ndarray, size: int = 5, looks: float = 4.4) -> np.ndarray:
+    """Lee filter: smooth the radar's speckle where the sea or the land is uniform, keep edges and ships.
+
+    Each pixel moves towards its neighbourhood's mean in proportion to how much of the local variation is
+    speckle (a GRD product has ~4.4 looks) rather than structure. NaN (no data) is ignored and kept.
+    """
+    valid = np.isfinite(sigma0)
+    x = np.where(valid, sigma0, 0).astype(np.float32)
+    n = uniform_filter(valid.astype(np.float32), size)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mean = uniform_filter(x, size) / n
+        variance = np.maximum(uniform_filter(x * x, size) / n - mean * mean, 0)
+        ci2 = variance / (mean * mean)  # local coefficient of variation, squared
+        cu2 = 1 / looks  # the same for pure speckle
+        weight = np.clip((ci2 - cu2) / (ci2 * (1 + cu2)), 0, 1)
+        out = mean + np.nan_to_num(weight) * (x - mean)
+    return np.where(valid, out, np.nan).astype(np.float32)
+
+
+SEA_RGB = np.array([8.0, 22.0, 42.0])  # what calm water shows as: dark navy
+
+
+def radar_colour(vv: np.ndarray, vh: np.ndarray, gamma: float = 1.5) -> np.ndarray:
+    """Radar for the eye: dark navy where the sea returns little, to white where it returns most (ships), warmer
+    where the cross-polarised return (VH) is strong too, as with ships, rather than wind or waves.
+
+    Returns 3 x height x width levels 1-255, 0 where there is no data; VV alone where VH is missing.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vv_db, vh_db = 10 * np.log10(vv), 10 * np.log10(vh)
+    strength = np.clip((vv_db + 25) / 25, 0, 1) ** gamma  # -25 dB (calm sea) .. 0 dB
+    cross = np.where(np.isfinite(vh_db), np.clip((vh_db + 30) / 22, 0, 1), strength)  # -30 .. -8 dB
+    white = np.stack([strength, (0.7 * strength + 0.3 * cross), 0.85 * strength])
+    rgb = SEA_RGB[:, None, None] + (255 - SEA_RGB[:, None, None]) * np.clip(white, 0, 1)
+    return np.where(np.isfinite(vv_db), np.clip(rgb, 1, 255), 0).astype(np.uint8)
 
 
 def backscatter_grey(sigma0: np.ndarray) -> np.ndarray:

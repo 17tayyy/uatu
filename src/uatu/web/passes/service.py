@@ -293,27 +293,32 @@ def tile_lonlat_bounds(z: int, x: int, y: int) -> tuple[float, float, float, flo
 
 
 def read_radar_tile(radar: Path, z: int, x: int, y: int) -> tuple[np.ndarray, np.ndarray] | None:
-    """A frame's radar image over one map tile, as grey levels and transparency; None if it has none there."""
+    """A frame's radar image over one map tile, as RGB levels (3 x 256 x 256; grey images repeated) and
+    transparency; None if it has none there."""
     left, bottom, right, top = _tile_bounds(z, x, y)
     with rasterio.open(radar) as src:
         b = src.bounds
         if right <= b.left or left >= b.right or top <= b.bottom or bottom >= b.top:
             return None
         window = from_bounds(left, bottom, right, top, src.transform)
-        shape = (TILE_PX, TILE_PX)
-        grey = src.read(1, window=window, out_shape=shape, boundless=True, fill_value=0, resampling=Resampling.bilinear)
-        mask = src.read_masks(1, window=window, out_shape=shape, boundless=True, resampling=Resampling.nearest)
-    return (grey, mask) if mask.any() else None
+        shape = (src.count, TILE_PX, TILE_PX)
+        levels = src.read(window=window, out_shape=shape, boundless=True, fill_value=0, resampling=Resampling.bilinear)
+        mask = src.read_masks(1, window=window, out_shape=shape[1:], boundless=True, resampling=Resampling.nearest)
+    if not mask.any():
+        return None
+    return (np.repeat(levels, 3, axis=0) if levels.shape[0] == 1 else levels), mask
+
+
+def tile_png(rgb: np.ndarray, alpha: np.ndarray) -> bytes:
+    out = io.BytesIO()
+    Image.fromarray(np.dstack([*rgb, alpha]), mode="RGBA").save(out, format="PNG", compress_level=3)
+    return out.getvalue()
 
 
 def radar_tile(radar: Path, z: int, x: int, y: int) -> bytes | None:
-    """The 256 px PNG (grey and transparency) of a frame's radar image over one map tile; None if it has none."""
+    """The 256 px PNG of a frame's radar image over one map tile; None if it has none there."""
     read = read_radar_tile(radar, z, x, y)
-    if read is None:
-        return None
-    out = io.BytesIO()
-    Image.fromarray(np.dstack(read), mode="LA").save(out, format="PNG", compress_level=3)
-    return out.getvalue()
+    return None if read is None else tile_png(*read)
 
 
 async def get_radar_tiles(db: AsyncSession, data_dir: Path, id_: str, frame: int) -> Path:
