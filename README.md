@@ -18,7 +18,7 @@ aisstream.io ──websocket──▶ parse ──▶ bounded queue ──batche
                               └──────▶ bounded queue ──batches──▶ raw archive (.jsonl.gz)
 ```
 
-- Subscribes to the area of interest (default lat 35.5–36.5, lon -6.5 – -4.5).
+- Subscribes to every zone in `uatu/config.py` (the Strait: lat 35.5–36.7, lon -6.5 – -4.5).
 - Reconnects with exponential backoff and jitter, and also when an open connection goes
   silent (`STALE_TIMEOUT_S`).
 - Buffers in memory and writes in batches. If Postgres goes down, the batch is retried
@@ -265,7 +265,7 @@ Environment variables (or `.env`):
 | `AISSTREAM_API_KEY`  | required                              |                                            |
 | `DATABASE_URL`       | `postgresql+asyncpg://uatu:uatu@localhost:5432/uatu` | set by docker compose       |
 | `ZONES`              | all six                               | zones the recorder records: `estrecho,alboran,murcia,valencia,cataluna,baleares` (`uatu/config.py`) |
-| `AIS_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`; AIS analysis and dashboard |
+| `AIS_BBOX`           | `35.5,-6.5,36.7,-4.5`                 | `lat_min,lon_min,lat_max,lon_max`; AIS analysis and dashboard |
 | `RAW_ARCHIVE_DIR`    | unset (disabled)                      | `/data/raw` volume in docker compose       |
 | `BATCH_SIZE`         | `1000`                                | rows per database transaction              |
 | `FLUSH_INTERVAL_S`   | `2`                                   | max wait before writing a partial batch    |
@@ -275,7 +275,7 @@ Environment variables (or `.env`):
 | `STATS_INTERVAL_S`   | `60`                                  |                                            |
 | `LOG_LEVEL` / `LOG_FORMAT` | `INFO` / `json`                 | `LOG_FORMAT=console` for local development |
 | `CDSE_USERNAME` / `CDSE_PASSWORD` | unset                    | [Copernicus Data Space](https://dataspace.copernicus.eu) account, to download scenes |
-| `SAR_BBOX`           | `35.5,-6.5,36.5,-4.5`                 | area for SAR search and detection          |
+| `SAR_BBOX`           | `35.5,-6.5,36.7,-4.5`                 | area for SAR search and detection          |
 | `SAR_DATA_DIR`       | `data/sar`                            | downloaded scenes and outputs              |
 | `REDIS_URL`          | `redis://localhost:6379`              | ArdiQ broker, set by docker compose        |
 | `SAR_DISCOVER_MINUTES` | `10`                                | how often the worker looks for new scenes  |

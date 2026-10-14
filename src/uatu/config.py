@@ -9,13 +9,12 @@ from shapely import Polygon, box
 
 type BBox = tuple[float, float, float, float]  # lat_min, lon_min, lat_max, lon_max
 
-STRAIT_OF_GIBRALTAR: BBox = (35.5, -6.5, 36.5, -4.5)
+STRAIT_OF_GIBRALTAR: BBox = (35.5, -6.5, 36.7, -4.5)  # up to Marbella and Fuengirola
 
 
 @dataclass(frozen=True)
 class Zone:
-    """A stretch of coast Uatu watches. Zones touch without overlapping, except the Alborán Sea,
-    which takes in the stretch of the Costa del Sol north of the Strait's box."""
+    """A stretch of coast Uatu watches. Zones touch without overlapping."""
 
     key: str
     name: str  # for people, in Spanish
@@ -27,8 +26,8 @@ ZONES: dict[str, Zone] = {
     z.key: z
     for z in [
         Zone("estrecho", "Estrecho de Gibraltar", STRAIT_OF_GIBRALTAR),
-        # Marbella to Águilas, with the island of Alborán and Melilla: the Alborán Sea.
-        Zone("alboran", "Mar de Alborán", (35.2, -5.2, 37.3, -1.6)),
+        # Torremolinos to Águilas, with the island of Alborán and Melilla: the Alborán Sea.
+        Zone("alboran", "Mar de Alborán", (35.2, -4.5, 37.3, -1.6)),
         # Águilas to Cabo de la Nao: Cartagena, Mar Menor, Alicante, Benidorm.
         Zone("murcia", "Murcia y Alicante", (37.0, -1.6, 38.9, 0.5)),
         # Denia to Vinaròs: Valencia, Sagunto, Castellón.

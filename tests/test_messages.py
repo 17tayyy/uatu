@@ -143,6 +143,6 @@ def test_the_recorder_subscribes_to_every_zone(monkeypatch):
     monkeypatch.setenv("AISSTREAM_API_KEY", "test")
     monkeypatch.setenv("ZONES", "estrecho,cataluna")
     boxes = RecorderSettings(_env_file=None).bounding_boxes
-    assert boxes == [[[35.5, -6.5], [36.5, -4.5]], [[40.5, 0.5], [42.5, 3.4]]]
+    assert boxes == [[[35.5, -6.5], [36.7, -4.5]], [[40.5, 0.5], [42.5, 3.4]]]
     monkeypatch.delenv("ZONES")
     assert len(RecorderSettings(_env_file=None).bounding_boxes) == 6  # every zone by default

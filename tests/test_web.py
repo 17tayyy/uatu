@@ -111,7 +111,7 @@ async def rows():
                     "status": "processed",
                 },
                 frame
-                | {  # overlaps the first by 0.2°: together they cover 60% of the area, not 70%
+                | {  # overlaps the first by 0.2°: together 1.2° x 1° of the 2° x 1.2° area, 50%
                     "id": SCENE2_ID,
                     "name": SCENE2_NAME,
                     "acquired_from": NOW - timedelta(minutes=59, seconds=35),
@@ -237,7 +237,7 @@ async def test_passes(client, tmp_path):
     passes = await ok(client, "/api/v1/passes")
     ours = next(p for p in passes if p["id"] == PASS_ID)
     expected = {
-        "frames": 2, "detections": 3, "matched": 1, "no_coverage": 1, "fixed": 0, "candidates": 1, "coverage": 0.6,
+        "frames": 2, "detections": 3, "matched": 1, "no_coverage": 1, "fixed": 0, "candidates": 1, "coverage": 0.5,
     }  # fmt: skip
     assert {k: ours[k] for k in expected} == expected
     assert ours["has_image"] is False
@@ -356,7 +356,7 @@ async def test_page_and_health(client):
     assert (await client.get("/app.js")).status_code == 200
     assert (await client.get("/health/live")).json() == {"status": "ok"}
     assert (await client.get("/health/ready")).json() == {"status": "ok"}
-    assert (await ok(client, "/api/v1/map/area")) == {"west": -6.5, "south": 35.5, "east": -4.5, "north": 36.5}
+    assert (await ok(client, "/api/v1/map/area")) == {"west": -6.5, "south": 35.5, "east": -4.5, "north": 36.7}
     land = await ok(client, "/api/v1/map/land")  # no land mask here: Natural Earth everywhere
     assert land["features"]
     assert all(f["geometry"]["type"] in ("Polygon", "MultiPolygon") for f in land["features"])
