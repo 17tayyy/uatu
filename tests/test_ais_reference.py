@@ -51,7 +51,8 @@ def test_world_ports_by_the_names_people_use():
         row("38330.0", "Europa Point", "Gibraltar", "36.13", "-5.35"),
         row("45730.0", "Ceuta", "Spain", "35.9", "-5.32"),
         row("", "Broken", "Nowhere", "x", "y"),
+        row("45730.0", "Ceuta", "Spain", "35.89", "-5.32"),  # the same number again: the later row wins
     ]
     gibraltar, ceuta = world_ports(rows)
     assert (gibraltar["id"], gibraltar["name"], gibraltar["locode"]) == (38330, "Gibraltar", None)
-    assert (ceuta["name"], ceuta["lat"], ceuta["lon"]) == ("Ceuta", 35.9, -5.32)
+    assert (ceuta["name"], ceuta["lat"], ceuta["lon"]) == ("Ceuta", 35.89, -5.32)

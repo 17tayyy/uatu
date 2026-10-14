@@ -128,8 +128,9 @@ def _status(value: object) -> str | None:
 
 
 def world_ports(rows: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
-    """Rows of the World Port Index CSV as ports."""
-    ports = []
+    """Rows of the World Port Index CSV as ports, one per index number (a couple of numbers appear
+    twice: the later row wins)."""
+    ports: dict[int, dict[str, Any]] = {}
     for row in rows:
         try:
             port_id = int(float(row["World Port Index Number"]))
@@ -137,18 +138,16 @@ def world_ports(rows: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
         except KeyError, ValueError:
             continue
         name = row["Main Port Name"].strip()
-        ports.append(
-            {
-                "id": port_id,
-                "name": PORT_NAMES.get(name, name),
-                "country": row["Country Code"].strip(),
-                "locode": row["UN/LOCODE"].strip() or None,
-                "size": row["Harbor Size"].strip() or None,
-                "lat": lat,
-                "lon": lon,
-            }
-        )
-    return ports
+        ports[port_id] = {
+            "id": port_id,
+            "name": PORT_NAMES.get(name, name),
+            "country": row["Country Code"].strip(),
+            "locode": row["UN/LOCODE"].strip() or None,
+            "size": row["Harbor Size"].strip() or None,
+            "lat": lat,
+            "lon": lon,
+        }
+    return list(ports.values())
 
 
 async def refresh_ports(engine: AsyncEngine, http: httpx.AsyncClient) -> int:
