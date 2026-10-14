@@ -71,7 +71,9 @@ def _summaries(bbox: BBox) -> Select:
     counts = _detection_counts()
     recording_since = select(func.min(IngestSession.connected_at)).scalar_subquery()
     area = func.ST_GeomFromText(bbox_polygon(bbox).wkt, 4326)
-    footprint = func.ST_Union(cast(SarScene.footprint, GeometryType))
+    # The frames of a pass abut with slivers of ~100 m between their footprints: close them (< 1 km).
+    union = func.ST_Union(cast(SarScene.footprint, GeometryType))
+    footprint = func.ST_Buffer(func.ST_Buffer(union, 0.005, "join=mitre"), -0.005, "join=mitre")
     return (
         select(
             SarScene.platform,
