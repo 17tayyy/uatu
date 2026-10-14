@@ -206,3 +206,30 @@ async def test_sanctioned_vessels_seen_in_the_area_are_events(engine):
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(SanctionedVessel).where(SanctionedVessel.source_id == "test"))
+
+
+async def test_a_sanctioned_vessels_visit_is_one_event_and_severity_follows_the_latest(engine):
+    from uatu.ais import store
+    from uatu.ais.events import Event
+    from uatu.db.models import AisEvent
+
+    def seen(start_h: float, end_h: float, severity: int = 3, kind: str = "sanctioned_vessel") -> Event:
+        start, end = T0 + timedelta(hours=start_h), T0 + timedelta(hours=end_h)
+        return Event(kind, severity, MMSI_A, start, 36.0, -5.6, {"name": "TEST"}, end)
+
+    try:
+        assert len(await store.save(engine, [seen(0, 2)])) == 1
+        # Seen again after midnight, past a 3 h stretch with no reception: the same visit.
+        assert await store.save(engine, [seen(5, 6)]) == []
+        # A cable event re-detected with more history behind it drops to informative.
+        assert len(await store.save(engine, [seen(0, 1, kind="infrastructure_loitering")])) == 1
+        assert await store.save(engine, [seen(0, 1.5, severity=1, kind="infrastructure_loitering")]) == []
+        async with engine.connect() as conn:
+            rows = (await conn.execute(select(AisEvent).where(AisEvent.mmsi == MMSI_A).order_by(AisEvent.kind))).all()
+        assert [(r.kind, r.severity, r.end_at - T0) for r in rows] == [
+            ("infrastructure_loitering", 1, timedelta(hours=1.5)),
+            ("sanctioned_vessel", 3, timedelta(hours=6)),
+        ]
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(AisEvent).where(AisEvent.mmsi == MMSI_A))

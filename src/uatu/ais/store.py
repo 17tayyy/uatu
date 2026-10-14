@@ -20,8 +20,11 @@ from uatu.db.models import StaticReport as Report
 
 # Events that span time and are re-detected on every run: a new detection that overlaps (or
 # follows within this gap) one already stored extends it instead of adding another.
-SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering"}
+SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", "sanctioned_vessel"}
 MERGE_GAP = timedelta(minutes=30)
+# A sanctioned vessel's visit lasts until it has been gone this long: one alert per visit, even
+# across midnight or a stretch with no reception.
+MERGE_GAPS = {"sanctioned_vessel": timedelta(hours=12)}
 
 
 async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> list[Track]:
@@ -127,9 +130,15 @@ async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime
         .limit(1)
         .lateral("last")
     )
+    first_seen = (
+        select(func.min(Position.received_at))
+        .where(Position.mmsi == Vessel.mmsi, Position.received_at.between(start, end))
+        .scalar_subquery()
+    )
     by_mmsi = func.strpos(SanctionedVessel.mmsis, cast(Vessel.mmsi, Text)) > 0
     stmt = (
         select(
+            first_seen.label("first_seen"),
             Vessel.mmsi,
             Vessel.name,
             Vessel.imo,
@@ -156,9 +165,7 @@ async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime
             "matched_by": "imo" if r.by_imo else "mmsi",
         }
         severity = 3 if r.by_imo else 2  # MMSIs get reassigned; an IMO stays with the hull
-        events.append(
-            Event("sanctioned_vessel", severity, r.mmsi, ais_day(r.received_at), r.lat, r.lon, details, r.received_at)
-        )
+        events.append(Event("sanctioned_vessel", severity, r.mmsi, r.first_seen, r.lat, r.lon, details, r.received_at))
     return events
 
 
@@ -212,6 +219,7 @@ async def save(engine: AsyncEngine, events: list[Event]) -> list[Event]:
     async with engine.begin() as conn:
         for e in events:
             if e.kind in SPANNING:
+                gap = MERGE_GAPS.get(e.kind, MERGE_GAP)
                 existing = (
                     await conn.execute(
                         select(AisEvent.id, AisEvent.start_at, AisEvent.end_at)
@@ -219,8 +227,8 @@ async def save(engine: AsyncEngine, events: list[Event]) -> list[Event]:
                             AisEvent.kind == e.kind,
                             AisEvent.mmsi == e.mmsi,
                             AisEvent.other_mmsi.is_not_distinct_from(e.other_mmsi),
-                            AisEvent.start_at <= (e.end or e.start) + MERGE_GAP,
-                            or_(AisEvent.end_at.is_(None), AisEvent.end_at >= e.start - MERGE_GAP),
+                            AisEvent.start_at <= (e.end or e.start) + gap,
+                            or_(AisEvent.end_at.is_(None), AisEvent.end_at >= e.start - gap),
                         )
                         .order_by(AisEvent.start_at)
                         .limit(1)
@@ -230,7 +238,15 @@ async def save(engine: AsyncEngine, events: list[Event]) -> list[Event]:
                     await conn.execute(
                         update(AisEvent)
                         .where(AisEvent.id == existing.id)
-                        .values(end_at=e.end, details=_extended(e, existing.start_at), updated_at=func.now())
+                        .values(
+                            end_at=e.end,
+                            # The latest detection knows more (longer history, e.g. of waiting areas).
+                            severity=e.severity,
+                            lat=e.lat,
+                            lon=e.lon,
+                            details=_extended(e, existing.start_at),
+                            updated_at=func.now(),
+                        )
                     )
                     continue
             stmt = (
