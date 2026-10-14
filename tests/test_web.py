@@ -127,6 +127,8 @@ async def rows():
             "distance_m": None,
             "suspected_mmsi": None,
             "suspect_silent_minutes": None,
+            "ais_vessels_nearby": None,
+            "ais_reports_nearby": None,
             "pixels": 20,
             "peak_db": 5.0,
             "vv_db": 0.0,
@@ -152,6 +154,8 @@ async def rows():
                     "lon": -4.9,
                     "status": "no_coverage",
                     "length_m": 50.0,
+                    "ais_vessels_nearby": 2,
+                    "ais_reports_nearby": 3,
                     "suspected_mmsi": None,
                     "suspect_silent_minutes": None,
                 },
@@ -232,6 +236,10 @@ async def test_passes(client, tmp_path):
     assert kinds["matched"]["length_m"] == 240
     assert kinds["matched"]["vh_db"] == -9.9
     assert kinds["went_silent"]["suspect_name"] == "TEST SILENT"
+    assert (kinds["no_coverage"]["ais_vessels_nearby"], kinds["no_coverage"]["ais_reports_nearby"]) == (2, 3)
+    assert detail["reception_rule"] == {
+        "radius_m": 3000.0, "window_hours": 2.0, "min_vessels": 3, "min_reports_per_vessel": 3.0
+    }  # fmt: skip
     checks = [f["properties"] for f in detail["ais_geojson"]["features"]]
     assert [(c["name"], c["status"]) for c in checks] == [("TEST ALFA", "detected")]  # seen in one frame: seen
     assert detail["images"] == []

@@ -402,6 +402,16 @@ div.row:hover { background: none; }
 
 .popup .text { margin: 4px 0 0; color: var(--ink-2); }
 
+.reception { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+
+.reception-title { margin-bottom: 4px; color: var(--muted); }
+
+.reception-row { display: flex; justify-content: space-between; gap: 12px; color: var(--ink); }
+
+.reception-row .need { color: var(--muted); }
+
+.reception-verdict { margin-top: 4px; color: var(--ink-2); }
+
 .hover-popup .maplibregl-popup-content { padding: 6px 10px; }
 
 .maplibregl-ctrl-group { background: var(--panel); border: 1px solid var(--line); box-shadow: none !important; }

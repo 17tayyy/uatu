@@ -46,6 +46,9 @@ class DetectionProperties(OutputSchema):
     suspect_name: str | None
     suspect_silent_minutes: Whole | None
     fixed_passes_seen: int | None
+    # For unpaired detections: AIS heard around them at the time (see ReceptionRule)
+    ais_vessels_nearby: int | None
+    ais_reports_nearby: int | None
 
 
 class AisCheckProperties(OutputSchema):
@@ -61,7 +64,17 @@ class ImageOverlay(OutputSchema):
     coordinates: list[list[float]]  # lon/lat of top-left, top-right, bottom-right, bottom-left
 
 
+class ReceptionRule(OutputSchema):
+    """When AIS counts as well received around an unpaired detection, so that its silence means something."""
+
+    radius_m: float
+    window_hours: float  # either side of the pass
+    min_vessels: int
+    min_reports_per_vessel: float
+
+
 class PassDetail(PassSummary):
     images: list[ImageOverlay]  # one per frame with a radar overlay
+    reception_rule: ReceptionRule
     detections_geojson: FeatureCollection[DetectionProperties]
     ais_geojson: FeatureCollection[AisCheckProperties]

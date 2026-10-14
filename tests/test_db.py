@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, select, update
 
 from uatu import db
 from uatu.db.models import IngestSession, Position, StaticReport, Vessel
@@ -87,7 +87,7 @@ async def test_sar_scene_lifecycle(engine):
 
     from uatu.db.models import SarAisCheck, SarDetection, SarScene
     from uatu.sar import store
-    from uatu.sar.ais import AisVessel
+    from uatu.sar.ais import AisVessel, Coverage
     from uatu.sar.analysis import Analysis
     from uatu.sar.annotation import AcquisitionGeometry
     from uatu.sar.catalog import Scene
@@ -112,7 +112,8 @@ async def test_sar_scene_lifecycle(engine):
         matched, dark, uncovered = det(-5.6, 36.0), det(-5.5, 36.0), det(-6.3, 36.1)
         vessel = AisVessel(MMSI_A, "TEST", 70, 150, -5.6, 36.0, 12.0, 90.0, T0, 30.0)
         expected = Expected(vessel, 0, 0, -120.0, (0, 0), 1000.0)
-        result = MatchResult([Match(matched, expected, 48.0)], [dark], [], [], [uncovered], {dark: 40, uncovered: 0})
+        nearby = {dark: Coverage(40, 400), uncovered: Coverage(2, 3)}
+        result = MatchResult([Match(matched, expected, 48.0)], [dark], [], [], [uncovered], nearby)
         corners = np.array([(-7.0, 35.0), (-4.0, 35.0), (-7.0, 37.0), (-4.0, 37.0)])
         geometry = AcquisitionGeometry(T0, 347.0, 7600.0, corners, np.array([0, 0, 25, 25.0]), np.full(4, 850e3),
                                        np.full(4, 35.0))  # fmt: skip
@@ -137,8 +138,8 @@ async def test_sar_scene_lifecycle(engine):
             detections = (await conn.execute(select(SarDetection).where(SarDetection.scene_id == row.id))).all()
             checks = (await conn.execute(select(SarAisCheck).where(SarAisCheck.scene_id == row.id))).all()
         assert (row.status, row.matched, row.dark) == ("processed", 1, 1)
-        assert sorted((d.status, d.mmsi, d.ais_vessels_nearby) for d in detections) == [
-            ("dark", None, 40), ("matched", MMSI_A, None), ("no_coverage", None, 0)
+        assert sorted((d.status, d.mmsi, d.ais_vessels_nearby, d.ais_reports_nearby) for d in detections) == [
+            ("dark", None, 40, 400), ("matched", MMSI_A, None, None), ("no_coverage", None, 2, 3)
         ]  # fmt: skip
         assert [(c.mmsi, c.status) for c in checks] == [(MMSI_A, "detected")]
         assert all(T0 <= d.seen_at <= T0 + timedelta(seconds=25) for d in detections)
@@ -281,7 +282,7 @@ async def test_fixed_objects_and_the_scene_report(engine):
             await conn.execute(insert(SarDetection), rows)
         assert await store.rebuild_fixed_objects(engine, srid=32630) == {"recurring": 2, "fixed": 1}
 
-        report = await store.scene_report(engine, scene_ids[3])
+        report = await store.pass_report(engine, [scene_ids[3]])
         assert (report.detections, report.matched, report.at_fixed_objects) == (6, 1, 1)
         assert sorted(c.kind for c in report.candidates) == ["reception_gap", "unidentified", "went_silent"]
     finally:
@@ -307,3 +308,68 @@ async def test_a_frame_published_twice_is_queued_once(engine):
     finally:
         async with engine.begin() as conn:
             await conn.execute(delete(SarScene).where(SarScene.name.like(f"{frame}%")))
+
+
+async def test_a_pass_is_announced_once_its_frames_are_done(engine):
+    from shapely import box
+
+    from uatu.db.models import SarDetection, SarScene
+    from uatu.sar import store
+
+    first, second, late, old = (uuid.UUID(f"00000000-0000-0000-0000-0000000a{k:04d}") for k in range(4))
+
+    def frame(scene_id: uuid.UUID, k: int, datatake: str = "ANN001", start: datetime = T0) -> dict:
+        at = start + timedelta(seconds=25 * k)
+        return {
+            "id": scene_id, "name": f"S1C_ANNOUNCE_{k}_{datatake}", "platform": "S1C", "datatake": datatake,
+            "orbit_direction": "ASCENDING", "relative_orbit": 147, "acquired_from": at,
+            "acquired_to": at + timedelta(seconds=25), "footprint": f"SRID=4326;{box(-6.0, 35.5, -5.0, 36.5).wkt}",
+            "aoi_coverage": 0.4, "status": "queued",
+        }  # fmt: skip
+
+    async def set_status(scene_id: uuid.UUID, status: str) -> None:
+        async with engine.begin() as conn:
+            await conn.execute(update(SarScene).where(SarScene.id == scene_id).values(status=status))
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                insert(IngestSession).values(
+                    id=uuid.uuid4(), connected_at=T0 - timedelta(days=1), close_reason="test:announce"
+                )
+            )
+            await conn.execute(
+                insert(SarScene),
+                [frame(first, 0), frame(second, 1), frame(old, 0, "ANN000", datetime(2000, 1, 1, tzinfo=UTC))],
+            )
+            matched = {"scene_id": first, "seen_at": T0, "lat": 36.0, "lon": -5.5, "status": "matched", "pixels": 20,
+                       "length_m": 120.0, "peak_db": 15.0, "vv_db": 10.0}  # fmt: skip
+            await conn.execute(insert(SarDetection), [matched])
+
+        await set_status(first, "processed")
+        assert await store.pass_announcement(engine, first) is None  # its other frame is still queued
+
+        await set_status(second, "failed")  # the last frame done: the pass, with what worked
+        announcement = await store.pass_announcement(engine, second)
+        assert announcement == store.Announcement([first], [first], late=False)
+        report = await store.pass_report(engine, announcement.frames)
+        assert (report.frames, report.detections, report.matched) == (1, 1, 1)
+        assert report.coverage == pytest.approx(0.4)
+
+        await store.mark_notified(engine, announcement.fresh)
+        assert await store.pass_announcement(engine, first) is None  # announced already
+
+        async with engine.begin() as conn:
+            await conn.execute(insert(SarScene), [frame(late, 2) | {"status": "processed"}])
+        assert await store.pass_announcement(engine, late) == store.Announcement([late], [late], late=True)
+
+        both = await store.pass_report(engine, [first, late])
+        assert (both.frames, both.name) == (2, "S1C_ANNOUNCE_0_ANN001")
+        assert both.coverage == pytest.approx(0.8)
+
+        await set_status(old, "processed")
+        assert await store.pass_announcement(engine, old) is None  # before AIS was recorded
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(SarScene).where(SarScene.id.in_([first, second, late, old])))
+            await conn.execute(delete(IngestSession).where(IngestSession.close_reason == "test:announce"))

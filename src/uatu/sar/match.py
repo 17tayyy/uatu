@@ -59,7 +59,7 @@ class MatchResult:
     undetected: list[Expected]  # AIS vessels in the imaged sea that the radar did not pick up
     not_imaged: list[Expected]  # AIS vessels outside the imaged sea (other frame, near the coast)
     no_coverage: list[Detection] = field(default_factory=list)  # unpaired where AIS is not received
-    ais_nearby: dict[Detection, int] = field(default_factory=dict)  # AIS vessels heard around unpaired ones
+    ais_nearby: dict[Detection, Coverage] = field(default_factory=dict)  # AIS heard around unpaired ones
 
 
 def split_by_coverage(
@@ -80,7 +80,7 @@ def split_by_coverage(
         result,
         dark=[d for d in result.dark if covered(d)],
         no_coverage=[d for d in result.dark if not covered(d)],
-        ais_nearby={d: c.vessels for d, c in around.items()},
+        ais_nearby=around,
     )
 
 
