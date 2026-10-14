@@ -16,8 +16,9 @@ import rasterio
 from geoalchemy2 import Geometry as GeometryType
 from PIL import Image
 from rasterio.enums import Resampling
+from rasterio.errors import WindowError
 from rasterio.warp import transform_bounds
-from rasterio.windows import from_bounds
+from rasterio.windows import Window, from_bounds
 from shapely.geometry import shape
 from sqlalchemy import Select, and_, case, cast, func, not_, or_, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
@@ -294,16 +295,29 @@ def tile_lonlat_bounds(z: int, x: int, y: int) -> tuple[float, float, float, flo
 
 def read_radar_tile(radar: Path, z: int, x: int, y: int) -> tuple[np.ndarray, np.ndarray] | None:
     """A frame's radar image over one map tile, as RGB levels (3 x 256 x 256; grey images repeated) and
-    transparency; None if it has none there."""
+    transparency; None if it has none there.
+
+    Only the part of the tile inside the image is read, and placed: a boundless read goes through a
+    warped VRT, which ignores the overviews and resamples the full 20 m image, 2-6 s a tile from afar
+    instead of 0.03 s.
+    """
     left, bottom, right, top = _tile_bounds(z, x, y)
     with rasterio.open(radar) as src:
-        b = src.bounds
-        if right <= b.left or left >= b.right or top <= b.bottom or bottom >= b.top:
-            return None
         window = from_bounds(left, bottom, right, top, src.transform)
-        shape = (src.count, TILE_PX, TILE_PX)
-        levels = src.read(window=window, out_shape=shape, boundless=True, fill_value=0, resampling=Resampling.bilinear)
-        mask = src.read_masks(1, window=window, out_shape=shape[1:], boundless=True, resampling=Resampling.nearest)
+        try:
+            inside = window.intersection(Window(0, 0, src.width, src.height))
+        except WindowError:  # the tile is off the image
+            return None
+        scale = TILE_PX / window.width  # tile pixels per image pixel
+        c0, c1 = (round((c - window.col_off) * scale) for c in (inside.col_off, inside.col_off + inside.width))
+        r0, r1 = (round((r - window.row_off) * scale) for r in (inside.row_off, inside.row_off + inside.height))
+        if c1 <= c0 or r1 <= r0:
+            return None
+        levels = np.zeros((src.count, TILE_PX, TILE_PX), np.uint8)
+        mask = np.zeros((TILE_PX, TILE_PX), np.uint8)
+        part = (r1 - r0, c1 - c0)
+        levels[:, r0:r1, c0:c1] = src.read(window=inside, out_shape=(src.count, *part), resampling=Resampling.bilinear)
+        mask[r0:r1, c0:c1] = src.read_masks(1, window=inside, out_shape=part, resampling=Resampling.nearest)
     if not mask.any():
         return None
     return (np.repeat(levels, 3, axis=0) if levels.shape[0] == 1 else levels), mask

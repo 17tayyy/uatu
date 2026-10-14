@@ -23,7 +23,7 @@ async def optical(
     return DataResponse(data=await optical_service.optical(db, http, cache, detection_id))
 
 
-@router.get("/{detection_id}/optical.png", response_class=FileResponse)
-async def optical_png(detection_id: DetectionId, settings: Settings) -> FileResponse:
-    path = optical_service.optical_png(settings.web_cache_dir / "optical", detection_id)
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+@router.get("/{detection_id}/optical.jpg", response_class=FileResponse)
+async def optical_jpeg(detection_id: DetectionId, settings: Settings) -> FileResponse:
+    path = optical_service.optical_jpeg(settings.web_cache_dir / "optical", detection_id)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})

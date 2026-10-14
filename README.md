@@ -273,11 +273,11 @@ browser: restrict it to the dashboard's origin), else [Sentinel-2 cloudless](htt
 EOX (10 m, CC BY-NC-SA 4.0). A "recent radar" layer mosaics the passes of the last week, newest on
 top, so the whole coast shows its latest radar image at once.
 
-Each detection's popup can show **a Sentinel-2 photo of its place**: the closest scene in time,
-within 3 days, with the spot mostly free of cloud (by the scene's own classification), as a 4 km
-chip read straight from the Cloud Optimised GeoTIFFs of Element 84's
-[Earth Search](https://element84.com/earth-search/) catalogue on AWS, without downloading the
-scene. Sentinel-2 passes around 11:00 UTC, hours from the radar: anchored ships, platforms and
+Each detection's popup can lay **a Sentinel-2 photo of its place** on the map, where it belongs,
+to zoom into and fade against the radar: the closest scene in time, within 3 days, with the spot
+mostly free of cloud (by the scene's own classification), as a 5 km chip read straight from the
+Cloud Optimised GeoTIFFs of Element 84's [Earth Search](https://element84.com/earth-search/)
+catalogue on AWS, without downloading the scene. Sentinel-2 passes around 11:00 UTC, hours from the radar: anchored ships, platforms and
 fish farms show where the radar saw them, moving ships do not. Chips are kept in the `webcache`
 volume; "none found" is looked up again after 6 hours, as scenes keep arriving.
 It draws its own base map with MapLibre GL, no third-party tiles: land from the SAR land mask in

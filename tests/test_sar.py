@@ -387,6 +387,19 @@ def test_the_radar_image_is_cut_into_map_tiles_where_it_has_data(tmp_path):
     assert radar_tile(tmp_path / "radar.tif", 13, *right) is None  # no data there
     assert radar_tile(tmp_path / "radar.tif", 13, 0, 0) is None  # far away
 
+    # From afar, from an overview: a tile the image fills only in part has that part where it belongs.
+    z, half = 9, math.pi * 6378137.0
+    tx, ty = tile_at(bounds.left, bounds.top, z)
+    size = 2 * half / 2**z
+    expected_cols = np.clip(
+        [(x - (tx * size - half)) / size * 256 for x in (bounds.left, (bounds.left + bounds.right) / 2)], 0, 256
+    )
+    expected_rows = np.clip([(half - y - ty * size) / size * 256 for y in (bounds.top, bounds.bottom)], 0, 256)
+    alpha = np.asarray(Image.open(io.BytesIO(radar_tile(tmp_path / "radar.tif", z, tx, ty))).split()[-1])
+    cols, rows = np.nonzero(alpha.any(axis=0))[0], np.nonzero(alpha.any(axis=1))[0]
+    assert np.allclose([cols[0], cols[-1] + 1], expected_cols, atol=3)  # the left half has data
+    assert np.allclose([rows[0], rows[-1] + 1], expected_rows, atol=3)
+
 
 def test_the_recent_radar_shows_each_place_from_the_newest_pass_over_it(tmp_path):
     import io
