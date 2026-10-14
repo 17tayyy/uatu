@@ -57,6 +57,11 @@ class Params:
     gap_min_s: float = 3600  # silence that counts as a gap
     coverage_radius_m: float = 15_000  # ...if AIS from other vessels kept arriving around it
     coverage_min_vessels: int = 3
+    # A silence is notable only if reception was good both where the vessel went quiet and where
+    # it should have been an hour later: vessels heard within this radius, each several times.
+    # aisstream.io hears the strait's lanes well and its western and eastern ends poorly.
+    local_coverage_radius_m: float = 5_000
+    min_reports_per_vessel: float = 3.0
     edge_margin_m: float = 10_000  # a vessel silent this close to the area's edge simply left it
     in_port_m: float = 2_000  # closer to the coast than this: harbour or anchorage
     moving_sog: float = 2.0  # a vessel going silent at this speed or more was under way
@@ -145,22 +150,24 @@ def detect_gaps(
                 continue
             start = tr.t[i]
             window = slice(np.searchsorted(all_t, start, "right"), np.searchsorted(all_t, start + p.gap_min_s, "right"))
-            near = np.hypot(all_x[window] - x[0], all_y[window] - y[0]) <= p.coverage_radius_m
-            heard = len(set(all_mmsi[window][near].tolist()) - {tr.mmsi})
+            fixes = (all_x[window], all_y[window], all_mmsi[window], tr.mmsi)
+            heard, _ = _heard_around(*fixes, x[0], y[0], p.coverage_radius_m)
             if heard < p.coverage_min_vessels:
                 continue
+            covered_here = _well_covered(*_heard_around(*fixes, x[0], y[0], p.local_coverage_radius_m), p)
             course = _dead_reckoning(tr, i, p.gap_min_s, proj)
             heard_ahead = None
+            covered_ahead = True
             heading_to_port = False
             if course is not None:
                 cx, cy = course
                 if ((cx < edge_x0[0]) | (cx > edge_x1[0]) | (cy < edge_y0[0]) | (cy > edge_y1[0])).any():
                     continue  # it sailed out of the area
                 heading_to_port = bool((coast(*proj.lonlat(cx, cy)) < p.in_port_m).any())
-                # Where it should be by now: was anyone heard there? If not, it sailed into a hole
-                # in aisstream's coverage (like the one west of Tarifa) rather than switching off.
-                ahead = np.hypot(all_x[window] - cx[-1], all_y[window] - cy[-1]) <= p.coverage_radius_m
-                heard_ahead = len(set(all_mmsi[window][ahead].tolist()) - {tr.mmsi})
+                # Where it should be by now: was AIS well received there? If not, it sailed into a
+                # hole in aisstream's coverage (like the one west of Tarifa) rather than switching off.
+                heard_ahead, reports_ahead = _heard_around(*fixes, cx[-1], cy[-1], p.local_coverage_radius_m)
+                covered_ahead = _well_covered(heard_ahead, reports_ahead, p)
             coast_m = float(coast(tr.lon[i : i + 1], tr.lat[i : i + 1])[0])
             details: dict = {
                 "sog": _num(tr.sog[i]),
@@ -182,10 +189,14 @@ def detect_gaps(
                 details["heading_to_port"] = True
             if heard_ahead is not None:
                 details["ais_heard_ahead"] = heard_ahead
+            if not covered_here:
+                details["poor_reception_here"] = True
+            if not covered_ahead:
+                details["poor_reception_ahead"] = True
             under_way = tr.sog[i] >= p.moving_sog
             at_sea = not coast_m < p.in_port_m  # NaN (unknown) counts as at sea
-            covered_ahead = heard_ahead is None or heard_ahead >= p.coverage_min_vessels
-            severity = 2 if under_way and at_sea and not heading_to_port and covered_ahead else 1
+            covered = covered_here and covered_ahead
+            severity = 2 if under_way and at_sea and not heading_to_port and covered else 1
             resumed_at = _utc(resumed) if resumed is not None else None
             lat, lon = float(tr.lat[i]), float(tr.lon[i])
             events.append(Event("ais_gap", severity, tr.mmsi, _utc(start), lat, lon, details, resumed_at))
@@ -196,6 +207,19 @@ def detect_gaps(
         replace(e, severity=1, details=e.details | {"patchy_reception": True}) if per_vessel[e.mmsi] > 1 else e
         for e in events
     ]
+
+
+def _heard_around(
+    xs: np.ndarray, ys: np.ndarray, mmsis: np.ndarray, own: int, px: float, py: float, radius: float
+) -> tuple[int, int]:
+    """(other vessels, their reports) among these fixes within radius of a point."""
+    close = (np.hypot(xs - px, ys - py) <= radius) & (mmsis != own)
+    return len(set(mmsis[close].tolist())), int(close.sum())
+
+
+def _well_covered(vessels: int, reports: int, p: Params) -> bool:
+    """Enough vessels heard, each several times: a receiver hears the place, not just glimpses of it."""
+    return vessels >= p.coverage_min_vessels and reports >= p.min_reports_per_vessel * vessels
 
 
 def _dead_reckoning(tr: Track, i: int, seconds: float, proj: LocalProjection) -> tuple[np.ndarray, np.ndarray] | None:

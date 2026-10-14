@@ -4,6 +4,7 @@ import math
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 import numpy as np
 from sqlalchemy import distinct, func, select
@@ -39,6 +40,9 @@ class AisVessel:
     cog: float | None  # degrees
     seen_at: datetime
     report_gap_s: float  # time to the nearest real AIS report: how much of the position is estimated
+    # Fastest it may have gone since then: across an interpolation, the higher of the two reports'
+    # speeds (a ferry keeps 29 kn until it slows to enter port; the nearest report may say 7).
+    max_sog: float | None = None
 
 
 async def vessels_at_acquisition(
@@ -62,9 +66,9 @@ async def vessels_at_acquisition(
             t = geometry.time_at(np.array([estimate[0]]), np.array([estimate[1]]))[0]
         if estimate is None:
             continue
-        lon, lat, sog, cog, gap_s = estimate
         name, ship_type, length_m = statics.get(mmsi, (None, None, None))
-        found.append(AisVessel(mmsi, name, ship_type, length_m, lon, lat, sog, cog, t, gap_s))
+        e = estimate
+        found.append(AisVessel(mmsi, name, ship_type, length_m, e.lon, e.lat, e.sog, e.cog, t, e.gap_s, e.max_sog))
     return found
 
 
@@ -93,15 +97,22 @@ async def silent_vessels(
             t = geometry.time_at(np.array([estimate[0]]), np.array([estimate[1]]))[0]
         if estimate is None:
             continue
-        lon, lat, sog, cog, gap_s = estimate
         name, ship_type, length_m = statics.get(mmsi, (None, None, None))
-        found.append(AisVessel(mmsi, name, ship_type, length_m, lon, lat, sog, cog, t, gap_s))
+        e = estimate
+        found.append(AisVessel(mmsi, name, ship_type, length_m, e.lon, e.lat, e.sog, e.cog, t, e.gap_s, e.max_sog))
     return found
 
 
-def predict(
-    reports: list[Report], t: datetime, max_gap: timedelta = MAX_GAP
-) -> tuple[float, float, float | None, float | None, float] | None:
+class Estimate(NamedTuple):
+    lon: float
+    lat: float
+    sog: float | None  # of the nearest report
+    cog: float | None
+    gap_s: float  # to the nearest report
+    max_sog: float | None  # fastest of the reports the estimate rests on
+
+
+def predict(reports: list[Report], t: datetime, max_gap: timedelta = MAX_GAP) -> Estimate | None:
     """Position at time t from a vessel's time-ordered reports: interpolated between the reports
     around t, or dead-reckoned from the nearest one with its speed and course; None if no report
     is within max_gap of t."""
@@ -112,12 +123,14 @@ def predict(
         f = (t - before.t) / (after.t - before.t) if after.t > before.t else 0.0
         nearest = before if f < 0.5 else after
         gap = min(t - before.t, after.t - t).total_seconds()
-        return (
+        speeds = [r.sog for r in (before, after) if r.sog is not None]
+        return Estimate(
             before.lon + f * (after.lon - before.lon),
             before.lat + f * (after.lat - before.lat),
             nearest.sog,
             nearest.cog,
             gap,
+            max(speeds) if speeds else None,
         )
     candidates = [r for r in (before, after) if r is not None]
     nearest = min(candidates, key=lambda r: abs((t - r.t).total_seconds()))
@@ -129,7 +142,7 @@ def predict(
         distance = nearest.sog * 0.514444 * dt
         lat += distance * math.cos(math.radians(nearest.cog)) / _METRES_PER_DEGREE
         lon += distance * math.sin(math.radians(nearest.cog)) / (_METRES_PER_DEGREE * math.cos(math.radians(lat)))
-    return lon, lat, nearest.sog, nearest.cog, abs(dt)
+    return Estimate(lon, lat, nearest.sog, nearest.cog, abs(dt), nearest.sog)
 
 
 @dataclass(frozen=True, slots=True)

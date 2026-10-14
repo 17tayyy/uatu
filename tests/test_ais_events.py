@@ -249,3 +249,10 @@ def test_bathymetry_reads_depth_from_the_terrain_model(tmp_path):
         dst.write(elevation, 1)
     depth = Bathymetry(path).depth_at(np.array([-5.9, -5.4, -5.9, -7.0]), np.array([35.9, 35.9, 35.4, 35.9]))
     assert depth[:3].tolist() == [30.0, 865.0, -12.0] and np.isnan(depth[3])
+
+
+def test_heading_where_vessels_are_heard_only_now_and_then_is_not_notable():
+    silent = track(1, range(0, 61))  # 10 kn eastbound, then nothing
+    glimpses = [track(950 + k, [k * 10], LAT0 + 0.01, LON0 + 0.2 + 0.001 * k) for k in range(5)]  # once each
+    [gap] = [g for g in gaps([silent, *neighbours(4, range(0, 181)), *glimpses], minutes_now=180) if g.mmsi == 1]
+    assert gap.severity == 1 and gap.details["poor_reception_ahead"]
