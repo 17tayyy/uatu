@@ -271,6 +271,14 @@ def test_scene_notification_separates_reception_gaps_from_silent_vessels():
     assert "Sin identificar" in message
     assert priority == "high" and link is not None
 
+    # Off the lists, but run by a sanctioned company: as urgent. On other watchlists: said, not urgent.
+    managed = Candidate(36.1, -5.3, 150.0, T0, 3, "ASTRA", 95.0, 900.0, None, "sanctioned_owner")
+    _, message, priority, _ = scene_notification(SceneReport("S1C_IW_GRDH_TEST", T0, 0.4, 3, 1, 1, 0, [managed]))
+    assert "Se calló: ASTRA ⚠ ARMADOR O GESTOR SANCIONADO" in message and priority == "high"
+    watched = Candidate(36.1, -5.3, 150.0, T0, 4, "FENOR", 95.0, 900.0, None, "watchlisted")
+    _, message, priority, _ = scene_notification(SceneReport("S1C_IW_GRDH_TEST", T0, 0.4, 3, 1, 1, 0, [watched]))
+    assert "Se calló: FENOR ⚠ EN LISTAS DE VIGILANCIA" in message and priority == "default"
+
 
 def test_a_pass_in_two_frames_is_one_notification():
     from uatu.sar.report import scene_notification

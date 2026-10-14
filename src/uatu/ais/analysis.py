@@ -21,6 +21,7 @@ from uatu.ais.events import (
     detect_loitering,
     downgrade_in_crowds,
 )
+from uatu.ais.sanctions import explain
 from uatu.config import BBox
 
 WINDOW = timedelta(hours=6)  # long enough for the longest pattern (3 h loitering) plus margin
@@ -69,6 +70,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     reports = await store.static_reports(engine, now - IDENTITY_HISTORY)
     events += detect_identity_changes(reports, start, await store.last_positions(engine, start))
     events += await store.sanctioned_present(engine, start, now)
+    events += await store.network_present(engine, start, now)
     events += await store.shared_imos(engine, start, now)
 
     closed = await store.close_resumed_gaps(engine)
@@ -121,6 +123,18 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
                 f"{name} (MMSI {e.mmsi}, IMO {d['imo']}) figura en listas de sanciones como {d['listed_as']}"
                 f" ({d['programs']}). Última posición {where}."
             )
+        case "sanctioned_owner":
+            title = f"Barco con armador o gestor sancionado: {name}"
+            message = (
+                f"{name} (MMSI {e.mmsi}, IMO {d['imo']}) no figura en listas de sanciones, pero"
+                f" {'; '.join(explain(r) for r in d['reasons'])}. Última posición {where}."
+            )
+        case "watchlisted_vessel":
+            title = f"Barco en listas de vigilancia: {name}"
+            message = (
+                f"{name} (MMSI {e.mmsi}, IMO {d['imo']}): {'; '.join(explain(r) for r in d['reasons'])}."
+                f" Última posición {where}."
+            )
         case "identity_change":
             title = f"Cambio de identidad: {name}"
             message = f"MMSI {e.mmsi} ha cambiado su {d['field']}: {d['before']} → {d['after']}."
@@ -142,14 +156,16 @@ def digest(
     events: list[Event], names: dict[int, str], hours: int, gaps: list[tuple[datetime, datetime]] = ()
 ) -> tuple[str, str]:
     """A summary notification of notable events and of the periods Uatu recorded no AIS."""
-    labels = {
-        "ais_gap": "apagones de AIS",
-        "encounter": "encuentros en el mar",
-        "loitering": "merodeos",
-        "infrastructure_loitering": "barcos sobre infraestructura",
-        "sanctioned_vessel": "barcos sancionados",
-        "identity_change": "cambios de identidad",
-        "shared_imo": "IMO duplicados",
+    labels = {  # kind: (one, several)
+        "ais_gap": ("apagón de AIS", "apagones de AIS"),
+        "encounter": ("encuentro en el mar", "encuentros en el mar"),
+        "loitering": ("merodeo", "merodeos"),
+        "infrastructure_loitering": ("barco sobre infraestructura", "barcos sobre infraestructura"),
+        "sanctioned_vessel": ("barco sancionado", "barcos sancionados"),
+        "sanctioned_owner": ("barco de armador o gestor sancionado", "barcos de armadores o gestores sancionados"),
+        "watchlisted_vessel": ("barco en listas de vigilancia", "barcos en listas de vigilancia"),
+        "identity_change": ("cambio de identidad", "cambios de identidad"),
+        "shared_imo": ("IMO duplicado", "IMO duplicados"),
     }
     counts: dict[str, int] = {}
     for e in events:
@@ -160,7 +176,7 @@ def digest(
         spans = ", ".join(f"{start:%H:%M}-{end:%H:%M}" for start, end in gaps)
         lines.append(f"⚠ Sin AIS {blind.total_seconds() / 60:.0f} min ({spans} UTC)")
     if events:
-        lines.append(", ".join(f"{n} {labels.get(kind, kind)}" for kind, n in counts.items()))
+        lines.append(", ".join(f"{n} {labels.get(kind, (kind, kind))[n > 1]}" for kind, n in counts.items()))
         lines += [f"• {describe(e, names)[0]}" for e in events[:8]]
         if len(events) > 8:
             lines.append(f"… y {len(events) - 8} más")

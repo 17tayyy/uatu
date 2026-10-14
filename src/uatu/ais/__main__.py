@@ -3,7 +3,7 @@
 uatu-ais around LAT LON [--at TIME]   who was near a place around a time (after an incident at sea)
 uatu-ais events [--hours 24]          recent AIS events
 uatu-ais analyse                      run the detectors now
-uatu-ais refresh                      reload sanctioned vessels and infrastructure
+uatu-ais refresh                      reload sanctions, the companies behind vessels and infrastructure
 """
 
 import argparse
@@ -15,7 +15,7 @@ import httpx
 from pydantic import ValidationError
 
 from uatu import db
-from uatu.ais import analysis, reference, store
+from uatu.ais import analysis, reference, sanctions, store
 from uatu.config import ZoneSettings
 from uatu.log import configure_logging
 from uatu.sar.config import SarSettings
@@ -86,11 +86,15 @@ async def cmd_refresh(settings: AisSettings, args: argparse.Namespace) -> int:
     engine = db.create_engine(settings.database_url)
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(60, read=180)) as http:
-            vessels = await reference.refresh_sanctions(engine, http)
+            listed = await sanctions.refresh_sanctions(engine, http)
             features = await reference.refresh_infrastructure(engine, http)
     finally:
         await engine.dispose()
-    print(f"{vessels} sanctioned vessels, {features} infrastructure features")
+    print(
+        f"{len(listed.sanctioned)} sanctioned vessels; {len(listed.companies)} companies behind"
+        f" {len({link['vessel_imo'] for link in listed.links})} vessels; {len(listed.watchlists)} on watchlists;"
+        f" {len(listed.risks)} off the sanctions lists worth a look; {features} infrastructure features"
+    )
     return 0
 
 
@@ -114,7 +118,8 @@ def main() -> None:
     events.set_defaults(run=cmd_events)
 
     commands.add_parser("analyse", help="run the detectors now").set_defaults(run=cmd_analyse)
-    commands.add_parser("refresh", help="reload sanctions and infrastructure").set_defaults(run=cmd_refresh)
+    refresh = commands.add_parser("refresh", help="reload sanctions, ship owners and managers, infrastructure")
+    refresh.set_defaults(run=cmd_refresh)
 
     args = parser.parse_args()
     try:

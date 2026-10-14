@@ -21,6 +21,9 @@ analysis one at a time.
   enough for silence to mean something), ship-to-ship meetings, loitering, idling over cables
   in water shallow enough to drop an anchor on them, identity changes, impossible jumps, and
   vessels whose IMO number is on a sanctions list.
+- **Knows who is behind a vessel**: its owners and managers, from sanctions lists, Ukraine's
+  military intelligence (GUR) and port state control records, so a vessel off the lists but run
+  by a sanctioned company, or by one whose fleet mostly is, is flagged too.
 - **Reads every Sentinel-1 pass** over the coast: calibrates the radar image, detects ships,
   places every AIS vessel where the radar saw it at that instant, pairs the two, and names the
   ships left over, separating those where AIS reception is too poor to judge.
@@ -37,6 +40,11 @@ From public data only (AIS as received by aisstream.io, sanctions lists via Open
   EU, UK, Canada, Australia and Switzerland, declaring Vysotsk to Port Said. *DERZHAVA* (Russian
   flag, 274 m, for Murmansk) is IMO 9290385, listed as *ELBUS*. *FLEXI 2* is IMO 9246322,
   listed as *TEX* under US Iran sanctions. Same hulls, new names: the shadow fleet at work.
+- **And who runs them.** *FLEXI 2*'s ISM manager, Draco Buren Shipping of Singapore, is under US
+  sanctions itself, and 13 of the 14 vessels it is known to manage are too. Four more tankers and
+  a bulk carrier heard off the coast are on no sanctions list but on GUR's: *FENOR* and *CHEM
+  NICHOLAS* as part of the Russian shadow fleet, *SUEZ PROTOPIA* and *SIREN* for carrying Russian
+  oil out of the Baltic, *PANOREA* for Russian coal from Taman to Turkey.
 - **What a radar pass looks like**, 14 October, 06:26 UTC over the Strait: 132 ships detected;
   36 paired with their AIS; 12 on fixed objects; 82 where aisstream hears too little to say
   whether they were broadcasting; one candidate, a 338 m echo where a container ship silent for
@@ -117,6 +125,8 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `loitering` | nearly stopped for 3 h+ | > 5 km from the coast |
 | `infrastructure_loitering` | under 3 kn for 30 min+ within 1 km of a submarine cable or pipeline | where an anchor can reach the seabed, ≤ 200 m deep (alert) |
 | `sanctioned_vessel` | a vessel on a sanctions list, by IMO (or listed MMSI) | always (alert) |
+| `sanctioned_owner` | a vessel off the lists whose owner or manager is on one | always (alert) |
+| `watchlisted_vessel` | off the lists, but run by a company with a mostly sanctioned fleet (2+ vessels, half or more), on GUR's lists (shadow fleet, vessels working for Russia), banned from European ports (Paris MoU) or insured by a sanctioned club | always |
 | `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
 
@@ -126,8 +136,13 @@ pushed to the phone at once; notable ones (2) go into a summary at 08:00 and 20:
 
 Reference data, refreshed by the worker:
 
-- **Sanctioned vessels**: [OpenSanctions](https://www.opensanctions.org) `sanctions`
-  collection (EU, UK, US, CH, CA, AU lists), CC BY-NC 4.0, daily.
+- **Sanctions, and who owns and manages vessels**: [OpenSanctions](https://www.opensanctions.org)
+  (CC BY-NC 4.0), daily: the `sanctions` collection (EU, UK, US, CH, CA, AU... lists, with the
+  companies they tie vessels to); Ukraine's GUR "War & Sanctions" (the shadow fleet and other
+  vessels working for Russia, with their owners and their commercial and ISM managers); the Paris
+  MoU's ban list; Tokyo and Black Sea MoU detentions of the last 3 years (the ISM company then).
+  OpenSanctions resolves a company across sources to one id, which is what joins them. Vessels
+  are keyed by IMO number throughout, which stays with a hull through renames and new flags.
 - **Water depth**: [EMODnet Bathymetry](https://emodnet.ec.europa.eu/en/bathymetry) DTM (~115 m,
   CC BY 4.0), downloaded once for the area: a vessel over a cable can only harm it by anchoring.
 - **Infrastructure in Spanish waters**: [EMODnet Human Activities](https://emodnet.ec.europa.eu/en/human-activities)
@@ -242,8 +257,10 @@ coast or one zone at a time (the selector in the header):
   that went silent and could be there.
 - **Eventos**: the AIS events (gaps, encounters, loitering, vessels over cables, sanctioned
   vessels...) of the last 24 h to 7 days.
-- **Barcos**: the vessels heard in the last hour (sanctioned ones first), search by name or
-  MMSI, and a vessel's card: track, events, sanctions and the passes that saw it.
+- **Barcos**: the vessels heard in the last hour (sanctioned and watchlisted ones first), search
+  by name or MMSI, and a vessel's card: track, events, sanctions, owners and managers, what the
+  lists say about it and the passes that saw it. A company's card lists its known fleet, with the
+  vessels Uatu has heard first.
 - Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute.
 
 The radar image of each pass is kept at 20 m (the sensor's actual resolution) as a tiled

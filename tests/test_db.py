@@ -217,6 +217,48 @@ async def test_sanctioned_vessels_seen_in_the_area_are_events(engine):
             await conn.execute(delete(SanctionedVessel).where(SanctionedVessel.source_id == "test"))
 
 
+async def test_vessels_with_sanctioned_managers_or_on_watchlists_are_events(engine):
+    from uatu.ais import store
+    from uatu.ais.analysis import describe
+    from uatu.db.models import VesselRisk
+
+    manager = {"kind": "sanctioned_company", "company_id": "NK-test", "company": "TEST SHIPMANAGEMENT",
+               "role": "ism_manager", "programs": "EU-RUS"}  # fmt: skip
+    async with engine.begin() as conn:
+        await conn.execute(
+            insert(VesselRisk),
+            [
+                {"imo": 9_999_801, "level": "sanctioned_owner", "reasons": [manager, {"kind": "shadow_fleet"}]},
+                {"imo": 9_999_802, "level": "watchlisted", "reasons": [{"kind": "port_ban"}]},
+            ],
+        )
+    await write(
+        engine,
+        [
+            StaticRow(MMSI_A, T0, 5, name="DARK TEST", imo=9_999_801),
+            StaticRow(MMSI_B, T0, 5, name="BAN TEST", imo=9_999_802),
+        ],
+    )
+    await write(
+        engine,
+        [
+            PositionRow(MMSI_A, T0 + timedelta(minutes=5), 1, 36.1, -5.5, 10.0, 90.0, 90, 0, True),
+            PositionRow(MMSI_B, T0 + timedelta(minutes=6), 1, 36.2, -5.4, 10.0, 90.0, 90, 0, True),
+        ],
+    )
+    try:
+        events = {e.mmsi: e for e in await store.network_present(engine, T0, T0 + timedelta(hours=1))}
+        assert (events[MMSI_A].kind, events[MMSI_A].severity) == ("sanctioned_owner", 3)
+        assert (events[MMSI_B].kind, events[MMSI_B].severity) == ("watchlisted_vessel", 2)
+        title, message, _ = describe(events[MMSI_A], {})
+        assert title == "Barco con armador o gestor sancionado: DARK TEST"
+        assert "no figura en listas de sanciones, pero su gestor ISM, TEST SHIPMANAGEMENT, está en listas" in message
+        assert "flota en la sombra" in message
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(VesselRisk).where(VesselRisk.imo.in_([9_999_801, 9_999_802])))
+
+
 async def test_a_sanctioned_vessels_visit_is_one_event_and_severity_follows_the_latest(engine):
     from uatu.ais import store
     from uatu.ais.events import Event

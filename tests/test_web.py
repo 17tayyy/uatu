@@ -22,7 +22,11 @@ from uatu.db.models import (
     SarAisCheck,
     SarDetection,
     SarScene,
+    ShipCompany,
+    ShipLink,
     Vessel,
+    VesselRisk,
+    WatchlistedVessel,
 )
 from uatu.web.config import WebSettings
 from uatu.web.main import create_app
@@ -77,6 +81,8 @@ DATATAKE = SCENE_ID.hex[:6].upper()
 PASS_ID = f"S1C-{DATATAKE}-estrecho"
 EVENT_KEY = f"test:{SCENE_ID.hex}"
 SESSION_ID = uuid.uuid4()
+COMPANY_ID = f"test-{SESSION_ID.hex[:8]}"
+IMO_A, IMO_FLEETMATE = 9_999_901, 9_999_902
 CELL = (35.931, -5.611)  # inside one 0.02° coverage cell
 
 
@@ -94,13 +100,69 @@ async def rows():
         await conn.execute(
             insert(Vessel).values(ais_class="A", first_seen_at=NOW, last_static_at=NOW),
             [
-                {"mmsi": MMSI_A, "name": "TEST ALFA", "imo": 9_999_901, "ship_type": 80, "dim_a": 200, "dim_b": 50},
+                {"mmsi": MMSI_A, "name": "TEST ALFA", "imo": IMO_A, "ship_type": 80, "dim_a": 200, "dim_b": 50},
                 *(
                     {"mmsi": mmsi, "name": name, "imo": None, "ship_type": None, "dim_a": None, "dim_b": None}
                     for mmsi, name in [(MMSI_B, "TEST BRAVO"), (MMSI_C, "TEST CHARLIE"), (MMSI_SILENT, "TEST SILENT")]
                 ),
             ],
         )
+        company = {
+            "id": COMPANY_ID,
+            "name": "TEST SHIPMANAGEMENT",
+            "kind": "company",
+            "countries": "ae",
+            "imos": "6000001",
+            "sanctioned": True,
+            "programs": "EU-RUS",
+            "vessels": 2,
+            "sanctioned_vessels": 0,
+        }
+        await conn.execute(insert(ShipCompany).values(company))
+        await conn.execute(
+            insert(ShipLink),
+            [
+                {
+                    "vessel_imo": IMO_A,
+                    "vessel_name": "ALFA AS LISTED",
+                    "company_id": COMPANY_ID,
+                    "role": "ism_manager",
+                    "role_label": "security manager",
+                    "source": "ua_war_sanctions",
+                },
+                {
+                    "vessel_imo": IMO_A,
+                    "vessel_name": "ALFA AS LISTED",
+                    "company_id": COMPANY_ID,
+                    "role": "commercial_manager",
+                    "role_label": "commerce manager",
+                    "source": "ua_war_sanctions",
+                },
+                {
+                    "vessel_imo": IMO_FLEETMATE,
+                    "vessel_name": "FLEETMATE",
+                    "company_id": COMPANY_ID,
+                    "role": "owner",
+                    "role_label": "owner",
+                    "source": "ua_war_sanctions",
+                },
+            ],
+        )
+        reason = {
+            "kind": "sanctioned_company",
+            "company_id": COMPANY_ID,
+            "company": "TEST SHIPMANAGEMENT",
+            "role": "ism_manager",
+            "programs": "EU-RUS",
+        }
+        await conn.execute(
+            insert(VesselRisk).values(imo=IMO_A, level="sanctioned_owner", reasons=[reason, {"kind": "shadow_fleet"}])
+        )
+        await conn.execute(
+            insert(WatchlistedVessel).values(
+                imo=IMO_A, watchlist="shadow_fleet", name="ALFA AS LISTED", note="Exports Urals.", source_id="test"
+            )
+        )  # fmt: skip
         positions = []
         for i in range(4):  # four reports each, all in one cell: good reception there
             for mmsi in (MMSI_A, MMSI_B, MMSI_C):
@@ -237,6 +299,9 @@ async def rows():
         await conn.execute(delete(AisEvent).where(AisEvent.key.like(f"{EVENT_KEY}%")))
         await conn.execute(delete(Position).where(Position.mmsi.in_(mmsis)))
         await conn.execute(delete(Vessel).where(Vessel.mmsi.in_(mmsis)))
+        await conn.execute(delete(ShipCompany).where(ShipCompany.id == COMPANY_ID))  # and its links
+        await conn.execute(delete(VesselRisk).where(VesselRisk.imo == IMO_A))
+        await conn.execute(delete(WatchlistedVessel).where(WatchlistedVessel.imo == IMO_A))
         await conn.execute(delete(IngestSession).where(IngestSession.id == SESSION_ID))
         await conn.execute(delete(RecordedZone).where(RecordedZone.key == "estrecho"))
     await engine.dispose()
@@ -316,6 +381,7 @@ async def test_vessels(client):
     live = await ok(client, "/api/v1/vessels/live?minutes=60&zone=estrecho")
     alfa = next(f["properties"] for f in live["features"] if f["properties"]["mmsi"] == MMSI_A)
     assert alfa["name"] == "TEST ALFA"
+    assert (alfa["sanctioned"], alfa["risk"]) == (False, "sanctioned_owner")
     assert alfa["sog"] == 12.3
     assert alfa["cog"] == 270
     assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in live["features"])
@@ -331,6 +397,20 @@ async def test_vessels(client):
     assert detail["name"] == "TEST ALFA"
     assert detail["track"]["type"] == "LineString"
     assert [e["kind"] for e in detail["events"]] == ["sanctioned_vessel"]
+    assert detail["risk"] == {
+        "level": "sanctioned_owner",
+        "reasons": [
+            "su gestor ISM, TEST SHIPMANAGEMENT, está en listas de sanciones (EU-RUS)",
+            "la inteligencia ucraniana (GUR) lo cuenta en la flota en la sombra rusa",
+        ],
+    }
+    assert detail["watchlists"] == [{"watchlist": "shadow_fleet", "note": "Exports Urals."}]
+    [manager] = detail["companies"]
+    assert (manager["id"], manager["sanctioned"], manager["roles"]) == (
+        COMPANY_ID,
+        True,
+        ["commercial_manager", "ism_manager"],
+    )
     assert detail["radar_sightings"][0]["pass_id"] == PASS_ID
 
     silent = await ok(client, f"/api/v1/vessels/{MMSI_SILENT}")
@@ -338,6 +418,20 @@ async def test_vessels(client):
 
     missing = await client.get("/api/v1/vessels/999000199")
     assert missing.status_code == 404
+
+
+@needs_db
+async def test_companies(client):
+    company = await ok(client, f"/api/v1/companies/{COMPANY_ID}")
+    assert (company["name"], company["sanctioned"], company["countries"]) == ("TEST SHIPMANAGEMENT", True, ["ae"])
+    # The vessel Uatu has heard comes first, with the MMSI it was heard with.
+    assert [(v["imo"], v["mmsi"], v["ais_name"], v["risk"]) for v in company["fleet"]] == [
+        (IMO_A, MMSI_A, "TEST ALFA", "sanctioned_owner"),
+        (IMO_FLEETMATE, None, None, None),
+    ]
+    assert company["fleet"][0]["watchlists"] == ["shadow_fleet"]
+    assert (await client.get("/api/v1/companies/no-such-company")).status_code == 404
+    assert (await client.get("/api/v1/companies/bad%20id")).status_code == 422
 
 
 @needs_db

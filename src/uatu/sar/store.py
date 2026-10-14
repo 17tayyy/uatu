@@ -20,6 +20,7 @@ from uatu.db.models import (
     SarFixedObject,
     SarScene,
     Vessel,
+    VesselRisk,
 )
 from uatu.sar.analysis import Analysis
 from uatu.sar.catalog import Scene, frame_of
@@ -322,6 +323,7 @@ class Candidate:
     suspect_silent_minutes: float | None
     suspect_distance_m: float | None
     suspect_sanctioned: str | None  # sanctions programmes, if the suspect's IMO is listed
+    suspect_risk: str | None = None  # sanctioned_owner | watchlisted: see uatu.ais.sanctions.assess
 
     @property
     def kind(self) -> str:
@@ -365,9 +367,11 @@ async def pass_report(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> SceneR
             SarDetection.suspect_silent_minutes,
             SarDetection.suspect_distance_m,
             SanctionedVessel.programs,
+            VesselRisk.level,
         )
         .outerjoin(Vessel, Vessel.mmsi == SarDetection.suspected_mmsi)
         .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
+        .outerjoin(VesselRisk, VesselRisk.imo == Vessel.imo)
         .where(in_frames, SarDetection.status == "dark", ~func.coalesce(at_fixed, False))
         .order_by(SarDetection.seen_at)
     )

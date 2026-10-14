@@ -1,17 +1,10 @@
-"""Reference data for AIS analysis: sanctioned vessels and critical infrastructure in Spanish waters.
+"""Reference data for AIS analysis: critical infrastructure in Spanish waters (sanctions: see sanctions.py).
 
-- Sanctioned vessels: OpenSanctions' `sanctions` collection (EU, UK, US, CH, CA, AU lists...),
-  CC BY-NC 4.0, matched by IMO number, which stays with a hull through renames and reflagging.
-- Infrastructure: EMODnet Human Activities (telecom cables from Spain's CICA, pipelines,
-  platforms, ports) and TeleGeography's submarine cable map (international cables and their
-  landing points), CC BY-NC-SA.
+EMODnet Human Activities (telecom cables from Spain's CICA, pipelines, platforms, ports) and
+TeleGeography's submarine cable map (international cables and their landing points), CC BY-NC-SA.
 """
 
-import asyncio
-import csv
-import tempfile
-from collections.abc import Iterable, Iterator
-from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -21,69 +14,16 @@ from shapely.geometry import shape
 from sqlalchemy import delete, insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from uatu.db.models import Infrastructure, SanctionedVessel
+from uatu.db.models import Infrastructure
 
 log = structlog.get_logger(component="reference")
 
-OPENSANCTIONS_CSV = "https://data.opensanctions.org/datasets/latest/sanctions/targets.simple.csv"
 EMODNET_WFS = "https://ows.emodnet-humanactivities.eu/wfs"
 TELEGEOGRAPHY_CABLES = "https://www.submarinecablemap.com/api/v3/cable/cable-geo.json"
 TELEGEOGRAPHY_LANDINGS = "https://www.submarinecablemap.com/api/v3/landing-point/landing-point-geo.json"
 
 # Spanish waters: the Peninsula, the Balearics and the Canaries (lon_min, lat_min, lon_max, lat_max).
 SPAIN = box(-19.0, 27.0, 5.0, 44.5)
-
-
-# --- sanctioned vessels ----------------------------------------------------------------------------
-
-
-def sanctioned_vessels(rows: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
-    """Vessel rows of an OpenSanctions targets.simple.csv, one per IMO number."""
-    by_imo: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        if row["schema"] != "Vessel":
-            continue
-        identifiers = [i for i in row["identifiers"].split(";") if i]
-        imos = [int(i[3:]) for i in identifiers if i.startswith("IMO") and i[3:].isdigit()]
-        mmsis = [i for i in identifiers if len(i) == 9 and i.isdigit()]
-        for imo in imos:
-            by_imo.setdefault(
-                imo,
-                {
-                    "imo": imo,
-                    "name": row["name"],
-                    "aliases": row["aliases"] or None,
-                    "mmsis": ";".join(mmsis) or None,
-                    "countries": row["countries"] or None,
-                    "programs": row["program_ids"] or None,
-                    "sanctions": row["sanctions"][:2000] or None,
-                    "source_id": row["id"],
-                },
-            )
-    return list(by_imo.values())
-
-
-async def refresh_sanctions(engine: AsyncEngine, http: httpx.AsyncClient) -> int:
-    """Replace sanctioned_vessels with the latest OpenSanctions data."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "targets.csv"
-        async with http.stream("GET", OPENSANCTIONS_CSV, follow_redirects=True) as response:
-            response.raise_for_status()
-            with path.open("wb") as f:  # ~70 MB: streamed to disk rather than held in memory
-                async for chunk in response.aiter_bytes(2**20):
-                    f.write(chunk)
-        rows = await asyncio.to_thread(_read_vessels, path)
-    async with engine.begin() as conn:
-        await conn.execute(delete(SanctionedVessel))
-        if rows:
-            await conn.execute(insert(SanctionedVessel), rows)
-    log.info("sanctions_refreshed", vessels=len(rows))
-    return len(rows)
-
-
-def _read_vessels(path: Path) -> list[dict[str, Any]]:
-    with path.open(newline="", encoding="utf-8") as f:
-        return sanctioned_vessels(csv.DictReader(f))
 
 
 # --- infrastructure --------------------------------------------------------------------------------
