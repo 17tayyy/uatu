@@ -37,8 +37,8 @@ def detections_geojson(detections: list[Detection], result: MatchResult | None, 
         properties["contrast_db"] = round(d.contrast_db, 1)
         if result is not None:
             properties["status"] = "matched" if id(d) in paired else "dark" if d in result.dark else "no_coverage"
-            if d in result.ais_nearby:
-                properties["ais_vessels_nearby"] = result.ais_nearby[d]
+            if (c := result.ais_nearby.get(d)) is not None:
+                properties |= {"ais_vessels_nearby": c.vessels, "ais_reports_nearby": c.reports}
         features.append(_point(d.lon, d.lat, properties))
     _write(path, features)
 
@@ -153,20 +153,24 @@ def _count(n: int, singular: str, plural: str | None = None) -> str:
     return f"{n} {singular if n == 1 else plural or singular + 's'}"
 
 
-def scene_notification(r: SceneReport) -> tuple[str, str, str, str | None]:
-    """(title, message, priority, link) summarising a processed pass, in Spanish."""
+def scene_notification(r: SceneReport, late: bool = False) -> tuple[str, str, str, str | None]:
+    """(title, message, priority, link) summarising a processed pass, in Spanish.
+
+    late: the report is on a frame that came in after the rest of the pass was announced.
+    """
     interesting = [c for c in r.candidates if c.kind != "reception_gap"]
     gaps = len(r.candidates) - len(interesting)
-    when = f"{r.name[:3]} {r.acquired:%d/%m %H:%M} UTC"
+    when = f"{r.name[:3]} {r.acquired:%d/%m %H:%M} UTC" + (" (toma tardía)" if late else "")
     headline = f"{_count(len(interesting), 'barco')} sin AIS" if interesting else "sin barcos oscuros"
     title = f"Pasada {when}: {headline}"
+    frames = f", {r.frames} tomas" if r.frames > 1 else ""
     lines = [
-        f"{r.detections} barcos detectados ({r.coverage:.0%} de la zona): {r.matched} con AIS,"
-        f" {r.no_coverage} donde no hay cobertura AIS, {r.at_fixed_objects} en objetos fijos."
+        f"{r.detections} barcos detectados ({r.coverage:.0%} de la zona{frames}): {r.matched} con AIS,"
+        f" {r.no_coverage} sin AIS donde se recibe mal, {r.at_fixed_objects} en objetos fijos."
     ]
     if r.candidates:
         explained = _count(gaps, "explicado", "explicados")
-        lines.append(f"{len(r.candidates)} sin AIS donde sí hay cobertura; {explained} por huecos de recepción.")
+        lines.append(f"{len(r.candidates)} sin AIS donde se recibe bien; {explained} por huecos de recepción.")
     for c in interesting[:6]:
         where = f"{c.lat:.4f}, {c.lon:.4f}, ~{c.length_m:.0f} m"
         if c.kind == "went_silent":

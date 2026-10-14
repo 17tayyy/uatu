@@ -149,6 +149,7 @@ class SarScene(Base):
     error: Mapped[str | None]
     discovered_at: Mapped[datetime] = mapped_column(server_default=func.now())
     processed_at: Mapped[datetime | None]
+    notified_at: Mapped[datetime | None] = mapped_column(comment="when the pass it belongs to was announced")
     detections: Mapped[int | None]
     matched: Mapped[int | None]
     dark: Mapped[int | None]
@@ -180,6 +181,7 @@ class SarDetection(Base):
     mmsi: Mapped[int | None] = mapped_column(comment="AIS vessel it was paired with")
     distance_m: Mapped[float | None] = mapped_column(REAL, comment="to the vessel's expected position")
     ais_vessels_nearby: Mapped[int | None] = mapped_column(SmallInteger, comment="AIS vessels heard around it")
+    ais_reports_nearby: Mapped[int | None] = mapped_column(comment="their AIS reports: how well AIS is received there")
     pixels: Mapped[int]
     length_m: Mapped[float] = mapped_column(REAL, comment="rough size from the radar image")
     peak_db: Mapped[float] = mapped_column(REAL)

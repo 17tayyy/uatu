@@ -195,7 +195,7 @@ def test_unpaired_detections_without_ais_coverage_are_not_dark():
     split = split_by_coverage(result, [Coverage(0, 0), Coverage(40, 400)], min_vessels=3, min_reports_per_vessel=3)
     assert split.dark == [busy]
     assert split.no_coverage == [lonely]
-    assert split.ais_nearby[lonely] == 0
+    assert split.ais_nearby[lonely] == Coverage(0, 0)
 
 
 def test_vessels_heard_only_now_and_then_are_no_coverage():
@@ -270,6 +270,20 @@ def test_scene_notification_separates_reception_gaps_from_silent_vessels():
     assert "Se calló: SPARTAN ⚠ SANCIONADO (EU-RUS), 1 h 35 min sin emitir" in message
     assert "Sin identificar" in message
     assert priority == "high" and link is not None
+
+
+def test_a_pass_in_two_frames_is_one_notification():
+    from uatu.sar.report import scene_notification
+    from uatu.sar.store import SceneReport
+
+    report = SceneReport("S1C_IW_GRDH_TEST", T0, 0.6, 40, 13, 22, 3, [], frames=2)
+    title, message, _, _ = scene_notification(report)
+    assert title == "Pasada S1C 13/10 18:25 UTC: sin barcos oscuros"
+    assert message.startswith(
+        "40 barcos detectados (60% de la zona, 2 tomas): 13 con AIS, 22 sin AIS donde se recibe mal"
+    )
+    title, _, _, _ = scene_notification(report, late=True)
+    assert title == "Pasada S1C 13/10 18:25 UTC (toma tardía): sin barcos oscuros"
 
 
 def test_a_ferry_slowing_into_port_is_paired_on_its_fastest_speed():

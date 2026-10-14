@@ -31,7 +31,7 @@ const KIND = {
   unidentified: { label: "Oscuro", color: C.critical, rank: 1 },
   reception_gap: { label: "Hueco de recepción", color: C.warning, rank: 2 },
   matched: { label: "Con AIS", color: C.blue, rank: 3 },
-  no_coverage: { label: "Sin cobertura AIS", color: C.muted, rank: 4 },
+  no_coverage: { label: "Sin AIS · mala recepción", color: C.muted, rank: 4 },
   unpaired: { label: "Antes de grabar AIS", color: C.muted, rank: 5 },
   fixed: { label: "Objeto fijo", color: C.fixed, rank: 6 },
 };
@@ -606,11 +606,12 @@ function detectionPopup(p, lngLat) {
     actions.push(vesselButton(p.suspected_mmsi, "Ver posible barco"));
   }
   if (p.fixed_passes_seen) rows.push(["Visto en", plural(p.fixed_passes_seen, "pasada", "pasadas")]);
+  const reception = receptionBox(p);
   const text = {
     went_silent: "Ningún AIS aquí, pero un barco que dejó de emitir hace rato pudo llegar hasta este punto.",
     unidentified: "Ningún AIS aquí, ningún barco callado que lo explique y buena recepción alrededor.",
     reception_gap: "Sin AIS aquí, pero un barco que lleva poco sin oírse pudo estar en este punto: probablemente recepción.",
-    no_coverage: "Aquí aisstream apenas recibe AIS: sin AIS no se puede saber si emitía.",
+    no_coverage: "Ningún AIS aquí, pero alrededor aisstream oye poco: puede que emitiera y no le llegara.",
     fixed: "Un punto que aparece pasada tras pasada: plataforma, boya o fondeo largo.",
   }[p.kind];
   openPopup(lngLat, [
@@ -619,9 +620,37 @@ function detectionPopup(p, lngLat) {
     text && h("p", { class: "text" }, text),
     ais && h("p", { class: "text" }, "La línea discontinua lleva a donde estaba ese barco según su AIS."),
     kv(rows),
+    reception,
     actions.length && h("div", { class: "actions" }, actions),
   ]);
   if (ais) link(lngLat, ais.geometry.coordinates);
+}
+
+/** For an unpaired detection: how much AIS was heard around it, against what counts as well received. */
+function receptionBox(p) {
+  const rule = state.pass?.reception_rule;
+  if (p.ais_vessels_nearby == null || p.ais_reports_nearby == null || !rule) return null;
+  const perVessel = p.ais_vessels_nearby ? p.ais_reports_nearby / p.ais_vessels_nearby : 0;
+  const ok = p.ais_vessels_nearby >= rule.min_vessels && perVessel >= rule.min_reports_per_vessel;
+  const fmt = (x) => x.toLocaleString("es-ES", { maximumFractionDigits: 1 });
+  return h(
+    "div",
+    { class: "reception" },
+    h("div", { class: "reception-title" }, `AIS alrededor (${metres(rule.radius_m)}, ±${fmt(rule.window_hours)} h)`),
+    h(
+      "div",
+      { class: "reception-row num" },
+      h("span", null, `${plural(p.ais_vessels_nearby, "barco oído", "barcos oídos")}`),
+      h("span", { class: "need" }, `hacen falta ${rule.min_vessels}`),
+    ),
+    h(
+      "div",
+      { class: "reception-row num" },
+      h("span", null, `${fmt(perVessel)} mensajes por barco`),
+      h("span", { class: "need" }, `hacen falta ${fmt(rule.min_reports_per_vessel)}`),
+    ),
+    h("div", { class: "reception-verdict" }, ok ? "Recepción buena: su silencio cuenta." : "Recepción insuficiente: su silencio no dice nada."),
+  );
 }
 
 function eventPopup(p, lngLat, pass) {
@@ -1025,7 +1054,7 @@ async function renderPass(id) {
       stat(pass.detections, "detecciones"),
       stat(pass.matched, "con AIS", svg("circle", C.blue)),
       stat(pass.candidates, "candidatos", svg("circle", C.critical)),
-      stat(pass.no_coverage, "sin cobertura AIS", svg("circle", C.muted)),
+      stat(pass.no_coverage, "sin AIS, mala recepción", svg("circle", C.muted)),
       stat(pass.fixed, "objetos fijos", svg("circle", C.fixed)),
       stat(undetected, "AIS no vistos", svg("ring", C.ink2)),
     ),
@@ -1035,7 +1064,7 @@ async function renderPass(id) {
       ? h("ul", { class: "list" }, review.map(detectionRow))
       : h("p", { class: "note" }, "Nada que revisar: cada detección tiene AIS, es un objeto fijo o está donde no se recibe AIS."),
     pass.no_coverage > 0 &&
-      h("p", { class: "note" }, `${plural(pass.no_coverage, "detección está", "detecciones están")} donde aisstream apenas recibe AIS: sin AIS ahí no se puede saber si emitían.`),
+      h("p", { class: "note" }, `${plural(pass.no_coverage, "detección no tiene", "detecciones no tienen")} AIS en sitios donde aisstream oye poco: puede que emitieran y no les llegara. Pulsa una para ver cuánto se oía alrededor.`),
     h("h3", { class: "section-title" }, `Con AIS (${matched.length})`),
     h("ul", { class: "list" }, matched.map(detectionRow)),
   );

@@ -200,10 +200,22 @@ async def process_scene(scene_id: str) -> dict[str, int]:
     objects = await store.rebuild_fixed_objects(state.engine, srid=state.grid.crs.to_epsg())
     log.info("scene_processed", scene=scene.name, historical=historical, **summary, **objects)
     if not historical:
-        report = await store.scene_report(state.engine, uuid.UUID(scene_id))
-        title, message, priority, link = scene_notification(report)
-        await state.alerter.notify(title, message, priority, link)
+        await announce_pass(uuid.UUID(scene_id))
     return summary
+
+
+async def announce_pass(scene_id: uuid.UUID) -> None:
+    """Notify the pass a frame belongs to, once all its frames are done (see store.pass_announcement).
+    A frame that turns up after its pass was announced is notified only if it adds vessels without AIS."""
+    engine = app.state.engine
+    announcement = await store.pass_announcement(engine, scene_id)
+    if announcement is None:
+        return
+    report = await store.pass_report(engine, announcement.frames)
+    if not announcement.late or any(c.kind != "reception_gap" for c in report.candidates):
+        title, message, priority, link = scene_notification(report, late=announcement.late)
+        await app.state.alerter.notify(title, message, priority, link)
+    await store.mark_notified(engine, announcement.fresh)
 
 
 # --- AIS ------------------------------------------------------------------------------------------
@@ -303,6 +315,7 @@ async def on_error(ctx: ErrorContext) -> None:
     if ctx.name == "sar.process_scene" and ctx.task_id.startswith("sar-scene:"):
         scene_id = uuid.UUID(ctx.task_id.removeprefix("sar-scene:"))
         await store.mark_failed(app.state.engine, scene_id, repr(ctx.exc))
+        await announce_pass(scene_id)  # the frames of its pass that did work
     await app.state.alerter.notify(f"Uatu: {ctx.name} failed", f"after {ctx.tries} tries: {ctx.exc!r}", "high")
 
 

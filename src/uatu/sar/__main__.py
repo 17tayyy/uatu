@@ -130,8 +130,8 @@ async def cmd_candidates(settings: SarSettings, args: argparse.Namespace) -> int
 
     engine = db.create_engine(settings.database_url)
     try:
-        for scene_id in await store.recent_live_scenes(engine, datetime.now(UTC) - timedelta(days=args.days)):
-            title, message, _, link = scene_notification(await store.scene_report(engine, scene_id))
+        for frames in await store.recent_live_passes(engine, datetime.now(UTC) - timedelta(days=args.days)):
+            title, message, _, link = scene_notification(await store.pass_report(engine, frames))
             print(f"{title}\n{message}" + (f"\n{link}" if link else "") + "\n")
     finally:
         await engine.dispose()

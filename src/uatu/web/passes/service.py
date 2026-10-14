@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.config import BBox, bbox_polygon
 from uatu.db.models import IngestSession, SarAisCheck, SarDetection, SarFixedObject, SarScene, Vessel
+from uatu.sar.analysis import DEFAULT_PAIRING
 from uatu.sar.store import RECEPTION_GAP_MINUTES
 from uatu.web.errors import NotFoundError
 from uatu.web.passes.schemas import (
@@ -24,6 +25,7 @@ from uatu.web.passes.schemas import (
     ImageOverlay,
     PassDetail,
     PassSummary,
+    ReceptionRule,
 )
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
 
@@ -181,6 +183,12 @@ async def get_pass(db: AsyncSession, data_dir: Path, bbox: BBox, id_: str) -> Pa
     return PassDetail(
         **summary.model_dump(),
         images=images,
+        reception_rule=ReceptionRule(
+            radius_m=DEFAULT_PAIRING.coverage_radius_m,
+            window_hours=DEFAULT_PAIRING.coverage_window.total_seconds() / 3600,
+            min_vessels=DEFAULT_PAIRING.min_ais_nearby,
+            min_reports_per_vessel=DEFAULT_PAIRING.min_reports_per_vessel,
+        ),
         detections_geojson=FeatureCollection(
             features=[
                 Feature(
@@ -199,6 +207,8 @@ async def get_pass(db: AsyncSession, data_dir: Path, bbox: BBox, id_: str) -> Pa
                         suspect_name=r.suspect_name,
                         suspect_silent_minutes=r.SarDetection.suspect_silent_minutes,
                         fixed_passes_seen=r.passes_seen,
+                        ais_vessels_nearby=r.SarDetection.ais_vessels_nearby,
+                        ais_reports_nearby=r.SarDetection.ais_reports_nearby,
                     ),
                 )
                 for r in detections

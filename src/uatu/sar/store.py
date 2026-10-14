@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from geoalchemy2.shape import to_shape
-from sqlalchemy import delete, func, insert, select, text, update
+from sqlalchemy import and_, delete, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.orm import aliased
 
 from uatu.db.models import (
     IngestSession,
@@ -99,7 +100,8 @@ async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analy
             "status": status(d),
             "mmsi": paired[id(d)].expected.vessel.mmsi if id(d) in paired else None,
             "distance_m": paired[id(d)].distance_m if id(d) in paired else None,
-            "ais_vessels_nearby": nearby.get(d),
+            "ais_vessels_nearby": nearby[d].vessels if d in nearby else None,
+            "ais_reports_nearby": nearby[d].reports if d in nearby else None,
             "pixels": d.pixels,
             "length_m": d.length_m,
             "peak_db": d.peak_db,
@@ -293,7 +295,9 @@ class Candidate:
 
 @dataclass(frozen=True)
 class SceneReport:
-    name: str
+    """What a pass found: all its frames, or the ones reported on."""
+
+    name: str  # of its first frame
     acquired: datetime
     coverage: float
     detections: int
@@ -301,11 +305,14 @@ class SceneReport:
     no_coverage: int
     at_fixed_objects: int
     candidates: list[Candidate]  # dark: AIS received around, none paired, not a fixed object
+    frames: int = 1
 
 
-async def scene_report(engine: AsyncEngine, scene_id: uuid.UUID) -> SceneReport:
+async def pass_report(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> SceneReport:
+    """What the given frames of a pass found, together."""
     fixed = select(SarFixedObject.id).where(SarFixedObject.fixed).scalar_subquery()
     at_fixed = SarDetection.fixed_object_id.in_(fixed)
+    in_frames = SarDetection.scene_id.in_(scene_ids)
     stmt = (
         select(
             SarDetection.lat,
@@ -320,7 +327,7 @@ async def scene_report(engine: AsyncEngine, scene_id: uuid.UUID) -> SceneReport:
         )
         .outerjoin(Vessel, Vessel.mmsi == SarDetection.suspected_mmsi)
         .outerjoin(SanctionedVessel, SanctionedVessel.imo == Vessel.imo)
-        .where(SarDetection.scene_id == scene_id, SarDetection.status == "dark", ~func.coalesce(at_fixed, False))
+        .where(in_frames, SarDetection.status == "dark", ~func.coalesce(at_fixed, False))
         .order_by(SarDetection.seen_at)
     )
     counts = select(
@@ -328,28 +335,73 @@ async def scene_report(engine: AsyncEngine, scene_id: uuid.UUID) -> SceneReport:
         func.count().filter(SarDetection.status == "matched"),
         func.count().filter(SarDetection.status == "no_coverage"),
         func.count().filter(func.coalesce(at_fixed, False)),
-    ).where(SarDetection.scene_id == scene_id)
+    ).where(in_frames)
+    frames = select(SarScene.name, SarScene.acquired_from, SarScene.aoi_coverage).where(SarScene.id.in_(scene_ids))
     async with engine.connect() as conn:
-        scene = (await conn.execute(select(SarScene).where(SarScene.id == scene_id))).one()
+        scenes = sorted((await conn.execute(frames)).all(), key=lambda f: f.acquired_from)
         total, matched, no_coverage, fixed_count = (await conn.execute(counts)).one()
         candidates = [Candidate(*row) for row in await conn.execute(stmt)]
+    coverage = min(sum(f.aoi_coverage for f in scenes), 1.0)  # frames of a pass barely overlap
     return SceneReport(
-        scene.name, scene.acquired_from, scene.aoi_coverage, total, matched, no_coverage, fixed_count, candidates
+        scenes[0].name, scenes[0].acquired_from, coverage, total, matched, no_coverage, fixed_count, candidates,
+        frames=len(scenes),
+    )  # fmt: skip
+
+
+@dataclass(frozen=True)
+class Announcement:
+    """What to notify about a pass now."""
+
+    frames: list[uuid.UUID]  # to report on
+    fresh: list[uuid.UUID]  # to mark as announced
+    late: bool  # frames that came in after the rest of the pass was announced
+
+
+async def pass_announcement(engine: AsyncEngine, scene_id: uuid.UUID) -> Announcement | None:
+    """Once a frame of a live pass is done (processed or failed): the whole pass, if no frame of it is
+    still queued and none was announced; only the new frames, if the rest already was; else nothing.
+
+    One notification per pass, not per frame: frames of a pass are found together and queued together.
+    """
+    this = aliased(SarScene)
+    stmt = (
+        select(SarScene.id, SarScene.acquired_from, SarScene.status, SarScene.notified_at)
+        .join(this, and_(this.platform == SarScene.platform, this.datatake == SarScene.datatake))
+        .where(this.id == scene_id)
+        .order_by(SarScene.acquired_from)
     )
+    async with engine.connect() as conn:
+        frames = (await conn.execute(stmt)).all()
+    recording_since = await ais_recording_start(engine)
+    if not frames or recording_since is None or frames[0].acquired_from < recording_since:
+        return None  # historical: nothing to announce
+    if any(f.status == "queued" for f in frames):
+        return None  # the last frame announces the pass
+    fresh = [f.id for f in frames if f.status == "processed" and f.notified_at is None]
+    if not fresh:
+        return None
+    if any(f.notified_at is not None for f in frames):
+        return Announcement(fresh, fresh, late=True)
+    return Announcement([f.id for f in frames if f.status == "processed"], fresh, late=False)
 
 
-async def recent_live_scenes(engine: AsyncEngine, since: datetime) -> list[uuid.UUID]:
-    """Processed scenes acquired since `since` while AIS was being recorded, oldest first."""
+async def mark_notified(engine: AsyncEngine, scene_ids: list[uuid.UUID]) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(update(SarScene).where(SarScene.id.in_(scene_ids)).values(notified_at=func.now()))
+
+
+async def recent_live_passes(engine: AsyncEngine, since: datetime) -> list[list[uuid.UUID]]:
+    """The frames of each pass acquired since `since` while AIS was being recorded, oldest first."""
+    passes: dict[tuple[str, str], list[uuid.UUID]] = {}
     recording_since = await ais_recording_start(engine)
     if recording_since is None:
         return []
     stmt = (
-        select(SarScene.id)
-        .where(
-            SarScene.status == "processed",
-            SarScene.acquired_from >= max(since, recording_since),
-        )
+        select(SarScene.platform, SarScene.datatake, SarScene.id)
+        .where(SarScene.status == "processed", SarScene.acquired_from >= max(since, recording_since))
         .order_by(SarScene.acquired_from)
     )
     async with engine.connect() as conn:
-        return list((await conn.scalars(stmt)).all())
+        for platform, datatake, scene_id in await conn.execute(stmt):
+            passes.setdefault((platform, datatake), []).append(scene_id)
+    return list(passes.values())
