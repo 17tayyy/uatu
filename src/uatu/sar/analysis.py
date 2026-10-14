@@ -22,8 +22,12 @@ from uatu.sar.raster import Grid
 class PairingParams:
     base_tolerance_m: float = 1000.0  # detection-AIS distance tolerated for a vessel with fresh AIS
     drift_fraction: float = 0.25  # of the distance travelled since the nearest AIS report, added on top
-    min_ais_nearby: int = 5  # AIS vessels heard around an unpaired detection for it to count as dark
-    coverage_radius_m: float = 15_000.0
+    # An unpaired detection is dark only if AIS was being received right there: this many other
+    # vessels heard within coverage_radius_m and ±coverage_window. Measured locally because coverage
+    # has holes at the scale of a bay: aisstream.io hears the strait's lanes but almost nothing in
+    # the anchorages behind the Rock of Gibraltar, 3-10 km away.
+    min_ais_nearby: int = 3
+    coverage_radius_m: float = 3_000.0
     coverage_window: timedelta = timedelta(hours=2)
     doppler_sign: float = 1.0
     # Linking unpaired detections to vessels that had gone silent: beyond this uncertainty on where

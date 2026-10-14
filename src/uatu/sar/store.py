@@ -20,7 +20,7 @@ from uatu.db.models import (
     Vessel,
 )
 from uatu.sar.analysis import Analysis
-from uatu.sar.catalog import Scene
+from uatu.sar.catalog import Scene, frame_of
 
 
 async def ais_recording_start(engine: AsyncEngine) -> datetime | None:
@@ -30,7 +30,17 @@ async def ais_recording_start(engine: AsyncEngine) -> datetime | None:
 
 
 async def queue_new(engine: AsyncEngine, scenes: list[Scene], coverage: dict[str, float]) -> list[Scene]:
-    """Record the scenes not seen before as queued; return those."""
+    """Record the scenes not seen before as queued; return those.
+
+    A frame can be published twice, as a standard product and later as a COG one with another id:
+    a frame already recorded under either is not new.
+    """
+    if not scenes:
+        return []
+    async with engine.connect() as conn:
+        names = (await conn.scalars(select(SarScene.name))).all()
+    known = {frame_of(name) for name in names}
+    scenes = [s for s in scenes if s.frame not in known]
     if not scenes:
         return []
     rows = [

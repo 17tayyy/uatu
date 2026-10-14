@@ -43,7 +43,7 @@ class Scene:
     @property
     def frame(self) -> str:
         """Identifies the frame regardless of the processing variant (standard or COG)."""
-        return "_".join(self.name.split("_")[:8])
+        return frame_of(self.name)
 
     @property
     def is_cog(self) -> bool:
@@ -53,6 +53,11 @@ class Scene:
     def coverage(self, aoi: Geometry) -> float:
         """Fraction of the area of interest inside this frame."""
         return self.footprint.intersection(aoi).area / aoi.area
+
+
+def frame_of(product_name: str) -> str:
+    """S1C_IW_GRDH_1SDV_<start>_<end>_<orbit>_<datatake>, without the product id and COG suffix."""
+    return "_".join(product_name.split("_")[:8])
 
 
 async def search(client: httpx.AsyncClient, aoi: Geometry, start: datetime, end: datetime) -> list[Scene]:
