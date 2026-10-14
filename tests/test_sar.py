@@ -262,7 +262,7 @@ def test_scene_notification_separates_reception_gaps_from_silent_vessels():
     )  # fmt: skip
     title, message, priority, link = scene_notification(report)
     assert title == "Pasada S1C 13/10 18:25 UTC: 2 barcos sin AIS"
-    assert "1 explicados por huecos de recepción" in message
+    assert "1 explicado por huecos de recepción" in message
     assert "Se calló: SPARTAN ⚠ SANCIONADO (EU-RUS), 1 h 35 min sin emitir" in message
     assert "Sin identificar" in message
     assert priority == "high" and link is not None
