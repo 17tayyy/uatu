@@ -1,14 +1,78 @@
 # Uatu
 
-Dark vessel detection in the Strait of Gibraltar: finding ships that appear on Sentinel-1
-radar imagery but are not broadcasting AIS.
+[![CI](https://github.com/17tayyy/uatu/actions/workflows/ci.yml/badge.svg)](https://github.com/17tayyy/uatu/actions/workflows/ci.yml)
 
-**Status:** running 24/7 on a homelab. The AIS recorder stores everything aisstream.io
-sends for the Strait and, since 14 October 2026, the whole Spanish Mediterranean coast and the
-Balearic Islands, in six zones (it only streams live data: any day not recorded is lost);
-analysis of the new zones is on its way. A worker
-looks for suspicious behaviour in that AIS every 10 minutes, and picks up every new
-Sentinel-1 pass to detect ships and pair them with it.
+**Dark vessel detection on the Spanish Mediterranean coast**: ships that Sentinel-1's radar sees
+but that are not broadcasting AIS, and the ones that are broadcasting but deserve a second look
+(sanctioned tankers sailing under new names, transponders switched off at sea, ship-to-ship
+meetings, vessels idling over submarine cables).
+
+![The dashboard on the Strait of Gibraltar: a Sentinel-1 pass, each radar detection coloured by what AIS says about it](docs/dashboard.png)
+
+Running 24/7 on a homelab since 13 October 2026: the Strait of Gibraltar first, then the whole
+coast from Gibraltar to Cap de Creus and the Balearic Islands, in six zones brought into the
+analysis one at a time.
+
+## What it does
+
+- **Records AIS** for the whole coast, around the clock: free live feeds keep no history, so
+  every day not recorded is lost. About 1,300 vessels an hour across the six zones.
+- **Watches AIS for behaviour**: vessels going silent at sea (only where reception is good
+  enough for silence to mean something), ship-to-ship meetings, loitering, idling over cables
+  in water shallow enough to drop an anchor on them, identity changes, impossible jumps, and
+  vessels whose IMO number is on a sanctions list.
+- **Reads every Sentinel-1 pass** over the coast: calibrates the radar image, detects ships,
+  places every AIS vessel where the radar saw it at that instant, pairs the two, and names the
+  ships left over, separating those where AIS reception is too poor to judge.
+- **Learns the coast**: three months of past passes teach it what never moves (platforms,
+  buoys, fish farms, long-term moorings), so they are not flagged.
+- **Tells**: a map dashboard per zone, and phone notifications for each pass and each alert.
+
+## What it has found so far
+
+From public data only (AIS as received by aisstream.io, sanctions lists via OpenSanctions):
+
+- **Three tankers whose IMO numbers are on sanctions lists, through the Strait in two days.**
+  *SPARTAN* (Omani flag, 273 m) is IMO 9421972, listed as *SCF SAMOTLOR* of Sovcomflot by the
+  EU, UK, Canada, Australia and Switzerland, declaring Vysotsk to Port Said. *DERZHAVA* (Russian
+  flag, 274 m, for Murmansk) is IMO 9290385, listed as *ELBUS*. *FLEXI 2* is IMO 9246322,
+  listed as *TEX* under US Iran sanctions. Same hulls, new names: the shadow fleet at work.
+- **What a radar pass looks like**, 14 October, 06:26 UTC over the Strait: 132 ships detected;
+  36 paired with their AIS; 12 on fixed objects; 82 where aisstream hears too little to say
+  whether they were broadcasting; one candidate, a 338 m echo where a container ship silent for
+  90 minutes could have been. No dark vessel confirmed yet. That is the honest result of the
+  first passes, and why the coverage test exists.
+
+## How it works
+
+![Architecture: recorder and worker on a homelab, PostGIS in the middle, dashboard and phone notifications out](docs/architecture.png)
+
+The techniques (CFAR detection, Doppler shift, pairing by the Hungarian method, local AIS
+coverage, fixed objects), why each is needed and what real data taught about them are in
+[docs/how-it-works.md](docs/how-it-works.md). The diagram is an
+[Excalidraw](https://excalidraw.com) file: [docs/architecture.excalidraw](docs/architecture.excalidraw).
+
+Python 3.14 throughout: asyncio, SQLAlchemy 2 + GeoAlchemy2 on PostGIS (Alembic migrations),
+numpy, scipy and rasterio for the radar, [ArdiQ](https://github.com/17tayyy/ardiq) (Rust core)
+on Redis for tasks, FastAPI and MapLibre GL for the dashboard, Docker Compose on a Proxmox LXC.
+CI runs the linters, the migrations on an empty PostGIS and 100+ tests on every change.
+
+## What it cannot tell
+
+- **Missing AIS is not hiding.** Small craft often carry no AIS; aisstream.io is a volunteer
+  network with holes the size of a bay (vessels in the Strait's lanes are heard 10–20 times in
+  4 hours, those anchored behind the Rock of Gibraltar about once); and it passes on about one
+  position per vessel per minute. A detection with no AIS is a candidate only where reception
+  around it is measured to be good.
+- **Sentinel-1 sees ships, not who they are**, roughly from 25–30 m long, once every day or two
+  per zone, and only the part of the coast its frame covers.
+- **A listed IMO is a lead, not proof**: lists lag reality, and IMO numbers can be misreported.
+
+## Responsible use
+
+The dashboard has no authentication and stays on the local network. Nothing here publishes
+live positions: migrant boats are a humanitarian matter, and tracking smugglers in real time
+can put people at risk. Findings are written up aggregated and after the fact.
 
 ## AIS recorder
 
@@ -134,8 +198,9 @@ minute.
 `worker` ([`src/uatu/worker.py`](src/uatu/worker.py)) runs the same pipeline on
 [ArdiQ](https://github.com/17tayyy/ardiq) with Redis:
 
-- `sar.discover`, every 10 minutes: Sentinel-1 frames over the area acquired since AIS
-  recording began (frames covering < 10% are skipped), recorded in `sar_scenes` and queued.
+- `sar.discover`, every 10 minutes: Sentinel-1 frames over each zone acquired since AIS
+  recording began there (frames covering under 10% of the zone's sea are skipped), recorded in
+  `sar_scenes` and queued.
   The catalogue can omit fresh products for a few minutes; a later run finds them.
 - `sar.process_scene`: download, detect, pair, link suspects, store, rebuild fixed objects;
   retried 3 times 10 minutes apart, then marked `failed`. One at a time (~0.8 GB of RAM).
