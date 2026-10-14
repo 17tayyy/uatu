@@ -124,8 +124,9 @@ async def get_pass(db: AsyncSession, data_dir: Path, pass_id: UUID) -> PassDetai
     image = None
     overlay = _overlay_dir(data_dir, summary.name)
     if summary.has_image and (overlay / "backscatter.json").exists():
+        version = int((overlay / "backscatter.png").stat().st_mtime)  # browsers cache it: a new image, a new URL
         image = ImageOverlay(
-            url=f"/api/v1/passes/{pass_id}/image",
+            url=f"/api/v1/passes/{pass_id}/image?v={version}",
             coordinates=json.loads((overlay / "backscatter.json").read_text()),
         )
 
