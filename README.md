@@ -49,7 +49,7 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `ais_gap` | a vessel stops transmitting for 1 h+ while vessels around it are still heard | under way, at sea, and vessels are also heard where it was heading (so it did not just sail out of the area, into port, or into a hole in aisstream's coverage) |
 | `encounter` | two vessels within 500 m, both under 2 kn, for 2 h+ (ship-to-ship transfers) | > 5 km from the coast |
 | `loitering` | nearly stopped for 3 h+ | > 5 km from the coast |
-| `infrastructure_loitering` | under 3 kn for 30 min+ within 1 km of a submarine cable or pipeline | always (alert) |
+| `infrastructure_loitering` | under 3 kn for 30 min+ within 1 km of a submarine cable or pipeline | where an anchor can reach the seabed, ≤ 200 m deep (alert) |
 | `sanctioned_vessel` | a vessel on a sanctions list, by IMO (or listed MMSI) | always (alert) |
 | `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
@@ -62,6 +62,8 @@ Reference data, refreshed by the worker:
 
 - **Sanctioned vessels**: [OpenSanctions](https://www.opensanctions.org) `sanctions`
   collection (EU, UK, US, CH, CA, AU lists), CC BY-NC 4.0, daily.
+- **Water depth**: [EMODnet Bathymetry](https://emodnet.ec.europa.eu/en/bathymetry) DTM (~115 m,
+  CC BY 4.0), downloaded once for the area: a vessel over a cable can only harm it by anchoring.
 - **Infrastructure in Spanish waters**: [EMODnet Human Activities](https://emodnet.ec.europa.eu/en/human-activities)
   (telecom cables from Spain's CICA, pipelines, platforms, ports) and
   [TeleGeography](https://www.submarinecablemap.com)'s submarine cable map (CC BY-NC-SA), weekly.

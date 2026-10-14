@@ -35,6 +35,7 @@ from uatu import db, ops
 from uatu.ais import analysis as ais_analysis
 from uatu.ais import reference
 from uatu.ais import store as ais_store
+from uatu.ais.bathymetry import load_bathymetry
 from uatu.ais.coast import CoastDistance
 from uatu.config import STRAIT_OF_GIBRALTAR, BBoxSetting, bbox_polygon
 from uatu.log import configure_logging
@@ -97,6 +98,11 @@ async def lifespan():
         grid = Grid.covering(AOI, 10.0)
         land = await asyncio.to_thread(land_cache, grid, settings.sar_data_dir / "cache")
         coast = await asyncio.to_thread(CoastDistance, grid, land, settings.sar_data_dir / "cache")
+        bathymetry = None
+        try:
+            bathymetry = await load_bathymetry(http, settings.ais_bbox, settings.sar_data_dir / "cache")
+        except httpx.HTTPError as e:  # without it, every vessel over a cable is an alert
+            log.warning("bathymetry_unavailable", error=repr(e))
         await _load_reference_if_missing(engine, http)
         log.info("worker_ready", grid=f"{grid.width}x{grid.height}", alerts=settings.ntfy_url is not None)
         await alerter.notify("Uatu worker started", f"Watching {settings.sar_bbox}", "low")
@@ -109,6 +115,7 @@ async def lifespan():
             "grid": grid,
             "land": land,
             "coast": coast,
+            "bathymetry": bathymetry,
         }
 
 
@@ -206,7 +213,7 @@ async def process_scene(scene_id: str) -> dict[str, int]:
 async def analyse_ais() -> dict[str, int]:
     state = app.state
     now = datetime.now(UTC)
-    outcome = await ais_analysis.analyse(state.engine, now, settings.ais_bbox, state.coast)
+    outcome = await ais_analysis.analyse(state.engine, now, settings.ais_bbox, state.coast, bathymetry=state.bathymetry)
     urgent = [e for e in outcome.new if e.severity >= 3 and ais_analysis.worth_alerting(e, now)]
     if urgent:
         mmsis = {e.mmsi for e in urgent} | {e.other_mmsi for e in urgent if e.other_mmsi}

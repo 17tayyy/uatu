@@ -215,3 +215,37 @@ def test_waiting_areas_are_learnt_from_past_days_too():
     history = [(200 + k, LON0 + 0.02 * k, LAT0 + 0.01) for k in range(5)]
     [e] = downgrade_in_crowds(detect_loitering([loiterer], at_sea(20)), history, PROJ)
     assert e.severity == 1 and e.details["vessels_stopped_nearby"] == 5
+
+
+def test_vessels_over_cables_matter_only_where_anchors_reach_the_seabed():
+    x, y = PROJ.xy(np.array([LON0]), np.array([LAT0]))
+    cable = LineString([(x[0] - 5000, y[0] + 300), (x[0] + 5000, y[0] + 300)])
+    slow = track(1, range(0, 41), sog=1.0)
+
+    def depth(metres: float):
+        return lambda lon, lat: np.full(np.shape(lon), metres)
+
+    [shallow] = detect_infrastructure_loitering(
+        [slow], [("telecom_cable", "T", cable)], at_sea(10), PROJ, depth=depth(60)
+    )
+    [deep] = detect_infrastructure_loitering(
+        [slow], [("telecom_cable", "T", cable)], at_sea(10), PROJ, depth=depth(865)
+    )
+    assert (shallow.severity, shallow.details["depth_m"]) == (3, 60)
+    assert (deep.severity, deep.details["depth_m"]) == (1, 865)
+
+
+def test_bathymetry_reads_depth_from_the_terrain_model(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    from uatu.ais.bathymetry import Bathymetry
+
+    elevation = np.array([[-30.0, -865.0], [12.0, -200.0]], dtype=np.float32)  # metres, negative = below sea
+    path = tmp_path / "depth.tif"
+    profile = {"driver": "GTiff", "width": 2, "height": 2, "count": 1, "dtype": "float32", "crs": "EPSG:4326",
+               "transform": from_origin(-6.0, 36.0, 0.5, 0.5)}  # fmt: skip
+    with rasterio.open(path, "w", **profile) as dst:
+        dst.write(elevation, 1)
+    depth = Bathymetry(path).depth_at(np.array([-5.9, -5.4, -5.9, -7.0]), np.array([35.9, 35.9, 35.4, 35.9]))
+    assert depth[:3].tolist() == [30.0, 865.0, -12.0] and np.isnan(depth[3])
