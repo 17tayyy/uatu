@@ -60,6 +60,14 @@ class DetectionProperties(OutputSchema):
     review: ReviewRead | None  # your verdict, if given
 
 
+class PendingDetection(DetectionProperties):
+    """A detection waiting for a verdict, with the pass it belongs to."""
+
+    pass_id: str
+    zone: str
+    acquired_at: datetime  # of its frame
+
+
 class AisCheckProperties(OutputSchema):
     mmsi: int
     name: str | None

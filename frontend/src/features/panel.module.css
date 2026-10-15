@@ -1,0 +1,213 @@
+/* What every panel is made of: a header, toolbars, lists of rows, stats. */
+
+.header {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.eyebrow {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.title {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.subtitle {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.intro {
+  margin: 0;
+  padding: 12px 20px 4px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 12px 0 0 14px;
+  padding: 3px 6px;
+  border-radius: var(--radius-s);
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.back:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.grow {
+  flex: 1;
+}
+
+.search {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--bg) no-repeat 11px center;
+  color: var(--text);
+  font-size: 13.5px;
+}
+.search:focus {
+  border-color: var(--blue);
+  outline: none;
+}
+.searchWrap {
+  position: relative;
+  flex: 1;
+}
+.searchIcon {
+  position: absolute;
+  left: 11px;
+  top: 10px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.list {
+  margin: 0;
+  padding: 0 10px;
+  list-style: none;
+}
+.list > li + li {
+  margin-top: 2px;
+}
+
+.row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 10px;
+  border-radius: var(--radius);
+  text-align: left;
+  transition: background 0.1s;
+}
+button.row:hover,
+a.row:hover {
+  background: var(--surface-2);
+}
+.row[aria-current="true"] {
+  background: var(--surface-3);
+  box-shadow: inset 2px 0 0 var(--text);
+}
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.rowTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.rowTime {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.rowMeta {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.rowText {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dayHeading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 12px 20px 6px;
+  background: var(--surface-1);
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin: 14px 20px 6px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--border);
+}
+.stat {
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+.statValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 19px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.statLabel {
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.block {
+  padding: 6px 20px 10px;
+  display: grid;
+  gap: 10px;
+}
+.callouts {
+  display: grid;
+  gap: 8px;
+  padding: 14px 20px 4px;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 4px 20px 10px;
+  font-size: 13px;
+}
+.cta {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px;
+}

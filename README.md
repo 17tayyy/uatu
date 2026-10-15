@@ -60,9 +60,9 @@ coverage, fixed objects), why each is needed and what real data taught about the
 [docs/how-it-works.md](docs/how-it-works.md). The diagram is an
 [Excalidraw](https://excalidraw.com) file: [docs/architecture.excalidraw](docs/architecture.excalidraw).
 
-Python 3.14 throughout: asyncio, SQLAlchemy 2 + GeoAlchemy2 on PostGIS (Alembic migrations),
+Python 3.14 for all but the dashboard: asyncio, SQLAlchemy 2 + GeoAlchemy2 on PostGIS (Alembic migrations),
 numpy, scipy and rasterio for the radar, [ArdiQ](https://github.com/17tayyy/ardiq) (Rust core)
-on Redis for tasks, FastAPI and MapLibre GL for the dashboard, Docker Compose on a Proxmox LXC.
+on Redis for tasks, FastAPI; the dashboard in TypeScript, React and MapLibre GL; Docker Compose on a Proxmox LXC.
 CI runs the linters, the migrations on an empty PostGIS and 100+ tests on every change.
 
 ## What it cannot tell
@@ -300,15 +300,18 @@ ORDER BY d.seen_at DESC;
 
 ## Dashboard
 
-A map and a side panel at `http://<host>:8000` (the `web` service), in Spanish, over the whole
-coast or one zone at a time (the selector in the header):
+A map with a rail of sections and their panel at `http://<host>:8000` (the `web` service), in
+Spanish, over the whole coast or one zone at a time (the selector at the top of the panel). What is
+picked on the map or in a list opens in an inspector over the map's right side.
 
 - **Pasadas**: every Sentinel-1 pass since AIS recording began, with the radar image laid on
   the map and each detection coloured by what AIS says about it (paired, where AIS is barely
   received, a fixed object, or a candidate with no AIS). Candidates come first, with the vessel
-  that went silent and could be there. Signed in, you give each detection a verdict (a vessel
-  without AIS, a vessel with AIS, a reception gap, not a vessel; which vessel, a note): "Para
-  revisar" keeps only those without one, and a pass counts what is left. The verdicts are stored
+  that went silent and could be there; each paired echo has a dashed line to its AIS position.
+- **Revisar**: what is left to review across every pass of the last 30 days. Signed in, you give
+  each detection a verdict in the inspector (a vessel without AIS, a vessel with AIS, a reception
+  gap, not a vessel; then which vessel and a note), with the mouse or the keyboard: `1`–`4` give a
+  verdict and move on, `J`/`K` move along the list, `Esc` closes. The verdicts are stored
   (`detection_reviews`) as the labels of a future classifier, and survive processing a scene again.
 - **Eventos**: the AIS events (gaps, encounters, loitering, vessels over cables, sanctioned
   vessels...) of the last 24 h to 7 days.
@@ -316,14 +319,17 @@ coast or one zone at a time (the selector in the header):
   by name or MMSI, and a vessel's card: track, events, sanctions, owners and managers, what the
   lists say about it and the passes that saw it. A company's card lists its known fleet, with the
   vessels Uatu has heard first.
-- Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute, and
-  traffic density: vessel-hours per ~2 km cell over the last week, a vessel counting once per hour
-  however often it reports.
+- **Vigilancia**: your own watch list.
+- **Capas**: radar, AIS and context layers in groups, each with its legend under its switch: live
+  vessels, infrastructure and AIS reception quality, refreshed every minute, and traffic density
+  (vessel-hours per ~2 km cell over the last week, a vessel counting once per hour however often it
+  reports).
 - **Máquina del tiempo**: the AIS record played back. A time bar sets any moment since recording
   began, or plays it at 10 s to 30 min a second. Every vessel is drawn where it was then,
   interpolated between reports, with its last hour behind it, along with the events going on at
-  that moment and the radar pass of the moment, if a satellite passed within 45 minutes. Each
-  event can be replayed from a little before it began. When Uatu itself was not recording (its
+  that moment and the radar pass of the moment, if a satellite passed within 45 minutes: "Ir al
+  instante" goes to the second the radar looked. Passes are marked on the bar. Each event can be
+  replayed from a little before it began. When Uatu itself was not recording (its
   connection down), the bar says so: what is missing then is not a vessel gone quiet. Reports
   come an hour at a time, and the browser keeps past hours.
 
@@ -423,7 +429,7 @@ uv sync
 docker compose up -d db
 uv run alembic upgrade head
 LOG_FORMAT=console uv run uatu-recorder
-LOG_FORMAT=console uv run fastapi dev                  # the dashboard, on http://127.0.0.1:8000
+LOG_FORMAT=console uv run fastapi dev                  # the API (and the dashboard, once built), on :8000
 
 uv run pytest                                          # unit tests
 # Integration tests need a migrated database of their own (they assume nothing else in it):
@@ -432,6 +438,20 @@ DATABASE_URL=${DATABASE_URL%/uatu}/uatu_test uv run alembic upgrade head
 UATU_TEST_DATABASE_URL=${DATABASE_URL%/uatu}/uatu_test uv run pytest
 uv run ruff check . && uv run ruff format .
 ```
+
+The dashboard is in `frontend/`: React, TypeScript and Vite, with TanStack Query for the API's data,
+Zustand for what the viewer is looking at and MapLibre GL for the map. Its types are generated from
+the API's OpenAPI schema, kept in `frontend/openapi.json` (a test fails when it falls behind):
+
+```sh
+cd frontend && npm ci
+UATU_API=http://localhost:8000 npm run dev    # on http://localhost:5173, the API proxied
+npm run check                                 # types, lint (Biome) and tests (Vitest)
+npm run build                                 # into src/uatu/web/static, which FastAPI serves
+uv run uatu-web openapi > frontend/openapi.json   # after a change to the API (from the repository)
+```
+
+The Docker image builds it in a stage of its own.
 
 Schema changes: edit `models.py`, run `uv run alembic revision --autogenerate -m "..."`,
 review the generated file in `migrations/versions/`, then run `uv run alembic upgrade head`.

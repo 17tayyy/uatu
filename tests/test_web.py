@@ -510,6 +510,9 @@ async def test_verdicts_on_detections(signed_in):
         "detections_geojson"]["features"]}  # fmt: skip
     silent = kinds["went_silent"]
     assert silent["review"] is None
+    pending = await ok(client, "/api/v1/detections/pending?zone=estrecho")
+    [queued] = [f["properties"] for f in pending["features"] if f["properties"]["id"] == silent["id"]]
+    assert (queued["pass_id"], queued["zone"], queued["kind"]) == (PASS_ID, "estrecho", "went_silent")
 
     path = f"/api/v1/detections/{silent['id']}/review"
     verdict = {"verdict": "vessel_without_ais", "mmsi": MMSI_SILENT, "note": "  its AIS off, by the radar  "}
@@ -527,6 +530,8 @@ async def test_verdicts_on_detections(signed_in):
     )
     assert reviewed["review"]["verdict"] == "reception_gap"
     assert detail["pending"] == 0
+    pending = await ok(client, "/api/v1/detections/pending?zone=estrecho")
+    assert silent["id"] not in [f["properties"]["id"] for f in pending["features"]]  # reviewed: off the queue
 
     no_ship = await client.put(path, json={"verdict": "not_a_vessel", "mmsi": MMSI_A}, headers=SAME)
     assert no_ship.status_code == 422  # not a vessel: no MMSI to give it
@@ -668,12 +673,15 @@ async def test_errors_share_one_shape(client):
 
 @needs_db
 async def test_page_and_health(client):
-    page = await client.get("/")
-    assert page.status_code == 200
-    assert "<title>Uatu</title>" in page.text
-    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
-    assert page.headers["x-content-type-options"] == "nosniff"
-    assert (await client.get("/app.js")).status_code == 200
+    from uatu.web.main import STATIC_DIR
+
+    if (STATIC_DIR / "index.html").exists():  # built from frontend/ (the image always is)
+        page = await client.get("/")
+        assert page.status_code == 200
+        assert "<title>Uatu</title>" in page.text
+        assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+        assert "worker-src 'self' blob:" in page.headers["content-security-policy"]
+        assert page.headers["x-content-type-options"] == "nosniff"
     assert (await client.get("/health/live")).json() == {"status": "ok"}
     assert (await client.get("/health/ready")).json() == {"status": "ok"}
     zones = await ok(client, "/api/v1/zones")
@@ -746,3 +754,14 @@ async def test_the_sea_a_pass_did_not_image(client):
     assert rest["properties"]["imaged_by"] == PASS_ID
     assert 0 < shape(rest["geometry"]).area < shape(sea["geometry"]).area  # the pass's footprint cut out
     assert (await client.get("/api/v1/map/unimaged?pass=../etc")).status_code == 422
+
+
+def test_the_dashboard_types_follow_the_api():
+    """frontend/openapi.json is what the dashboard's TypeScript types are generated from: after a change to the
+    API, `uv run uatu-web openapi > frontend/openapi.json` (and `npm run api` in frontend/)."""
+    import json
+
+    from uatu.web.__main__ import openapi
+
+    committed = json.loads((Path(__file__).parents[1] / "frontend" / "openapi.json").read_text())
+    assert committed == json.loads(json.dumps(openapi())), "frontend/openapi.json is out of date"

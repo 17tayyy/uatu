@@ -4,3 +4,6 @@ __pycache__/
 .ruff_cache/
 .env
 data/
+
+# The dashboard, built from frontend/ into the package (npm run build; the Docker image builds it)
+src/uatu/web/static/

@@ -2,11 +2,13 @@
 
 uatu-web set-password [--user NAME]   create a user or change its password (and sign it out everywhere);
                                       the password is asked for, or read from stdin when piped
+uatu-web openapi                      the API's OpenAPI schema, as the dashboard's types are generated from
 """
 
 import argparse
 import asyncio
 import getpass
+import json
 import sys
 
 from pydantic import ValidationError
@@ -37,6 +39,13 @@ async def set_password(settings: WebSettings, username: str, password: str) -> b
         await engine.dispose()
 
 
+def openapi() -> dict:
+    """The API's schema, as any deployment serves it: it depends on no setting."""
+    from uatu.web.main import create_app
+
+    return create_app(WebSettings()).openapi()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="uatu-web", description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -44,7 +53,11 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     set_cmd = commands.add_parser("set-password", help="create a user or change its password")
     set_cmd.add_argument("--user", default="oscar", help="(default: oscar)")
+    commands.add_parser("openapi", help="print the API's OpenAPI schema (frontend/openapi.json)")
     args = parser.parse_args()
+    if args.command == "openapi":
+        print(json.dumps(openapi(), indent=2, ensure_ascii=False))
+        return
     try:
         settings = WebSettings()
     except ValidationError as e:

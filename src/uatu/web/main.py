@@ -118,7 +118,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         api.include_router(router)
     app.include_router(api)
     app.include_router(health_router)
-    app.frontend("/", directory=STATIC_DIR, fallback=None)
+    # The dashboard, as built from frontend/ (npm run build); the API works without it.
+    app.frontend("/", directory=STATIC_DIR, fallback=None, check_dir=False)
     return app
 
 

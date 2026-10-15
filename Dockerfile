@@ -1,4 +1,12 @@
 # syntax=docker/dockerfile:1
+# The dashboard (frontend/: React + TypeScript + Vite), built into the Python package that serves it.
+FROM node:22-slim AS dashboard
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build -- --outDir /dashboard
+
 FROM python:3.14-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.9.26 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
@@ -7,6 +15,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project
 COPY README.md ./
 COPY src ./src
+COPY --from=dashboard /dashboard ./src/uatu/web/static
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-editable
 
 FROM python:3.14-slim

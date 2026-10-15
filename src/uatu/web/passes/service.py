@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,7 @@ from uatu.web.passes.schemas import (
     ImageOverlay,
     PassDetail,
     PassSummary,
+    PendingDetection,
     ReceptionRule,
 )
 from uatu.web.reviews.service import REVIEW_COLUMNS, join_reviews, review_of
@@ -186,41 +188,102 @@ async def pass_footprint(db: AsyncSession, id_: str) -> BaseGeometry:
     return shape(json.loads((await _pass_row(db, id_)).footprint_json))
 
 
+def _detections(*columns: Any) -> Select:
+    """Detections with all that DetectionProperties tells of them (see _properties)."""
+    paired, suspect = Vessel.__table__.alias("paired"), Vessel.__table__.alias("suspect")
+    seen = SarAisCheck.__table__.alias("seen")
+    return (
+        join_reviews(
+            select(
+                SarDetection,
+                _KIND.label("kind"),
+                paired.c.name.label("vessel_name"),
+                suspect.c.name.label("suspect_name"),
+                SarFixedObject.passes_seen,
+                seen.c.lon.label("ais_lon"),
+                seen.c.lat.label("ais_lat"),
+                seen.c.doppler_shift_m,
+                *REVIEW_COLUMNS,
+                *columns,
+            )
+        )
+        .outerjoin(paired, paired.c.mmsi == SarDetection.mmsi)
+        .outerjoin(
+            seen,
+            and_(
+                seen.c.scene_id == SarDetection.scene_id,
+                seen.c.mmsi == SarDetection.mmsi,
+                seen.c.status == "detected",
+            ),
+        )
+        .outerjoin(suspect, suspect.c.mmsi == SarDetection.suspected_mmsi)
+        .outerjoin(SarFixedObject, SarFixedObject.id == SarDetection.fixed_object_id)
+    )
+
+
+def _properties(r: Any) -> dict[str, Any]:
+    return {
+        "id": r.SarDetection.id,
+        "kind": r.kind,
+        "seen_at": r.SarDetection.seen_at,
+        "length_m": r.SarDetection.length_m,
+        "contrast_db": _difference(r.SarDetection.peak_db, r.SarDetection.background_db),
+        "vh_db": r.SarDetection.vh_db,
+        "mmsi": r.SarDetection.mmsi,
+        "vessel_name": r.vessel_name,
+        "distance_m": r.SarDetection.distance_m,
+        "ais_lon": r.ais_lon,
+        "ais_lat": r.ais_lat,
+        "doppler_shift_m": r.doppler_shift_m,
+        "suspected_mmsi": r.SarDetection.suspected_mmsi,
+        "suspect_name": r.suspect_name,
+        "suspect_silent_minutes": r.SarDetection.suspect_silent_minutes,
+        "fixed_passes_seen": r.passes_seen,
+        "ais_vessels_nearby": r.SarDetection.ais_vessels_nearby,
+        "ais_reports_nearby": r.SarDetection.ais_reports_nearby,
+        "review": review_of(r),
+    }
+
+
+async def pending_detections(
+    db: AsyncSession, zones: list[str], since: datetime, limit: int
+) -> FeatureCollection[PendingDetection]:
+    """Unpaired detections where AIS is received, without a verdict yet, of every pass: latest first."""
+    query = (
+        _detections(SarScene.platform, SarScene.datatake, SarScene.zone, SarScene.acquired_from)
+        .join(SarScene, SarScene.id == SarDetection.scene_id)
+        .where(
+            SarScene.zone.in_(zones),
+            SarScene.status == "processed",
+            SarDetection.status == "dark",
+            not_(_AT_FIXED),
+            DetectionReview.id.is_(None),
+            SarDetection.seen_at >= since,
+        )
+        .order_by(SarDetection.seen_at.desc(), SarDetection.id)
+        .limit(limit)
+    )
+    return FeatureCollection(
+        features=[
+            Feature(
+                geometry=point(r.SarDetection.lon, r.SarDetection.lat),
+                properties=PendingDetection(
+                    **_properties(r),
+                    pass_id=pass_id(r.platform, r.datatake, r.zone),
+                    zone=r.zone,
+                    acquired_at=r.acquired_from,
+                ),
+            )
+            for r in (await db.execute(query)).all()
+        ]
+    )
+
+
 async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
     row = await _pass_row(db, id_)
     summary = _summary(row, data_dir)
-
-    paired, suspect = Vessel.__table__.alias("paired"), Vessel.__table__.alias("suspect")
-    seen = SarAisCheck.__table__.alias("seen")
     detections = (
-        await db.execute(
-            join_reviews(
-                select(
-                    SarDetection,
-                    _KIND.label("kind"),
-                    paired.c.name.label("vessel_name"),
-                    suspect.c.name.label("suspect_name"),
-                    SarFixedObject.passes_seen,
-                    seen.c.lon.label("ais_lon"),
-                    seen.c.lat.label("ais_lat"),
-                    seen.c.doppler_shift_m,
-                    *REVIEW_COLUMNS,
-                )
-            )
-            .outerjoin(paired, paired.c.mmsi == SarDetection.mmsi)
-            .outerjoin(
-                seen,
-                and_(
-                    seen.c.scene_id == SarDetection.scene_id,
-                    seen.c.mmsi == SarDetection.mmsi,
-                    seen.c.status == "detected",
-                ),
-            )
-            .outerjoin(suspect, suspect.c.mmsi == SarDetection.suspected_mmsi)
-            .outerjoin(SarFixedObject, SarFixedObject.id == SarDetection.fixed_object_id)
-            .where(SarDetection.scene_id.in_(row.frame_ids))
-            .order_by(SarDetection.id)
-        )
+        await db.execute(_detections().where(SarDetection.scene_id.in_(row.frame_ids)).order_by(SarDetection.id))
     ).all()
     # A vessel in the overlap of two frames is checked in both: keep it once, detected if either saw it.
     checks = (
@@ -265,27 +328,7 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
             features=[
                 Feature(
                     geometry=point(r.SarDetection.lon, r.SarDetection.lat),
-                    properties=DetectionProperties(
-                        id=r.SarDetection.id,
-                        kind=r.kind,
-                        seen_at=r.SarDetection.seen_at,
-                        length_m=r.SarDetection.length_m,
-                        contrast_db=_difference(r.SarDetection.peak_db, r.SarDetection.background_db),
-                        vh_db=r.SarDetection.vh_db,
-                        mmsi=r.SarDetection.mmsi,
-                        vessel_name=r.vessel_name,
-                        distance_m=r.SarDetection.distance_m,
-                        ais_lon=r.ais_lon,
-                        ais_lat=r.ais_lat,
-                        doppler_shift_m=r.doppler_shift_m,
-                        suspected_mmsi=r.SarDetection.suspected_mmsi,
-                        suspect_name=r.suspect_name,
-                        suspect_silent_minutes=r.SarDetection.suspect_silent_minutes,
-                        fixed_passes_seen=r.passes_seen,
-                        ais_vessels_nearby=r.SarDetection.ais_vessels_nearby,
-                        ais_reports_nearby=r.SarDetection.ais_reports_nearby,
-                        review=review_of(r),
-                    ),
+                    properties=DetectionProperties(**_properties(r)),
                 )
                 for r in detections
             ]

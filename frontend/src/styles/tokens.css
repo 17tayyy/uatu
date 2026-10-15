@@ -1,0 +1,42 @@
+/* Uatu's look: a dark operations console. Colours as in lib/constants.ts (the map needs literals). */
+:root {
+  color-scheme: dark;
+
+  --bg: #0b0d10;
+  --surface-1: #12151a;
+  --surface-2: #181c22;
+  --surface-3: #20252d;
+  --overlay: rgba(18, 21, 26, 0.92);
+  --border: #262b33;
+  --border-strong: #353c46;
+
+  --text: #e8eaed;
+  --text-2: #b4bac3;
+  --text-3: #7d8590;
+
+  --blue: #4c8dff;
+  --blue-soft: rgba(76, 141, 255, 0.14);
+  --good: #3fb950;
+  --warning: #f5b83d;
+  --serious: #f0883e;
+  --critical: #e5484d;
+  --critical-soft: rgba(229, 72, 77, 0.12);
+  --fixed: #3a3f47;
+
+  --radius-s: 6px;
+  --radius: 10px;
+  --radius-l: 14px;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+
+  --rail: 60px;
+  --panel: 380px;
+  --inspector: 380px;
+
+  --font: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  font-feature-settings: "cv11", "ss01";
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}

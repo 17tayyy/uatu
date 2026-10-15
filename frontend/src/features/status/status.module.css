@@ -1,0 +1,70 @@
+.bar {
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand {
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.zone {
+  margin-left: auto;
+  max-width: 210px;
+  height: 30px;
+  padding: 0 26px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  appearance: none;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+  background:
+    var(--surface-2)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%237d8590' stroke-width='1.5'/%3E%3C/svg%3E")
+    no-repeat right 9px center / 10px 6px;
+  cursor: pointer;
+}
+.zone:hover {
+  border-color: var(--text-3);
+}
+.zone option {
+  background: var(--surface-1);
+}
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 5px;
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-weight: 550;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.state[data-tone="good"] .dot {
+  background: var(--good);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.18);
+}
+.state[data-tone="critical"] .dot {
+  background: var(--critical);
+  box-shadow: 0 0 0 3px var(--critical-soft);
+}

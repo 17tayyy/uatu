@@ -1,0 +1,10 @@
+.wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.map {
+  position: absolute;
+  inset: 0;
+}
