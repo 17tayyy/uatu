@@ -20,6 +20,7 @@ from uatu.ais.events import (
     detect_jumps,
     detect_loitering,
     downgrade_in_crowds,
+    downgrade_when_blind,
 )
 from uatu.ais.sanctions import explain
 from uatu.ais.stops import Stop, detect_stops, detect_transits
@@ -82,6 +83,9 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     events += await store.network_present(engine, start, now)
     events += await store.shared_imos(engine, start, now)
 
+    # Uatu deaf for 5 minutes or more (its connection, the recorder): no silence then says anything.
+    blind = await store.recording_gaps(engine, start - timedelta(seconds=p.gap_min_s), timedelta(minutes=5))
+    events = downgrade_when_blind(events, blind, p)
     closed = await store.close_resumed_gaps(engine)
     new = await store.save(engine, events)
     return Outcome(new, len(events), tracked, closed, stopped_now, crossed)

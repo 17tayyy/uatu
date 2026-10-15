@@ -10,7 +10,7 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -413,6 +413,21 @@ def stopped_points(tracks: Sequence[Track], max_sog: float = 1.0) -> list[tuple[
         if still.sum() >= 3:
             points.append((tr.mmsi, float(np.median(tr.lon[still])), float(np.median(tr.lat[still]))))
     return points
+
+
+def downgrade_when_blind(
+    events: list[Event], blind: Sequence[tuple[datetime, datetime]], p: Params = DEFAULT_PARAMS
+) -> list[Event]:
+    """Lower to informative the AIS gaps whose first hour Uatu itself did not hear all of (its
+    connection or the recorder down): others being heard before the outage proves nothing after it."""
+    result = []
+    for e in events:
+        if e.kind == "ais_gap" and e.severity > 1:
+            evidence_end = e.start + timedelta(seconds=p.gap_min_s)
+            if any(start < evidence_end and end > e.start for start, end in blind):
+                e = replace(e, severity=1, details=e.details | {"uatu_blind": True})
+        result.append(e)
+    return result
 
 
 def downgrade_in_crowds(
