@@ -341,6 +341,55 @@ class WatchedVessel(Base):
     added_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
+class DashboardUser(Base):
+    """Who may change things on the dashboard (verdicts, the watch list); set with uatu-web set-password."""
+
+    __tablename__ = "dashboard_users"
+
+    id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
+    username: Mapped[str] = mapped_column(String(40), unique=True)
+    password_hash: Mapped[str] = mapped_column(comment="argon2id")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class DashboardSession(Base):
+    """A signed-in browser. Its cookie carries a random token, kept here only as its SHA-256."""
+
+    __tablename__ = "dashboard_sessions"
+
+    token_hash: Mapped[str] = mapped_column(CHAR(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("dashboard_users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    expires_at: Mapped[datetime]
+
+
+class DetectionReview(Base):
+    """A verdict on a radar detection. Kept by scene and place too: processing the scene again replaces its
+    detections, and the verdict moves to the new one in that place (see uatu.sar.store.save_results)."""
+
+    __tablename__ = "detection_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "verdict IN ('vessel_without_ais', 'vessel_with_ais', 'reception_gap', 'not_a_vessel')", name="verdict"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    scene_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sar_scenes.id", ondelete="CASCADE"), index=True)
+    detection_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("sar_detections.id", ondelete="SET NULL"), unique=True
+    )
+    lat: Mapped[float] = mapped_column(Double)
+    lon: Mapped[float] = mapped_column(Double)
+    verdict: Mapped[str] = mapped_column(
+        comment="vessel_without_ais | vessel_with_ais | reception_gap (a vessel AIS was not heard from) | not_a_vessel"
+    )
+    mmsi: Mapped[int | None] = mapped_column(comment="the vessel it is, when known")
+    note: Mapped[str | None]
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("dashboard_users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
 class VesselRisk(Base):
     """A vessel off the sanctions lists that its owners, managers or other lists make worth a look."""
 

@@ -15,6 +15,8 @@ class WebSettings(DatabaseSettings, LogSettings, ZoneSettings):
     # MapTiler (maptiler.com) for high resolution satellite imagery under the radar; without it, Sentinel-2
     # cloudless (10 m). The browser fetches the tiles: restrict the key to the dashboard's origin at MapTiler.
     maptiler_key: SecretStr | None = None
+    # Session cookies only over HTTPS. The dashboard is served over plain HTTP on the local network: off.
+    cookie_secure: bool = False
 
 
 @lru_cache

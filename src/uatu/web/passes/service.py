@@ -26,7 +26,15 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.config import ZONES
-from uatu.db.models import RecordedZone, SarAisCheck, SarDetection, SarFixedObject, SarScene, Vessel
+from uatu.db.models import (
+    DetectionReview,
+    RecordedZone,
+    SarAisCheck,
+    SarDetection,
+    SarFixedObject,
+    SarScene,
+    Vessel,
+)
 from uatu.sar.analysis import DEFAULT_PAIRING
 from uatu.sar.store import RECEPTION_GAP_MINUTES
 from uatu.web.errors import NotFoundError
@@ -39,6 +47,7 @@ from uatu.web.passes.schemas import (
     PassSummary,
     ReceptionRule,
 )
+from uatu.web.reviews.service import REVIEW_COLUMNS, join_reviews, review_of
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
 from uatu.zones import sea_of
 
@@ -82,7 +91,11 @@ def _detection_counts() -> Any:
             func.count().filter(and_(SarDetection.status == "no_coverage", not_(_AT_FIXED))).label("no_coverage"),
             func.count().filter(_AT_FIXED).label("fixed"),
             func.count().filter(worth_a_look).label("candidates"),
+            func.count()
+            .filter(and_(SarDetection.status == "dark", not_(_AT_FIXED), DetectionReview.id.is_(None)))
+            .label("pending"),
         )
+        .outerjoin(DetectionReview, DetectionReview.detection_id == SarDetection.id)
         .group_by(SarDetection.scene_id)
         .subquery()
     )
@@ -139,6 +152,7 @@ def _summary(row: Any, data_dir: Path) -> PassSummary:
         no_coverage=row.no_coverage,
         fixed=row.fixed,
         candidates=row.candidates,
+        pending=row.pending,
         footprint=footprint,
         has_image=any((_overlay_dir(data_dir, row.zone, n) / "backscatter.png").exists() for n in row.frame_names),
     )
@@ -180,15 +194,18 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
     seen = SarAisCheck.__table__.alias("seen")
     detections = (
         await db.execute(
-            select(
-                SarDetection,
-                _KIND.label("kind"),
-                paired.c.name.label("vessel_name"),
-                suspect.c.name.label("suspect_name"),
-                SarFixedObject.passes_seen,
-                seen.c.lon.label("ais_lon"),
-                seen.c.lat.label("ais_lat"),
-                seen.c.doppler_shift_m,
+            join_reviews(
+                select(
+                    SarDetection,
+                    _KIND.label("kind"),
+                    paired.c.name.label("vessel_name"),
+                    suspect.c.name.label("suspect_name"),
+                    SarFixedObject.passes_seen,
+                    seen.c.lon.label("ais_lon"),
+                    seen.c.lat.label("ais_lat"),
+                    seen.c.doppler_shift_m,
+                    *REVIEW_COLUMNS,
+                )
             )
             .outerjoin(paired, paired.c.mmsi == SarDetection.mmsi)
             .outerjoin(
@@ -267,6 +284,7 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
                         fixed_passes_seen=r.passes_seen,
                         ais_vessels_nearby=r.SarDetection.ais_vessels_nearby,
                         ais_reports_nearby=r.SarDetection.ais_reports_nearby,
+                        review=review_of(r),
                     ),
                 )
                 for r in detections

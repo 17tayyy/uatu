@@ -16,6 +16,7 @@ from sqlalchemy import delete, insert
 from uatu import db
 from uatu.db.models import (
     AisEvent,
+    DashboardUser,
     IngestSession,
     Position,
     RecordedZone,
@@ -39,19 +40,30 @@ WEB = Path(__file__).parent.parent / "src" / "uatu" / "web"
 # --- architecture --------------------------------------------------------------------------------
 
 
-WRITABLE = {"/api/v1/watches", "/api/v1/watches/{watch_id}"}  # your own watch list, nothing else
+def test_api_is_read_only_but_for_what_you_sign_in_to_change():
+    """No authentication to read: GET only, but for the watch list and the verdicts, which need a session,
+    and signing in and out. All of them only from the dashboard's own page."""
+    from fastapi.routing import APIRoute
 
-
-def test_api_is_read_only_but_for_your_watch_list():
-    """No authentication: GET only, but for the watch list, which only the dashboard's own page can write."""
-    from uatu.web.dependencies import same_origin
+    from uatu.web.auth.router import router as auth
+    from uatu.web.dependencies import get_current_user, same_origin
+    from uatu.web.reviews.router import router as reviews
     from uatu.web.watches.router import router as watches
 
+    writable = {
+        "/api/v1/watches", "/api/v1/watches/{watch_id}", "/api/v1/detections/{detection_id}/review",
+        "/api/v1/auth/login", "/api/v1/auth/logout",
+    }  # fmt: skip
     paths = create_app(WebSettings()).openapi()["paths"]
     assert any(path.startswith("/api/v1/") for path in paths)
     for path, operations in paths.items():
-        assert set(operations) == {"get"} or path in WRITABLE, f"{path} accepts {set(operations)}"
-    assert same_origin in [d.dependency for d in watches.dependencies]
+        assert set(operations) == {"get"} or path in writable, f"{path} accepts {set(operations)}"
+    for router in (watches, reviews, auth):
+        assert same_origin in [d.dependency for d in router.dependencies]
+        for route in router.routes:
+            assert isinstance(route, APIRoute)
+            if route.methods - {"GET", "HEAD"} and router is not auth:
+                assert get_current_user in [d.call for d in route.dependant.dependencies], route.path
 
 
 @pytest.mark.parametrize("path", sorted(WEB.glob("*/service.py")), ids=lambda p: p.parent.name)
@@ -406,13 +418,68 @@ async def test_events(client):
     assert {MMSI_A, MMSI_BARCELONA} <= mmsis  # the whole coast
 
 
+SAME = {"Origin": "http://test"}  # the dashboard's own page
+USER, PASSWORD = "uatu-test", "a test password"
+
+
+@pytest.fixture
+async def signed_in(client):
+    """The client with a session of a test user."""
+    from uatu.web import dependencies
+    from uatu.web.__main__ import set_password
+
+    dependencies._attempts.clear()
+    await set_password(WebSettings(database_url=os.environ["UATU_TEST_DATABASE_URL"]), USER, PASSWORD)
+    response = await client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD}, headers=SAME)
+    assert response.status_code == 200, response.text
+    client.cookies.set(dependencies.SESSION_COOKIE, _session_token(response))
+    yield client
+    client.cookies.clear()
+    engine = db.create_engine(os.environ["UATU_TEST_DATABASE_URL"])
+    async with engine.begin() as conn:
+        await conn.execute(delete(DashboardUser).where(DashboardUser.username == USER))  # and its sessions
+    await engine.dispose()
+
+
+def _session_token(response: httpx.Response) -> str:
+    cookie = response.headers["set-cookie"]
+    attributes = {a.strip().split("=")[0].lower() for a in cookie.split(";")[1:]}
+    assert {"httponly", "path", "samesite", "expires"} <= attributes and "samesite=strict" in cookie.lower()
+    return cookie.split(";")[0].split("=", 1)[1]
+
+
 @needs_db
-async def test_your_watch_list(client):
+async def test_signing_in_and_out(signed_in):
+    from uatu.web import dependencies
+
+    client = signed_in
+    assert (await ok(client, "/api/v1/auth/session")) == {"username": USER}
+    wrong = await client.post("/api/v1/auth/login", json={"username": USER, "password": "nope"}, headers=SAME)
+    nobody = await client.post("/api/v1/auth/login", json={"username": "nobody", "password": "nope"}, headers=SAME)
+    assert wrong.status_code == nobody.status_code == 401
+    assert wrong.json()["error"]["message"] == nobody.json()["error"]["message"]  # says nothing of who exists
+    elsewhere = await client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD})
+    assert elsewhere.status_code == 403  # no Origin: not the dashboard
+
+    assert (await client.post("/api/v1/auth/logout", headers=SAME)).status_code == 204
+    assert (await ok(client, "/api/v1/auth/session")) == {"username": None}
+    refused = await client.post("/api/v1/watches", json={"mmsi": 1, "note": "uatu test"}, headers=SAME)
+    assert refused.status_code == 401  # the old cookie no longer opens anything
+
+    for _ in range(dependencies.LOGIN_ATTEMPTS):
+        await client.post("/api/v1/auth/login", json={"username": USER, "password": "nope"}, headers=SAME)
+    throttled = await client.post("/api/v1/auth/login", json={"username": USER, "password": PASSWORD}, headers=SAME)
+    assert throttled.status_code == 429
+    dependencies._attempts.clear()
+
+
+@needs_db
+async def test_your_watch_list(signed_in):
+    client = signed_in
     [fixture] = [w for w in await ok(client, "/api/v1/watches") if w["note"] == "uatu test"]
     assert (fixture["name"], [v["mmsi"] for v in fixture["vessels"]]) == ("test alfa", [MMSI_A])  # by name, any case
 
-    same = {"Origin": "http://test"}
-    added = await client.post("/api/v1/watches", json={"imo": IMO_A, "note": "uatu test"}, headers=same)
+    added = await client.post("/api/v1/watches", json={"imo": IMO_A, "note": "uatu test"}, headers=SAME)
     assert added.status_code == 201, added.text
     watch = added.json()["data"]
     assert (watch["imo"], watch["mmsi"], [v["mmsi"] for v in watch["vessels"]]) == (IMO_A, None, [MMSI_A])
@@ -424,14 +491,52 @@ async def test_your_watch_list(client):
         refused = await client.post("/api/v1/watches", json={"mmsi": 1, "note": "uatu test"}, headers=headers)
         assert refused.status_code == 403
         assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=headers)).status_code == 403
-    nothing = await client.post("/api/v1/watches", json={"note": "uatu test"}, headers=same)
+    nothing = await client.post("/api/v1/watches", json={"note": "uatu test"}, headers=SAME)
     assert nothing.status_code == 422
-    too_short = await client.post("/api/v1/watches", json={"imo": 123, "note": "uatu test"}, headers=same)
+    too_short = await client.post("/api/v1/watches", json={"imo": 123, "note": "uatu test"}, headers=SAME)
     assert too_short.status_code == 422
 
-    assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=same)).status_code == 204
-    assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=same)).status_code == 404
+    assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=SAME)).status_code == 204
+    assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=SAME)).status_code == 404
     assert [w["id"] for w in await ok(client, "/api/v1/watches") if w["note"] == "uatu test"] == [fixture["id"]]
+
+
+@needs_db
+async def test_verdicts_on_detections(signed_in):
+    client = signed_in
+    [summary] = [p for p in await ok(client, "/api/v1/passes") if p["id"] == PASS_ID]
+    assert summary["pending"] == 1  # the vessel gone silent
+    kinds = {f["properties"]["kind"]: f["properties"] for f in (await ok(client, f"/api/v1/passes/{PASS_ID}"))[
+        "detections_geojson"]["features"]}  # fmt: skip
+    silent = kinds["went_silent"]
+    assert silent["review"] is None
+
+    path = f"/api/v1/detections/{silent['id']}/review"
+    verdict = {"verdict": "vessel_without_ais", "mmsi": MMSI_SILENT, "note": "  its AIS off, by the radar  "}
+    put = await client.put(path, json=verdict, headers=SAME)
+    assert put.status_code == 200, put.text
+    review = put.json()["data"]
+    assert (review["verdict"], review["mmsi"], review["vessel_name"], review["note"], review["reviewed_by"]) == (
+        "vessel_without_ais", MMSI_SILENT, "TEST SILENT", "its AIS off, by the radar", USER
+    )  # fmt: skip
+    changed = await client.put(path, json={"verdict": "reception_gap"}, headers=SAME)
+    assert (changed.json()["data"]["verdict"], changed.json()["data"]["mmsi"]) == ("reception_gap", None)
+    detail = await ok(client, f"/api/v1/passes/{PASS_ID}")
+    reviewed = next(
+        f["properties"] for f in detail["detections_geojson"]["features"] if f["properties"]["id"] == silent["id"]
+    )
+    assert reviewed["review"]["verdict"] == "reception_gap"
+    assert detail["pending"] == 0
+
+    no_ship = await client.put(path, json={"verdict": "not_a_vessel", "mmsi": MMSI_A}, headers=SAME)
+    assert no_ship.status_code == 422  # not a vessel: no MMSI to give it
+    assert (await client.put("/api/v1/detections/999999999/review", json=verdict, headers=SAME)).status_code == 404
+    assert (await client.delete(path, headers=SAME)).status_code == 204
+    assert (await client.delete(path, headers=SAME)).status_code == 404
+    assert (await client.put(path, json=verdict, headers=SAME)).status_code == 200
+    client.cookies.clear()
+    assert (await client.put(path, json=verdict, headers=SAME)).status_code == 401
+    assert (await client.delete(path, headers=SAME)).status_code == 401
 
 
 @needs_db

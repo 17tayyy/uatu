@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from uatu.db import create_engine
 from uatu.log import configure_logging
+from uatu.web.auth.router import router as auth_router
 from uatu.web.basemap import service as basemap_service
 from uatu.web.basemap.router import router as basemap_router
 from uatu.web.companies.router import router as companies_router
@@ -31,6 +32,7 @@ from uatu.web.optical.router import router as optical_router
 from uatu.web.passes.router import router as passes_router
 from uatu.web.radar.router import router as radar_router
 from uatu.web.reports.router import router as reports_router
+from uatu.web.reviews.router import router as reviews_router
 from uatu.web.schemas import FeatureCollection
 from uatu.web.status.router import router as status_router
 from uatu.web.vessels.router import router as vessels_router
@@ -105,6 +107,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         events_router,
         vessels_router,
         watches_router,
+        reviews_router,
+        auth_router,
         companies_router,
         history_router,
         reports_router,

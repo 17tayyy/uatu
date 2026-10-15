@@ -85,7 +85,7 @@ async def test_sar_scene_lifecycle(engine):
     from rasterio.crs import CRS
     from shapely import box
 
-    from uatu.db.models import SarAisCheck, SarDetection, SarScene
+    from uatu.db.models import DetectionReview, SarAisCheck, SarDetection, SarScene
     from uatu.sar import store
     from uatu.sar.ais import AisVessel, Coverage
     from uatu.sar.analysis import Analysis
@@ -128,8 +128,19 @@ async def test_sar_scene_lifecycle(engine):
                              np.zeros((1, 1), bool))  # fmt: skip
         analysis = Analysis(scene.name, geometry, output, result, ais_vessels=1)
 
-        for _ in range(2):  # saving twice replaces, never duplicates
-            summary = await store.save_results(engine, uuid.UUID(scene_id), analysis)
+        summary = await store.save_results(engine, uuid.UUID(scene_id), analysis)
+        async with engine.begin() as conn:  # a verdict on the dark one
+            first_dark = await conn.scalar(
+                select(SarDetection.id).where(
+                    SarDetection.scene_id == uuid.UUID(scene_id), SarDetection.status == "dark"
+                )
+            )
+            await conn.execute(
+                insert(DetectionReview).values(
+                    scene_id=uuid.UUID(scene_id), detection_id=first_dark, lat=36.0, lon=-5.5, verdict="not_a_vessel"
+                )
+            )
+        summary = await store.save_results(engine, uuid.UUID(scene_id), analysis)  # replaces, never duplicates
         assert summary == {
             "detections": 3,
             "matched": 1,
@@ -148,6 +159,11 @@ async def test_sar_scene_lifecycle(engine):
             ("dark", None, 40, 400), ("matched", MMSI_A, None, None), ("no_coverage", None, 2, 3)
         ]  # fmt: skip
         assert [(c.mmsi, c.status) for c in checks] == [(MMSI_A, "detected")]
+        # Processed again, the scene has new detections: the verdict moved to the new one in its place.
+        async with engine.connect() as conn:
+            [review] = (await conn.execute(select(DetectionReview).where(DetectionReview.scene_id == row.id))).all()
+        dark_now = next(d.id for d in detections if d.status == "dark")
+        assert review.detection_id == dark_now != first_dark
         assert all(T0 <= d.seen_at <= T0 + timedelta(seconds=25) for d in detections)
 
         await store.mark_failed(engine, other[0].id, "boom")

@@ -31,6 +31,18 @@ class NotFoundError(AppError):
         super().__init__(f"{resource} not found")
 
 
+class UnauthorizedError(AppError):
+    status_code = 401
+    code = "unauthorized"
+    default_message = "Sign in first"
+
+
+class RateLimitError(AppError):
+    status_code = 429
+    code = "rate_limited"
+    default_message = "Too many attempts: wait a few minutes"
+
+
 class ForbiddenError(AppError):
     status_code = 403
     code = "forbidden"
