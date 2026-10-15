@@ -95,6 +95,7 @@ const RECEPTION = {
 const LAYERS = {
   satellite: { label: "Satélite (óptico)", hint: "tierra", on: true, ids: ["satellite"] },
   recent: { label: "Radar reciente", hint: "7 días", on: true, ids: ["radar-recent"] },
+  unimaged: { label: "Rayar lo que no ve la pasada", on: true, ids: ["unimaged"] },
   radar: { label: "Imagen radar", on: true, ids: ["radar-0", "radar-1", "radar-2", "radar-3"] }, // one per frame
   detections: { label: "Detecciones radar", on: true, ids: ["footprint", "detections"] },
   passAis: { label: "AIS en la pasada", on: false, ids: ["pass-ais"] },
@@ -178,6 +179,10 @@ function svg(shape, color) {
       break;
     case "square":
       part("rect", { x: 1, y: 1, width: 10, height: 10, rx: 1.5, fill: color });
+      break;
+    case "hatch":
+      part("rect", { x: 1, y: 1, width: 10, height: 10, rx: 1.5, fill: "rgba(13,13,13,0.5)", stroke: C.line });
+      part("path", { d: "M1 7 7 1M1 11 11 1M5 11 11 5", stroke: color, "stroke-width": 1 });
       break;
   }
   return el;
@@ -353,6 +358,22 @@ function arrowIcon(fill) {
   });
 }
 
+/** Diagonal lines over a dark veil: the sea a pass did not image. A texture, so it reads without colour. */
+function hatchPattern() {
+  return icon((g, s) => {
+    g.fillStyle = "rgba(13, 13, 13, 0.5)";
+    g.fillRect(0, 0, s, s);
+    g.strokeStyle = "rgba(195, 194, 183, 0.45)";
+    g.lineWidth = 1.5;
+    for (const offset of [-s, 0, s]) {
+      g.beginPath();
+      g.moveTo(offset, s);
+      g.lineTo(offset + s, 0);
+      g.stroke();
+    }
+  }, 16);
+}
+
 function diamondIcon(fill) {
   return icon((g, s) => {
     g.beginPath();
@@ -385,13 +406,14 @@ function addLayers() {
     ["arrow", arrowIcon(C.ink2)],
     ["arrow-sanctioned", arrowIcon(C.critical)],
     ["arrow-watch", arrowIcon(C.serious)],
+    ["hatch", hatchPattern()],
     ["diamond-3", diamondIcon(C.critical)],
     ["diamond-2", diamondIcon(C.serious)],
     ["diamond-1", diamondIcon(C.muted)],
   ]) {
     map.addImage(name, image, { pixelRatio: 2 });
   }
-  for (const id of ["land", "zones", "coverage", "density", "infra", "footprint", "detections", "pass-ais", "events", "time-trails", "vessels", "track", "link", "selected"]) {
+  for (const id of ["land", "zones", "unimaged", "coverage", "density", "infra", "footprint", "detections", "pass-ais", "events", "time-trails", "vessels", "track", "link", "selected"]) {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
@@ -407,6 +429,8 @@ function addLayers() {
     layout: { visibility: "none" }, // until start() knows the latest pass, which versions its tiles
     paint: { "raster-opacity": 0.95, "raster-brightness-max": 0.9, "raster-fade-duration": 0 },
   });
+  // Over the radar of other days: the sea the pass on the map did not image, where nothing was looked for.
+  map.addLayer({ id: "unimaged", type: "fill", source: "unimaged", paint: { "fill-pattern": "hatch", "fill-antialias": false } });
   map.addLayer({
     id: "coverage",
     type: "fill",
@@ -1090,6 +1114,9 @@ function renderLegend() {
     parts.push(h("h3", null, "Densidad de tráfico (7 días)"), legendItem("square", C.coverage.poor, "Poco tráfico"), legendItem("square", C.coverage.good, "Mucho tráfico"));
   }
   parts.push(h("h3", null, "Mapa"), legendItem("dash", C.muted, "Zonas vigiladas"));
+  if (state.layers.unimaged) {
+    parts.push(legendItem("hatch", C.ink2, state.pass ? "Fuera de esta pasada: sin analizar" : "Sin pasada de radar: sin analizar"));
+  }
   if (state.layers.recent) parts.push(legendItem("square", "#8a8a85", "Radar: última pasada de cada sitio, 7 días"));
   fill(document.getElementById("legend"), parts);
 }
@@ -1246,9 +1273,17 @@ async function loadPass(id) {
   setData("detections", pass.detections_geojson);
   setData("pass-ais", pass.ais_geojson);
   showRadarImage(pass);
+  loadUnimaged();
   renderLegend();
   renderMapContext();
   return pass;
+}
+
+/** The sea outside the pass on the map (all of it without one), to hatch. */
+async function loadUnimaged() {
+  const passId = state.pass?.id;
+  const data = await api(inZone(`/map/unimaged${passId ? `?pass=${encodeURIComponent(passId)}` : ""}`)).catch(() => EMPTY);
+  if ((state.pass?.id ?? undefined) === passId) setData("unimaged", data);
 }
 
 /** Take the pass off the map, saying why. */
@@ -1261,6 +1296,7 @@ function clearPass(note) {
   byId.passAis = new Map();
   for (const source of ["footprint", "detections", "pass-ais", "link"]) setData(source, EMPTY);
   showRadarImage(null);
+  loadUnimaged();
   renderLegend();
   renderMapContext();
 }
@@ -1885,6 +1921,7 @@ function renderZoneSelect() {
 /** Draw what depends on the zone looked at (but not live data: see refresh). */
 async function showZone({ fit }) {
   setData("zones", zoneEdges());
+  loadUnimaged();
   updateRecentRadar();
   const area = scopeArea();
   if (fit) map.fitBounds([[area.west, area.south], [area.east, area.north]], { padding: 20, duration: fit === "animate" ? 600 : 0 });

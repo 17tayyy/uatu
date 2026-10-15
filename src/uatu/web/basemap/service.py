@@ -23,9 +23,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uatu.config import BBox, bbox_polygon
 from uatu.db.models import Infrastructure
 from uatu.sar.raster import Grid
-from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, MapArea, SatelliteLayer
+from uatu.web.basemap.schemas import (
+    InfrastructureProperties,
+    LandProperties,
+    MapArea,
+    SatelliteLayer,
+    UnimagedProperties,
+)
+from uatu.web.passes.service import pass_footprint
 from uatu.web.schemas import Feature, FeatureCollection, Geometry
-from uatu.zones import NATURAL_EARTH_LAND
+from uatu.zones import NATURAL_EARTH_LAND, sea_in
 
 
 def satellite(maptiler_key: str | None) -> SatelliteLayer:
@@ -129,3 +136,16 @@ def _rounded(geojson: dict) -> dict:
         return [walk(x) for x in c] if isinstance(c[0], list | tuple) else [round(c[0], 5), round(c[1], 5)]
 
     return {"type": geojson["type"], "coordinates": walk(geojson["coordinates"])}
+
+
+async def unimaged(db: AsyncSession, bbox: BBox, pass_id: str | None) -> FeatureCollection[UnimagedProperties]:
+    """The sea in view that the pass did not image (all of it, without a pass): there the map shows radar
+    of other days, or none, and nothing was looked for."""
+    sea = sea_in(bbox)
+    if pass_id:
+        sea = sea.difference(await pass_footprint(db, pass_id))
+    sea = sea.simplify(0.002)
+    if sea.is_empty:
+        return FeatureCollection(features=[])
+    geometry = Geometry.model_validate(_rounded(mapping(sea)))
+    return FeatureCollection(features=[Feature(geometry=geometry, properties=UnimagedProperties(imaged_by=pass_id))])

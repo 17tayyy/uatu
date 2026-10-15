@@ -5,6 +5,10 @@ class LandProperties(OutputSchema):
     pass
 
 
+class UnimagedProperties(OutputSchema):
+    imaged_by: str | None  # the pass whose radar image is the rest of the sea, if any
+
+
 class InfrastructureProperties(OutputSchema):
     kind: str  # telecom_cable | pipeline | platform | port | landing_point
     name: str

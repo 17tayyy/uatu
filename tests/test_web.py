@@ -582,3 +582,15 @@ async def test_reports(client, tmp_path):
         "informe-x/informe.html",
     ):
         assert (await client.get(f"/api/v1/reports/{bad}")).status_code == 404
+
+
+@needs_db
+async def test_the_sea_a_pass_did_not_image(client):
+    from shapely.geometry import shape
+
+    whole = await ok(client, "/api/v1/map/unimaged?zone=estrecho")
+    outside = await ok(client, f"/api/v1/map/unimaged?zone=estrecho&pass={PASS_ID}")
+    [sea], [rest] = whole["features"], outside["features"]
+    assert rest["properties"]["imaged_by"] == PASS_ID
+    assert 0 < shape(rest["geometry"]).area < shape(sea["geometry"]).area  # the pass's footprint cut out
+    assert (await client.get("/api/v1/map/unimaged?pass=../etc")).status_code == 422

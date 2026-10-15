@@ -1,7 +1,9 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 
 from uatu.web.basemap import service as basemap_service
-from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, SatelliteLayer
+from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, SatelliteLayer, UnimagedProperties
 from uatu.web.dependencies import DbSession, LandOutlines, Settings, ZoneScope
 from uatu.web.schemas import DataResponse, FeatureCollection
 
@@ -24,3 +26,13 @@ async def satellite(settings: Settings) -> DataResponse[SatelliteLayer]:
 @router.get("/infrastructure")
 async def infrastructure(db: DbSession, scope: ZoneScope) -> DataResponse[FeatureCollection[InfrastructureProperties]]:
     return DataResponse(data=await basemap_service.infrastructure(db, scope.bbox))
+
+
+@router.get("/unimaged")
+async def unimaged(
+    db: DbSession,
+    scope: ZoneScope,
+    pass_id: Annotated[str | None, Query(alias="pass", max_length=64, pattern=r"^[A-Z0-9]+-[A-F0-9]+-[a-z]+$")] = None,
+) -> DataResponse[FeatureCollection[UnimagedProperties]]:
+    """The sea in view outside a pass's radar image (or all of it): to mark what that pass did not look at."""
+    return DataResponse(data=await basemap_service.unimaged(db, scope.bbox, pass_id))
