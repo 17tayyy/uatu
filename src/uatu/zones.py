@@ -10,7 +10,7 @@ from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
 from uatu.ais.coast import CoastDistance
-from uatu.config import Zone, bbox_polygon
+from uatu.config import BBox, Zone, bbox_polygon
 from uatu.sar.raster import Grid, land_cache
 
 SAR_RESOLUTION_M = 10.0
@@ -28,11 +28,16 @@ class Geography:
     coast: CoastDistance
 
 
-@cache
 def sea_of(zone: Zone) -> BaseGeometry:
     """The zone's box without land, from Natural Earth: coarse, but enough to tell how much sea a frame covers."""
+    return sea_in(zone.bbox)
+
+
+@cache
+def sea_in(bbox: BBox) -> BaseGeometry:
+    """A box without land, from Natural Earth."""
     land = unary_union([shape(f["geometry"]) for f in json.loads(NATURAL_EARTH_LAND.read_text())["features"]])
-    return bbox_polygon(zone.bbox).difference(land)
+    return bbox_polygon(bbox).difference(land)
 
 
 def grid_of(zone: Zone) -> Grid:

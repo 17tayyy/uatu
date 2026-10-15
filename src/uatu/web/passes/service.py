@@ -20,6 +20,7 @@ from rasterio.errors import WindowError
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window, from_bounds
 from shapely.geometry import shape
+from shapely.geometry.base import BaseGeometry
 from sqlalchemy import Select, and_, case, cast, func, not_, or_, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by, distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -164,6 +165,11 @@ async def _pass_row(db: AsyncSession, id_: str) -> Any:
     if row is None:
         raise NotFoundError("Pass")
     return row
+
+
+async def pass_footprint(db: AsyncSession, id_: str) -> BaseGeometry:
+    """What a pass imaged, all its frames together, in lon/lat."""
+    return shape(json.loads((await _pass_row(db, id_)).footprint_json))
 
 
 async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
