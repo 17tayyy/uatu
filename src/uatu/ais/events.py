@@ -72,7 +72,11 @@ class Params:
     # Gibraltar drift kilometres apart: 8 km and 4 vessels found that area on the first day's data.
     crowd_radius_m: float = 8_000
     crowd_min_vessels: int = 4
-    crowd_history_days: float = 7  # how much of the record teaches where vessels wait
+    crowd_history_days: float = 7  # how much of the record teaches where vessels wait (and go quiet)
+    # Where many vessels go quiet, it is aisstream that stops hearing them: west of Tarifa, 65 vessels
+    # bound west fell silent in the first three days. A silence there says nothing about the vessel.
+    silence_radius_m: float = 5_000
+    silence_min_vessels: int = 5
     offshore_m: float = 5_000  # farther than this: open sea
     encounter_distance_m: float = 500
     encounter_max_sog: float = 2.0
@@ -426,6 +430,30 @@ def downgrade_when_blind(
             evidence_end = e.start + timedelta(seconds=p.gap_min_s)
             if any(start < evidence_end and end > e.start for start, end in blind):
                 e = replace(e, severity=1, details=e.details | {"uatu_blind": True})
+        result.append(e)
+    return result
+
+
+def downgrade_where_usually_silent(
+    events: list[Event], silences: Sequence[tuple[int, float, float]], proj: LocalProjection, p: Params = DEFAULT_PARAMS
+) -> list[Event]:
+    """Lower to informative the AIS gaps where several other vessels went quiet lately: where the
+    receivers stop hearing ships, not where ships stop talking.
+
+    silences: (mmsi, lon, lat) where AIS gaps began, learnt from the record itself.
+    """
+    if not silences:
+        return events
+    xs, ys = proj.xy(np.array([s[1] for s in silences]), np.array([s[2] for s in silences]))
+    tree = cKDTree(np.column_stack([xs, ys]))
+    mmsis = [s[0] for s in silences]
+    result = []
+    for e in events:
+        if e.kind == "ais_gap" and e.severity > 1:
+            ex, ey = proj.xy(np.array([e.lon]), np.array([e.lat]))
+            others = {mmsis[k] for k in tree.query_ball_point([ex[0], ey[0]], p.silence_radius_m)} - {e.mmsi}
+            if len(others) >= p.silence_min_vessels:
+                e = replace(e, severity=1, details=e.details | {"usual_silence": len(others)})
         result.append(e)
     return result
 

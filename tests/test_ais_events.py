@@ -295,3 +295,19 @@ def test_a_gap_is_told_as_far_as_uatu_knows():
     assert "estuvo 90 min sin emitir" in told(now - timedelta(hours=3), now - timedelta(hours=1, minutes=30))
     gone = told(now - timedelta(days=2), names={248001000: "XT HOPE"})
     assert gone.startswith("XT HOPE (MMSI 248001000) dejó de oírse y no se le ha vuelto a oír")
+
+
+def test_a_gap_where_many_go_quiet_is_the_receivers_not_the_vessel():
+    from uatu.ais.events import downgrade_where_usually_silent
+
+    silent = track(1, range(0, 61))
+    [gap] = detect_gaps([silent, *neighbours(4, range(0, 181)), *ahead(3, range(0, 181))], T0 + 180 * 60,
+                        STRAIT_OF_GIBRALTAR, at_sea(10), PROJ)  # fmt: skip
+    # Five other vessels went quiet within 5 km lately (one twice), and the vessel itself before: a sink.
+    quiet = [(10 + k, LON0 + 0.01 * k, LAT0) for k in range(5)] + [(10, LON0, LAT0), (1, LON0, LAT0)]
+    [usual] = downgrade_where_usually_silent([gap], quiet, PROJ)
+    assert usual.severity == 1 and usual.details["usual_silence"] == 5
+    # Four is not enough, nor are five far away.
+    assert downgrade_where_usually_silent([gap], quiet[:4], PROJ) == [gap]
+    far = [(10 + k, LON0 + 0.2, LAT0 + 0.2) for k in range(5)]
+    assert downgrade_where_usually_silent([gap], far, PROJ) == [gap]

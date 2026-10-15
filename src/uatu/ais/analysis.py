@@ -21,6 +21,7 @@ from uatu.ais.events import (
     detect_loitering,
     downgrade_in_crowds,
     downgrade_when_blind,
+    downgrade_where_usually_silent,
 )
 from uatu.ais.sanctions import explain
 from uatu.ais.stops import Stop, detect_stops, detect_transits
@@ -55,6 +56,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     start = now - WINDOW
     t0, t1 = start.timestamp(), now.timestamp()
     stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days))
+    quiet = await store.silences(engine, now - timedelta(days=p.crowd_history_days))
     events: list[Event] = []
     tracked = stopped_now = crossed = 0
     ports = await store.ports(engine)
@@ -71,7 +73,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
             *detect_infrastructure_loitering(tracks, infrastructure, area.coast.at, proj, p, depth),
             *detect_jumps(tracks, proj, p),
         ]
-        events += downgrade_in_crowds(found, stopped, proj, p)
+        events += downgrade_where_usually_silent(downgrade_in_crowds(found, stopped, proj, p), quiet, proj, p)
         tracked += len(tracks)
         stops = await store.save_stops(engine, detect_stops(tracks, area.coast.at, ports, proj), area.zone)
         events += await listed_stops(engine, stops)

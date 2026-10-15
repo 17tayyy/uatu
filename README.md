@@ -120,7 +120,7 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 
 | Event | What | Notable when |
 |---|---|---|
-| `ais_gap` | a vessel stops transmitting for 1 h+ while vessels around it are still heard | under way, at sea, and vessels are also heard where it was heading (so it did not just sail out of the area, into port, or into a hole in aisstream's coverage), and Uatu itself heard that whole hour (no outage of its own) |
+| `ais_gap` | a vessel stops transmitting for 1 h+ while vessels around it are still heard | under way, at sea, and vessels are also heard where it was heading (so it did not just sail out of the area, into port, or into a hole in aisstream's coverage), and Uatu itself heard that whole hour (no outage of its own), and not where 5+ other vessels went quiet within 5 km in the last week (where aisstream stops hearing ships, west of Tarifa above all) |
 | `encounter` | two vessels within 500 m, both under 2 kn, for 2 h+ (ship-to-ship transfers) | > 5 km from the coast |
 | `loitering` | nearly stopped for 3 h+ | > 5 km from the coast |
 | `infrastructure_loitering` | under 3 kn for 30 min+ within 1 km of a submarine cable or pipeline | where an anchor can reach the seabed, ≤ 200 m deep (alert) |

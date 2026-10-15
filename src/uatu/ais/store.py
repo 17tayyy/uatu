@@ -83,6 +83,15 @@ async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox
     return result
 
 
+async def silences(engine: AsyncEngine, since: datetime) -> list[tuple[int, float, float]]:
+    """(mmsi, lon, lat) where AIS gaps began since `since`, Uatu's own outages left out."""
+    stmt = select(AisEvent.mmsi, AisEvent.lon, AisEvent.lat).where(
+        AisEvent.kind == "ais_gap", AisEvent.start_at >= since, ~AisEvent.details.has_key("uatu_blind")
+    )
+    async with engine.connect() as conn:
+        return [(m, lon, lat) for m, lon, lat in await conn.execute(stmt)]
+
+
 async def stopped_places(
     engine: AsyncEngine, since: datetime, cell_deg: float = 0.01
 ) -> list[tuple[int, float, float]]:
