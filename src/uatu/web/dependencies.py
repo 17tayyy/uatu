@@ -1,14 +1,19 @@
+import time
+from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from typing import Annotated
 from urllib.parse import urlsplit
 
 import httpx
+import structlog
 from fastapi import Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from uatu.db.models import DashboardUser
+from uatu.web.auth import service as auth_service
 from uatu.web.basemap.schemas import LandProperties
 from uatu.web.config import WebSettings
-from uatu.web.errors import ForbiddenError, NotFoundError
+from uatu.web.errors import ForbiddenError, NotFoundError, RateLimitError, UnauthorizedError
 from uatu.web.schemas import FeatureCollection
 from uatu.web.scope import ALL, Scope, scope
 
@@ -49,7 +54,37 @@ async def same_origin(request: Request) -> None:
         raise ForbiddenError("Writes only from the dashboard itself")
 
 
+SESSION_COOKIE = "uatu_session"
+
+
+async def get_current_user(request: Request, db: Annotated[AsyncSession, Depends(get_db)]) -> DashboardUser:
+    """The signed-in user, from the session cookie: what changes anything needs."""
+    token = request.cookies.get(SESSION_COOKIE)
+    user = await auth_service.user_for(db, token) if token else None
+    if user is None:
+        raise UnauthorizedError()
+    structlog.contextvars.bind_contextvars(user_id=user.id)
+    return user
+
+
+LOGIN_ATTEMPTS, LOGIN_WINDOW_S = 10, 600
+_attempts: defaultdict[str, deque[float]] = defaultdict(deque)  # one web process (see docker-compose.yml)
+
+
+async def login_throttle(request: Request) -> None:
+    """At most LOGIN_ATTEMPTS sign-ins per LOGIN_WINDOW_S from one address, right or wrong."""
+    now = time.monotonic()
+    seen = _attempts[request.client.host if request.client else "?"]
+    while seen and seen[0] < now - LOGIN_WINDOW_S:
+        seen.popleft()
+    if len(seen) >= LOGIN_ATTEMPTS:
+        raise RateLimitError()
+    seen.append(now)
+
+
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+CurrentUser = Annotated[DashboardUser, Depends(get_current_user)]
+LoginThrottle = Depends(login_throttle)
 Settings = Annotated[WebSettings, Depends(get_settings)]
 ZoneScope = Annotated[Scope, Depends(get_scope)]
 HttpClient = Annotated[httpx.AsyncClient, Depends(get_http)]

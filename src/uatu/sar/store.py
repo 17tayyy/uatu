@@ -1,5 +1,6 @@
 """Scenes and their results in the database."""
 
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from sqlalchemy.orm import aliased
 
 from uatu.config import ZONES
 from uatu.db.models import (
+    DetectionReview,
     RecordedZone,
     SanctionedVessel,
     SarAisCheck,
@@ -195,6 +197,7 @@ async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analy
         await conn.execute(delete(SarAisCheck).where(SarAisCheck.scene_id == scene_id))
         if detection_rows:
             await conn.execute(insert(SarDetection), detection_rows)
+        await _relink_reviews(conn, scene_id)
         if check_rows:
             await conn.execute(insert(SarAisCheck), check_rows)
         await conn.execute(
@@ -203,6 +206,43 @@ async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analy
             .values(status="processed", error=None, processed_at=datetime.now(UTC), **summary)
         )
     return summary
+
+
+REVIEW_RELINK_M = 50.0  # the same echo found again: detections are cut from the same image the same way
+
+
+async def _relink_reviews(conn: Any, scene_id: uuid.UUID) -> None:
+    """Give each verdict on the scene whose detection was replaced the new detection in its place."""
+    orphans = (
+        await conn.execute(
+            select(DetectionReview.id, DetectionReview.lat, DetectionReview.lon).where(
+                DetectionReview.scene_id == scene_id, DetectionReview.detection_id.is_(None)
+            )
+        )
+    ).all()
+    if not orphans:
+        return
+    linked = select(DetectionReview.detection_id).where(DetectionReview.detection_id.is_not(None))
+    free = (
+        await conn.execute(
+            select(SarDetection.id, SarDetection.lat, SarDetection.lon).where(
+                SarDetection.scene_id == scene_id, SarDetection.id.not_in(linked)
+            )
+        )
+    ).all()
+    for review in orphans:
+        nearest = min(free, key=lambda d: _metres(review.lon, review.lat, d.lon, d.lat), default=None)
+        if nearest is None or _metres(review.lon, review.lat, nearest.lon, nearest.lat) > REVIEW_RELINK_M:
+            continue
+        free.remove(nearest)
+        await conn.execute(
+            update(DetectionReview).where(DetectionReview.id == review.id).values(detection_id=nearest.id)
+        )
+
+
+def _metres(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    x = (lon2 - lon1) * 111_320 * math.cos(math.radians((lat1 + lat2) / 2))
+    return math.hypot(x, (lat2 - lat1) * 111_320)
 
 
 async def mark_skipped(engine: AsyncEngine, scene_id: uuid.UUID, reason: str) -> None:

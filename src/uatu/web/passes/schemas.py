@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
+from uatu.web.reviews.schemas import ReviewRead
 from uatu.web.schemas import Degrees, FeatureCollection, Geometry, OneDecimal, OutputSchema, Whole
 
 
@@ -29,6 +30,7 @@ class PassSummary(OutputSchema):
     no_coverage: int
     fixed: int
     candidates: int  # went silent or unidentified: the ones worth a look
+    pending: int  # unpaired where AIS is received (candidates and reception gaps) with no verdict yet
     footprint: Geometry
     has_image: bool
 
@@ -55,6 +57,7 @@ class DetectionProperties(OutputSchema):
     # For unpaired detections: AIS heard around them at the time (see ReceptionRule)
     ais_vessels_nearby: int | None
     ais_reports_nearby: int | None
+    review: ReviewRead | None  # your verdict, if given
 
 
 class AisCheckProperties(OutputSchema):
