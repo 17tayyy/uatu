@@ -6,6 +6,8 @@ uatu-ais analyse                      run the detectors now
 uatu-ais stops [--days 7] [--listed]  where vessels stopped (berths, anchorages), sanctioned/watchlisted only
 uatu-ais stops --rebuild --days 3     find them again in the recorded AIS of the last days
 uatu-ais refresh                      reload sanctions, the companies behind vessels, infrastructure, ports
+uatu-ais watch add [--imo N] [--mmsi N] [--name NAME] --note WHY   be told whenever it is heard
+uatu-ais watch list | watch remove ID your own watch list
 """
 
 import argparse
@@ -136,6 +138,32 @@ async def cmd_refresh(settings: AisSettings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_watch(settings: AisSettings, args: argparse.Namespace) -> int:
+    engine = db.create_engine(settings.database_url)
+    try:
+        if args.action == "add":
+            name = args.name.strip() if args.name else None
+            if args.imo is None and args.mmsi is None and not name:
+                print("give an --imo, an --mmsi or a --name", file=sys.stderr)
+                return 2
+            watch_id = await store.add_watch(engine, args.note.strip(), args.imo, args.mmsi, name)
+            print(f"watching #{watch_id}")
+        elif args.action == "remove":
+            if not await store.remove_watch(engine, args.id):
+                print(f"no watch #{args.id}", file=sys.stderr)
+                return 1
+            print(f"removed #{args.id}")
+        else:
+            rows = await store.watches(engine)
+            for w in rows:
+                who = ", ".join(f"{k} {v}" for k, v in (("IMO", w.imo), ("MMSI", w.mmsi), ("name", w.name)) if v)
+                print(f"#{w.id:<4} {who:<50} {w.note}  (since {w.added_at:%Y-%m-%d})")
+            print(f"\n{len(rows)} watched")
+    finally:
+        await engine.dispose()
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="uatu-ais", description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -163,6 +191,18 @@ def main() -> None:
     stops.set_defaults(run=cmd_stops)
     refresh = commands.add_parser("refresh", help="reload sanctions, ship owners and managers, infrastructure")
     refresh.set_defaults(run=cmd_refresh)
+
+    watch = commands.add_parser("watch", help="your own watch list: an alert whenever one is heard")
+    actions = watch.add_subparsers(dest="action", required=True)
+    add = actions.add_parser("add", help="watch a vessel by IMO, MMSI or name (any that matches)")
+    add.add_argument("--imo", type=int)
+    add.add_argument("--mmsi", type=int)
+    add.add_argument("--name", help="as broadcast, in any case")
+    add.add_argument("--note", required=True, help="why you watch it")
+    actions.add_parser("list", help="what you watch")
+    remove = actions.add_parser("remove", help="stop watching")
+    remove.add_argument("id", type=int)
+    watch.set_defaults(run=cmd_watch)
 
     args = parser.parse_args()
     try:

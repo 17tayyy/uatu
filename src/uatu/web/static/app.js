@@ -74,10 +74,11 @@ const regionName = (() => {
   };
 })();
 
-/** How a vessel stands with sanctions: 2 sanctioned or run by a sanctioned company, 1 on other watchlists. */
+/** How a vessel stands with sanctions: 2 sanctioned or run by a sanctioned company, 1 on other watchlists or yours. */
 function listing(p) {
   if (p.sanctioned === true) return { level: 2, label: "Sancionado" };
   if (p.risk === "sanctioned_owner") return { level: 2, label: "Gestor sancionado" };
+  if (p.watched === true) return { level: 1, label: "En tu lista" };
   if (p.risk === "watchlisted") return { level: 1, label: "Vigilado" };
   return { level: 0, label: null };
 }
@@ -397,7 +398,7 @@ const kindRank = ["match", ["get", "kind"], ...Object.entries(KIND).flatMap(([k,
 const vesselListing = [
   "case",
   ["any", ["==", ["get", "sanctioned"], true], ["==", ["get", "risk"], "sanctioned_owner"]], 2,
-  ["==", ["get", "risk"], "watchlisted"], 1,
+  ["any", ["==", ["get", "risk"], "watchlisted"], ["==", ["get", "watched"], true]], 1,
   0,
 ];
 
@@ -1591,6 +1592,15 @@ async function renderVessel(mmsi) {
         ". Fuente: OpenSanctions.",
       ),
     v.risk && riskCallout(v.risk),
+    v.watched.length > 0 &&
+      h(
+        "div",
+        { class: "callout watch" },
+        h("strong", null, svg("arrow", C.serious), "En tu lista de vigilancia"),
+        v.watched.length === 1
+          ? `${capitalise(v.watched[0].note)} (desde ${month(v.watched[0].added_at)}).`
+          : h("ul", { class: "reasons" }, v.watched.map((w) => h("li", null, `${capitalise(w.note)} (desde ${month(w.added_at)})`))),
+      ),
     kv([
       ["MMSI", String(v.mmsi)],
       ["IMO", v.imo ? String(v.imo) : null],

@@ -28,6 +28,7 @@ from uatu.db.models import (
     Vessel,
     VesselRisk,
     VesselStop,
+    WatchedVessel,
     WatchlistedVessel,
 )
 from uatu.web.config import WebSettings
@@ -165,6 +166,7 @@ async def rows():
                 imo=IMO_A, watchlist="shadow_fleet", name="ALFA AS LISTED", note="Exports Urals.", source_id="test"
             )
         )  # fmt: skip
+        await conn.execute(insert(WatchedVessel).values(name="test alfa", note="uatu test"))
         await conn.execute(
             insert(VesselStop).values(
                 mmsi=MMSI_A, kind="anchorage", start_at=NOW - timedelta(hours=9), end_at=NOW - timedelta(hours=2),
@@ -315,6 +317,7 @@ async def rows():
         await conn.execute(delete(ShipCompany).where(ShipCompany.id == COMPANY_ID))  # and its links
         await conn.execute(delete(VesselRisk).where(VesselRisk.imo == IMO_A))
         await conn.execute(delete(WatchlistedVessel).where(WatchlistedVessel.imo == IMO_A))
+        await conn.execute(delete(WatchedVessel).where(WatchedVessel.note == "uatu test"))
         await conn.execute(delete(IngestSession).where(IngestSession.id == SESSION_ID))
         await conn.execute(delete(RecordedZone).where(RecordedZone.key == "estrecho"))
     await engine.dispose()
@@ -396,7 +399,8 @@ async def test_vessels(client):
     live = await ok(client, "/api/v1/vessels/live?minutes=60&zone=estrecho")
     alfa = next(f["properties"] for f in live["features"] if f["properties"]["mmsi"] == MMSI_A)
     assert alfa["name"] == "TEST ALFA"
-    assert (alfa["sanctioned"], alfa["risk"]) == (False, "sanctioned_owner")
+    assert (alfa["sanctioned"], alfa["risk"], alfa["watched"]) == (False, "sanctioned_owner", True)
+    assert not any(f["properties"]["watched"] for f in live["features"] if f["properties"]["mmsi"] != MMSI_A)
     assert alfa["sog"] == 12.3
     assert alfa["cog"] == 270
     assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in live["features"])
@@ -420,6 +424,9 @@ async def test_vessels(client):
         ],
     }
     assert detail["watchlists"] == [{"watchlist": "shadow_fleet", "note": "Exports Urals."}]
+    assert [w["note"] for w in detail["watched"]] == ["uatu test"]
+    assert detail["last_position"]["properties"]["watched"] is True
+    assert (await ok(client, f"/api/v1/vessels/{MMSI_SILENT}"))["watched"] == []
     [stop] = detail["stops"]
     assert (stop["kind"], stop["place"], stop["lat"]) == ("anchorage", None, 35.93)
     assert [t["direction"] for t in detail["transits"]] == ["east"]
