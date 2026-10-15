@@ -1,0 +1,212 @@
+.context {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 300px);
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--overlay);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context button {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 550;
+  font-size: 12px;
+}
+.context button:hover {
+  background: var(--border-strong);
+}
+
+.open {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--overlay);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+  font-weight: 550;
+}
+.open:hover {
+  border-color: var(--border-strong);
+}
+
+.bar {
+  position: absolute;
+  left: 16px;
+  right: 70px;
+  bottom: 16px;
+  z-index: 3;
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--overlay);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  animation: fade-in 0.16s ease-out;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.play {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--bg);
+}
+.play:hover {
+  background: #fff;
+}
+.step {
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.step:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.label {
+  min-width: 120px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.grow {
+  flex: 1;
+}
+.speed {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-s);
+  color: var(--text-3);
+}
+.close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.track {
+  position: relative;
+  height: 22px;
+}
+.slider {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  accent-color: var(--text);
+  background: transparent;
+}
+.outage {
+  position: absolute;
+  top: 7px;
+  height: 8px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(135deg, rgba(229, 72, 77, 0.5) 0 3px, transparent 3px 6px);
+  pointer-events: auto;
+}
+.passTick {
+  position: absolute;
+  top: 1px;
+  z-index: 1;
+  width: 3px;
+  height: 9px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--blue);
+  opacity: 0.9;
+}
+.passTick:hover {
+  transform: scaleY(1.4);
+  opacity: 1;
+}
+.count {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.count[data-warning] {
+  color: var(--warning);
+}
+
+@media (max-width: 760px) {
+  .context {
+    max-width: calc(100% - 24px);
+    top: 56px;
+  }
+  .bar {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+  }
+  .label {
+    min-width: 0;
+    font-size: 13px;
+  }
+  .step {
+    display: none;
+  }
+}
+
+/* With the inspector open: centred on the map left free (on a phone, the inspector is a sheet). */
+@media (min-width: 761px) {
+  :global([data-inspector]) .context,
+  :global([data-inspector]) .open {
+    left: calc(50% - var(--inspector) / 2 - 12px);
+  }
+
+  :global([data-inspector]) .context {
+    max-width: calc(100% - var(--inspector) - 160px);
+  }
+
+  :global([data-inspector]) .bar {
+    right: calc(var(--inspector) + 24px);
+  }
+}

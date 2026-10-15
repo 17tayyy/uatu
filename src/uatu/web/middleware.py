@@ -50,14 +50,14 @@ class RequestContextMiddleware:
                 )
 
 
-# The page loads MapLibre from jsdelivr, which runs its workers from blob: URLs, and the optional
-# satellite layer's tiles from MapTiler or EOX. The API docs (Swagger UI, ReDoc) need inline scripts, so they
-# go without the policy.
+# The page is one bundle from here (frontend/, built with Vite): MapLibre's worker included, as a module
+# script of its own. The optional satellite layer's tiles come from MapTiler or EOX. The API docs (Swagger UI,
+# ReDoc) load from jsdelivr and need inline scripts, so they go without the policy.
 IMAGERY = "https://api.maptiler.com https://tiles.maps.eox.at"
 CONTENT_SECURITY_POLICY = (
-    "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; "
-    "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
-    f"img-src 'self' data: blob: {IMAGERY}; worker-src blob:; child-src blob:; connect-src 'self' {IMAGERY}; "
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    f"img-src 'self' data: blob: {IMAGERY}; worker-src 'self' blob:; child-src 'self' blob:; "
+    f"connect-src 'self' {IMAGERY}; "
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 NO_POLICY_PATHS = {"/docs", "/docs/oauth2-redirect", "/redoc"}

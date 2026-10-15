@@ -1,14 +1,29 @@
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Path, status
+from fastapi import APIRouter, Path, Query, status
 
-from uatu.web.dependencies import CurrentUser, DbSession, SameOrigin
+from uatu.web.dependencies import CurrentUser, DbSession, SameOrigin, ZoneScope
+from uatu.web.passes import service as pass_service
+from uatu.web.passes.schemas import PendingDetection
 from uatu.web.reviews import service as review_service
 from uatu.web.reviews.schemas import ReviewRead, ReviewWrite
-from uatu.web.schemas import DataResponse
+from uatu.web.schemas import DataResponse, FeatureCollection
 
 router = APIRouter(prefix="/detections", tags=["reviews"], dependencies=[SameOrigin])
 DetectionId = Annotated[int, Path(ge=1)]
+
+
+@router.get("/pending")
+async def pending_detections(
+    db: DbSession,
+    scope: ZoneScope,
+    days: Annotated[float, Query(gt=0, le=90)] = 30,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> DataResponse[FeatureCollection[PendingDetection]]:
+    """What is left to review across passes: candidates and reception gaps without a verdict, latest first."""
+    since = datetime.now(UTC) - timedelta(days=days)
+    return DataResponse(data=await pass_service.pending_detections(db, scope.keys, since, limit))
 
 
 @router.put("/{detection_id}/review")

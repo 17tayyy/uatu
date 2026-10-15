@@ -1,0 +1,129 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--text);
+  text-decoration-color: var(--text-3);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  text-decoration-color: var(--text);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Scrollbars that do not shout. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* MapLibre's own controls, in our colours. */
+.maplibregl-ctrl-group {
+  background: var(--overlay) !important;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow) !important;
+}
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--border) !important;
+}
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(0.85);
+}
+.maplibregl-ctrl-scale {
+  background: var(--overlay);
+  border-color: var(--text-3);
+  color: var(--text-2);
+}
+.maplibregl-ctrl-attrib {
+  background: var(--overlay) !important;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--text-2);
+}
+.maplibregl-ctrl-attrib-button {
+  filter: invert(0.85);
+}
+.maplibregl-popup.hover-tip .maplibregl-popup-content {
+  padding: 5px 9px;
+  border-radius: var(--radius-s);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font: 500 12px var(--font);
+}
+.maplibregl-popup.hover-tip .maplibregl-popup-tip {
+  display: none;
+}

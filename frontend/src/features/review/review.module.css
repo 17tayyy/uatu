@@ -1,0 +1,89 @@
+.start {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px 6px;
+  font-size: 13px;
+}
+.keys {
+  margin: 0;
+  padding: 4px 20px 6px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.keys kbd,
+.verdictKey {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--text-2);
+  font: 600 10.5px var(--font);
+}
+
+.verdicts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.verdict {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface-1);
+  text-align: left;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.verdict:hover:not(:disabled) {
+  border-color: var(--tone);
+  background: var(--surface-3);
+}
+.verdict[aria-pressed="true"] {
+  border-color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 14%, var(--surface-1));
+}
+.verdictTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.verdictTop .verdictKey {
+  margin-left: auto;
+}
+.verdictHint {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.given {
+  display: grid;
+  gap: 8px;
+}
+.givenHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.meta {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.extra {
+  display: grid;
+  gap: 8px;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
