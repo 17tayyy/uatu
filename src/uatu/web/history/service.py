@@ -8,13 +8,13 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import distinct, func, select, tuple_
+from sqlalchemy import distinct, func, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.config import BBox
 from uatu.db.models import Position, RecordedZone, SanctionedVessel, Vessel, VesselRisk
 from uatu.web.geo import inside
-from uatu.web.history.schemas import DensityProperties, HistoryChunk, HistoryRange, HistoryTrack
+from uatu.web.history.schemas import DensityProperties, HistoryChunk, HistoryRange, HistoryTrack, Outage
 from uatu.web.schemas import Feature, FeatureCollection, point
 from uatu.web.vessels.labels import flag, ship_type
 
@@ -23,8 +23,14 @@ CELL_DEG = 0.02  # ~2 km, as the AIS coverage cells
 
 async def history_range(db: AsyncSession) -> HistoryRange:
     now = datetime.now(UTC)
-    since = await db.scalar(select(func.min(RecordedZone.since)))
-    return HistoryRange(start=since or now, end=now)
+    since = await db.scalar(select(func.min(RecordedZone.since))) or now
+    outages = await db.execute(
+        text(
+            "SELECT gap_start, gap_end FROM ingest_gaps WHERE gap_end >= :since AND duration >= :min ORDER BY gap_start"
+        ),
+        {"since": since, "min": timedelta(minutes=5)},
+    )
+    return HistoryRange(start=since, end=now, outages=[Outage(start=a, end=b) for a, b in outages])
 
 
 async def tracks(db: AsyncSession, bbox: BBox, start: datetime, hours: float) -> HistoryChunk:

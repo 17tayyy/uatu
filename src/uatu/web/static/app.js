@@ -1972,10 +1972,11 @@ const SPEEDS = [10, 60, 300, 1800]; // times real time: 1 s plays 10 s ... 30 mi
 
 function enterTime(t) {
   if (!state.time) {
-    state.time = { t, playing: false, speed: 60, chunks: new Map(), from: null, events: null, ui: null };
+    state.time = { t, playing: false, speed: 60, chunks: new Map(), from: null, outages: [], events: null, ui: null, passId: undefined };
     api("/history").then((range) => {
       if (!state.time) return;
       state.time.from = new Date(range.start).getTime();
+      state.time.outages = range.outages.map((o) => [new Date(o.start).getTime(), new Date(o.end).getTime()]);
       renderTimebar();
     }).catch(() => {});
     loadTimeEvents();
@@ -1992,6 +1993,19 @@ function exitTime() {
   setData("time-trails", EMPTY);
   setData("events", state.events);
   renderTimebar();
+  // Back to the present: its latest pass.
+  if (state.status?.latest_pass) loadPass(state.status.latest_pass.id).catch(() => {});
+}
+
+/** The radar pass of the moment shown, if a satellite passed within 45 minutes of it; else none. */
+function syncPassToTime() {
+  const time = state.time;
+  const distance = (p) => Math.abs(new Date(p.acquired_at).getTime() - time.t);
+  const near = (state.passes ?? []).filter((p) => distance(p) <= 45 * 60_000).sort((a, b) => distance(a) - distance(b))[0];
+  if ((near?.id ?? null) === time.passId) return;
+  time.passId = near?.id ?? null;
+  if (near) loadPass(near.id).catch(() => {});
+  else clearPass("Máquina del tiempo: ningún satélite pasó a esa hora");
 }
 
 function clampTime(t) {
@@ -2105,6 +2119,7 @@ function renderTime() {
     });
     setData("events", { type: "FeatureCollection", features: going });
   }
+  syncPassToTime();
   updateTimebar(vessels.length, keys.some((key) => !time.chunks.get(key)?.data));
 }
 
@@ -2163,7 +2178,14 @@ function updateTimebar(vessels = null, loading = false) {
   slider.max = String(Date.now());
   slider.value = String(time.t);
   label.textContent = when(new Date(time.t).toISOString());
-  if (vessels != null) count.textContent = loading ? "Cargando AIS de ese momento…" : `${fmtNumber.format(vessels)} barcos oídos en la última media hora`;
+  const outage = time.outages.find(([start, end]) => start <= time.t && time.t <= end);
+  count.classList.toggle("warning", Boolean(outage));
+  if (outage) {
+    // Uatu itself was deaf: vessels still drawn were heard before, and a silence then says nothing.
+    count.textContent = `⚠ Uatu no grababa AIS de ${when(new Date(outage[0]).toISOString())} a ${when(new Date(outage[1]).toISOString())} (sin conexión): lo que falta no es un barco callado`;
+  } else if (vessels != null) {
+    count.textContent = loading ? "Cargando AIS de ese momento…" : `${fmtNumber.format(vessels)} barcos oídos en la última media hora`;
+  }
 }
 
 function togglePlay() {
