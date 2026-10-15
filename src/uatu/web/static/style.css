@@ -259,6 +259,60 @@ div.row:hover { background: none; }
 
 .map-busy[hidden] { display: none; }
 
+/* Time machine ------------------------------------------------------------------------------- */
+
+.time-toggle {
+  position: absolute;
+  bottom: 52px; /* over the attribution line */
+  left: 50%;
+  z-index: 3; /* over MapLibre's controls */
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgb(26 26 25 / 0.92);
+  color: var(--ink);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.time-toggle[hidden], .timebar[hidden] { display: none; }
+
+.timebar {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  z-index: 3;
+  width: min(640px, calc(100% - 24px));
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(26 26 25 / 0.95);
+  backdrop-filter: blur(8px);
+  color: var(--ink-2);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.time-top { display: flex; align-items: center; gap: 10px; }
+
+.time-top .grow { flex: 1; }
+
+.time-play { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--page); font-size: 12px; }
+
+.time-step { flex: none; color: var(--ink-2); font-size: 12px; }
+
+.time-step:hover, .timebar .close:hover { color: var(--ink); }
+
+.time-label { min-width: 96px; color: var(--ink); font-weight: 600; text-align: center; }
+
+.time-speed { padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink-2); font-size: 12px; }
+
+.timebar .close { padding: 0 4px; color: var(--muted); font-size: 20px; line-height: 1; }
+
+.time-slider { display: block; width: 100%; margin: 8px 0 2px; accent-color: var(--ink-2); }
+
+.time-count { color: var(--muted); font-size: 12px; }
+
 .error-note { color: var(--ink-2); }
 
 .section-title {
@@ -594,7 +648,15 @@ div.row:hover { background: none; }
 
   .optical-card { top: calc(max(10px, env(safe-area-inset-top)) + 96px); right: 10px; left: 10px; width: auto; font-size: 12px; }
 
-  .map-busy { top: auto; bottom: calc(44dvh + 12px); }
+  .map-busy { top: auto; bottom: calc(44dvh + 56px); }
+
+  .time-toggle { bottom: calc(44dvh + 12px); }
+
+  .timebar { bottom: calc(44dvh + 10px); padding: 8px 10px; }
+
+  .time-top { gap: 6px; }
+
+  .time-step { display: none; }
 
   .legend { display: none; }
 

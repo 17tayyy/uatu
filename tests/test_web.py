@@ -451,6 +451,28 @@ async def test_companies(client):
 
 
 @needs_db
+async def test_history(client):
+    span = await ok(client, "/api/v1/history")
+    assert span["start"] <= span["end"]
+
+    start = (NOW - timedelta(hours=1)).isoformat()
+    response = await client.get("/api/v1/history/tracks", params={"start": start, "zone": "estrecho"})
+    assert response.status_code == 200 and response.headers["cache-control"] == "public, max-age=60"
+    tracks = {t["mmsi"]: t for t in response.json()["data"]["tracks"]}
+    alfa = tracks[MMSI_A]
+    assert (alfa["name"], alfa["risk"], len(alfa["t"])) == ("TEST ALFA", "sanctioned_owner", 4)
+    assert alfa["t"] == sorted(alfa["t"]) and alfa["sog"][0] == 12.3 and alfa["cog"][0] == 270
+    assert MMSI_BARCELONA not in tracks  # in another zone
+    old = await client.get("/api/v1/history/tracks", params={"start": "2026-01-01T00:00Z", "hours": 1})
+    assert old.json()["data"]["tracks"] == [] and old.headers["cache-control"] == "public, max-age=86400"
+    assert (await client.get("/api/v1/history/tracks", params={"start": start, "hours": 4})).status_code == 422
+
+    cells = await ok(client, "/api/v1/history/density?days=1&zone=estrecho")
+    ours = [c for c in cells["features"] if abs(c["geometry"]["coordinates"][1] - 35.93) < 0.02]
+    assert ours and all(0 < c["properties"]["weight"] <= 1 for c in cells["features"])
+
+
+@needs_db
 async def test_coverage_and_status(client):
     cells = await ok(client, "/api/v1/coverage?days=1")
     ours = [

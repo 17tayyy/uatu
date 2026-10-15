@@ -279,7 +279,14 @@ coast or one zone at a time (the selector in the header):
   by name or MMSI, and a vessel's card: track, events, sanctions, owners and managers, what the
   lists say about it and the passes that saw it. A company's card lists its known fleet, with the
   vessels Uatu has heard first.
-- Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute.
+- Layers for live vessels, infrastructure and AIS reception quality, refreshed every minute, and
+  traffic density: vessel-hours per ~2 km cell over the last week, a vessel counting once per hour
+  however often it reports.
+- **Máquina del tiempo**: the AIS record played back. A time bar sets any moment since recording
+  began, or plays it at 10 s to 30 min a second. Every vessel is drawn where it was then,
+  interpolated between reports, with its last hour behind it, along with the events going on at
+  that moment. Each event can be replayed from a little before it began. Reports come an hour at
+  a time, and the browser keeps past hours.
 
 The radar image of each pass is kept at 20 m (the sensor's actual resolution) as a tiled
 Web Mercator GeoTIFF with overviews (`radar.tif`, ~17 MB a frame), and served as map tiles: the
