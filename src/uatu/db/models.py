@@ -9,6 +9,7 @@ from sqlalchemy import (
     CHAR,
     REAL,
     BigInteger,
+    CheckConstraint,
     Computed,
     DateTime,
     Double,
@@ -324,6 +325,20 @@ class WatchlistedVessel(Base):
     name: Mapped[str]
     note: Mapped[str | None] = mapped_column(comment="what the source says about it")
     source_id: Mapped[str] = mapped_column(comment="OpenSanctions entity id")
+
+
+class WatchedVessel(Base):
+    """A vessel to be told about whenever it is heard: by IMO, MMSI or name (uatu-ais watch)."""
+
+    __tablename__ = "watched_vessels"
+    __table_args__ = (CheckConstraint("imo IS NOT NULL OR mmsi IS NOT NULL OR name IS NOT NULL", name="identified"),)
+
+    id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
+    imo: Mapped[int | None]
+    mmsi: Mapped[int | None]
+    name: Mapped[str | None] = mapped_column(comment="as broadcast, in any case")
+    note: Mapped[str] = mapped_column(comment="why it is watched")
+    added_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class VesselRisk(Base):

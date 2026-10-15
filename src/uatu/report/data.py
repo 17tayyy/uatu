@@ -287,6 +287,7 @@ async def _notable(conn: Any, start: datetime, end: datetime) -> list[Notable]:
         .outerjoin(Vessel, Vessel.mmsi == AisEvent.mmsi)
         .where(
             AisEvent.severity >= 2,
+            AisEvent.kind != "watched_vessel",  # the watch list is one's own, not for a report
             AisEvent.start_at < end,
             or_(AisEvent.end_at.is_(None), AisEvent.end_at >= start),
         )

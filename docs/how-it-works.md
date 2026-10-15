@@ -153,6 +153,20 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
   counts once it has held for an hour, to a value the vessel had not used: one night brought
   eight "renames" in an hour from a vessel whose two transponders share an MMSI, and a name made
   up by a corrupt message for three minutes. A name corrected by a letter or two is informative.
+- **AIS that cannot be true.** A transponder sends whatever it is set to, and its GPS can be
+  jammed or fed false positions. One MMSI jumping back and forth between two places, three times
+  or more, is two transmitters on one identity. A vessel reported again and again 5 km or more
+  inland is GPS spoofing, as ships off the Baltic and Black Sea coasts turn up at airports;
+  between 2 and 5 km it is only informative, as the land mask (ESA WorldCover at 10 m, judged in
+  100 m blocks) takes the narrow canals of a marina like Empuriabrava for built-up land. An MMSI
+  carries its flag in its first digits (ITU-R M.585): one no country was allocated, a placeholder
+  like 123456789, or a coast station's number on a vessel under way at sea is a transponder set up
+  wrong or a made-up identity. Most turn out to be stationary in port, which is informative. AIS
+  search-and-rescue beacons (SART, man overboard, EPIRB) are notable at sea, informative in port,
+  where they are tested; they reach Salvamento Marítimo directly, so Uatu adds nothing in time.
+- **Your own watch list**: vessels you name by IMO, MMSI or name with a note
+  (`uatu-ais watch add`), an alert whenever one is heard on the coast, once per visit. The
+  dashboard marks them; the reports leave them out, as the list is yours.
 
 Where 4 or more vessels have sat stopped within 8 km over the past week, an anchorage or waiting
 area learnt from the record itself, stopping is routine and only informative.

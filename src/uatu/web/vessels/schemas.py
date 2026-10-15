@@ -17,6 +17,11 @@ class Risk(OutputSchema):
     reasons: list[str]  # in Spanish
 
 
+class Watch(OutputSchema):
+    note: str
+    added_at: datetime
+
+
 class Watchlisting(OutputSchema):
     watchlist: str  # shadow_fleet | war_and_sanctions (Ukraine's GUR) | port_ban (Paris MoU)
     note: str | None  # what the source says, in its words
@@ -52,6 +57,7 @@ class LiveVesselProperties(OutputSchema):
     received_at: datetime
     sanctioned: bool
     risk: str | None  # off the sanctions lists: sanctioned_owner | watchlisted
+    watched: bool  # on one's own watch list (uatu-ais watch)
 
 
 class VesselSummary(OutputSchema):
@@ -84,6 +90,7 @@ class VesselDetail(OutputSchema):
     sanction: Sanction | None
     risk: Risk | None
     watchlists: list[Watchlisting]
+    watched: list[Watch]  # one's own watch list entries it matches
     companies: list[CompanyRole]  # who owns and manages it, as far as the sources tell
     last_position: Feature[LiveVesselProperties] | None
     track: Geometry | None  # LineString of the last hours

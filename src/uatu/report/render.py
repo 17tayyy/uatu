@@ -26,6 +26,10 @@ EVENTS = {
     "identity_change": "Cambios de identidad",
     "shared_imo": "IMO duplicados",
     "position_jump": "Saltos de posición",
+    "position_on_land": "Posiciones en tierra",
+    "shared_mmsi": "MMSI compartidos",
+    "odd_mmsi": "MMSI imposibles",
+    "emergency_beacon": "Balizas de emergencia",
 }
 COUNTRY = {"Spain": "España", "Morocco": "Marruecos", "Algeria": "Argelia", "France": "Francia", "Italy": "Italia"}
 MAX_EVENTS = 40

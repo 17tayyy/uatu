@@ -30,18 +30,21 @@ from uatu.db.models import (
     Vessel,
     VesselRisk,
     VesselStop,
+    WatchedVessel,
 )
 from uatu.db.models import StaticReport as Report
 
 # Events that span time and are re-detected on every run: a new detection that overlaps (or
 # follows within this gap) one already stored extends it instead of adding another.
-LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel"}
+LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel", "watched_vessel"}
+# What AIS can't make true: told once per visit too.
+FALSE_AIS = {"position_on_land", "shared_mmsi", "odd_mmsi", "emergency_beacon"}
 # listed_stop is not one: each stop is its own event, keyed by the stop's first report.
-SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", *LISTED}
+SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", *LISTED, *FALSE_AIS}
 MERGE_GAP = timedelta(minutes=30)
 # A listed vessel's visit lasts until it has been gone this long: one alert per visit, even
 # across midnight or a stretch with no reception.
-MERGE_GAPS = dict.fromkeys(LISTED, timedelta(hours=12))
+MERGE_GAPS = dict.fromkeys(LISTED | FALSE_AIS, timedelta(hours=12))
 
 
 async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> list[Track]:
@@ -214,6 +217,65 @@ async def sanctioned_present(engine: AsyncEngine, start: datetime, end: datetime
         severity = 3 if r.by_imo else 2  # MMSIs get reassigned; an IMO stays with the hull
         events.append(Event("sanctioned_vessel", severity, r.mmsi, r.first_seen, r.lat, r.lon, details, r.received_at))
     return events
+
+
+async def watched_present(engine: AsyncEngine, start: datetime, end: datetime) -> list[Event]:
+    """Vessels on the watch list (by IMO, MMSI or name) seen in the window: an alert each visit."""
+    first_seen, last = _seen(start, end)
+    matched_by = case(
+        (WatchedVessel.imo == Vessel.imo, literal_column("'imo'")),
+        (WatchedVessel.mmsi == Vessel.mmsi, literal_column("'mmsi'")),
+        else_=literal_column("'name'"),
+    )
+    stmt = (
+        select(
+            first_seen.label("first_seen"),
+            Vessel.mmsi,
+            Vessel.name,
+            WatchedVessel.id.label("watch_id"),
+            WatchedVessel.note,
+            matched_by.label("matched_by"),
+            last.c.lat,
+            last.c.lon,
+            last.c.received_at,
+        )
+        .join(
+            WatchedVessel,
+            or_(
+                WatchedVessel.imo == Vessel.imo,
+                WatchedVessel.mmsi == Vessel.mmsi,
+                func.upper(WatchedVessel.name) == func.upper(Vessel.name),
+            ),
+        )
+        .join(last, true())
+        .order_by(Vessel.mmsi, WatchedVessel.id)
+    )
+    async with engine.connect() as conn:
+        rows = (await conn.execute(stmt)).all()
+    events = {}  # one per vessel, though it match several entries
+    for r in rows:
+        details = {"name": r.name, "note": r.note, "watch_id": r.watch_id, "matched_by": r.matched_by}
+        events.setdefault(
+            r.mmsi, Event("watched_vessel", 3, r.mmsi, r.first_seen, r.lat, r.lon, details, r.received_at)
+        )
+    return list(events.values())
+
+
+async def add_watch(engine: AsyncEngine, note: str, imo: int | None, mmsi: int | None, name: str | None) -> int:
+    async with engine.begin() as conn:
+        return await conn.scalar(
+            pg_insert(WatchedVessel).values(imo=imo, mmsi=mmsi, name=name, note=note).returning(WatchedVessel.id)
+        )
+
+
+async def watches(engine: AsyncEngine) -> list[Any]:
+    async with engine.connect() as conn:
+        return list((await conn.execute(select(WatchedVessel).order_by(WatchedVessel.id))).all())
+
+
+async def remove_watch(engine: AsyncEngine, watch_id: int) -> bool:
+    async with engine.begin() as conn:
+        return (await conn.execute(delete(WatchedVessel).where(WatchedVessel.id == watch_id))).rowcount > 0
 
 
 async def network_present(engine: AsyncEngine, start: datetime, end: datetime) -> list[Event]:

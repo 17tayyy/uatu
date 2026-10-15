@@ -259,6 +259,36 @@ async def test_vessels_with_sanctioned_managers_or_on_watchlists_are_events(engi
             await conn.execute(delete(VesselRisk).where(VesselRisk.imo.in_([9_999_801, 9_999_802])))
 
 
+async def test_your_own_watch_list_by_imo_mmsi_or_name(engine):
+    from uatu.ais import store
+    from uatu.ais.analysis import describe
+
+    await write(
+        engine,
+        [
+            StaticRow(MMSI_A, T0, 5, name="WATCH TEST", imo=9_999_803),
+            StaticRow(MMSI_B, T0, 5, name="OTHER TEST", imo=9_999_804),
+        ],
+    )
+    await write(engine, [PositionRow(MMSI_A, T0 + timedelta(minutes=5), 1, 36.1, -5.5, 10.0, 90.0, 90, 0, True)])
+    ids = [
+        await store.add_watch(engine, "seen bunkering off Ceuta.", None, None, "watch test"),
+        await store.add_watch(engine, "the same, by IMO", 9_999_803, None, None),
+        await store.add_watch(engine, "not heard in the window", None, MMSI_B, None),
+    ]
+    try:
+        [event] = await store.watched_present(engine, T0, T0 + timedelta(hours=1))  # one per vessel
+        assert (event.kind, event.severity, event.mmsi) == ("watched_vessel", 3, MMSI_A)
+        assert (event.details["watch_id"], event.details["matched_by"]) == (ids[0], "name")
+        title, message, _ = describe(event, {})
+        assert title == "En tu lista de vigilancia: WATCH TEST"
+        assert "Lo vigilas por: seen bunkering off Ceuta. Última" in message
+        assert [w.id for w in await store.watches(engine) if w.id in ids] == ids
+    finally:
+        assert all([await store.remove_watch(engine, i) for i in ids])
+    assert not await store.remove_watch(engine, ids[0])
+
+
 async def test_a_stop_seen_in_pieces_is_one_and_a_watchlisted_vessel_stopping_is_an_event(engine):
     from uatu.ais import analysis, store
     from uatu.ais.stops import Port, Stop, Transit

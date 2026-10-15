@@ -130,6 +130,11 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `watchlisted_vessel` | off the lists, but run by a company with a mostly sanctioned fleet (2+ vessels, half or more), on GUR's lists (shadow fleet, vessels working for Russia), banned from European ports (Paris MoU) or insured by a sanctioned club | always |
 | `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes to a value the vessel had not used, held for an hour (two transponders on one MMSI flip between names; a corrupt message makes one up); a name corrected by a letter or two is informative |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
+| `shared_mmsi` | one MMSI jumping back and forth 3+ times between places no ship could sail between: two transmitters on one identity | always (its jumps are then not told one by one) |
+| `position_on_land` | 3+ reports over 2 km inland (ESA WorldCover land mask, 100 m blocks, harbours and wide rivers staying water) | 5 km inland or more (GPS spoofing, as off the Baltic and Black Sea coasts); nearer, informative: canals the mask can't see (Empuriabrava's) or a boatyard |
+| `odd_mmsi` | a vessel transmitting with an MMSI that cannot be a ship's: a flag no country was allocated, a placeholder (123456789), a coast station's or a group's | under way, over 2 km from the coast |
+| `emergency_beacon` | an AIS-SART, man-overboard or EPIRB-AIS beacon | over 2 km from the coast; in port, most likely a test |
+| `watched_vessel` | a vessel on your own watch list (`uatu-ais watch`), by IMO, MMSI or name | always (alert), once per visit; never in the reports |
 
 Gaps and encounters within 2 km of the coast are not kept at all: in a harbour, vessels lie side
 by side for days and go quiet at their berth (Barcelona's marinas alone made ~2,000 "encounters" a
@@ -170,6 +175,8 @@ A vessel's card shows its last 30 days of stops and crossings.
 uv run uatu-ais around 36.10 -5.40 --at 2026-10-13T18:25Z   # who was there: AIS, events, radar
 uv run uatu-ais events --hours 24
 uv run uatu-ais stops --listed --days 7                     # where sanctioned and watchlisted vessels stopped
+uv run uatu-ais watch add --imo 9384447 --note "Russian oil, seen off Ceuta"   # an alert whenever it is heard
+uv run uatu-ais watch list                                   # and watch remove ID
 ```
 
 ## Reports

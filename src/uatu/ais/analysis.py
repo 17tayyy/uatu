@@ -24,6 +24,7 @@ from uatu.ais.events import (
     downgrade_where_usually_silent,
 )
 from uatu.ais.sanctions import explain
+from uatu.ais.spoofing import detect_odd_mmsi, detect_on_land, detect_shared_mmsi
 from uatu.ais.stops import Stop, detect_stops, detect_transits
 from uatu.config import BBox
 
@@ -66,12 +67,17 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
         tracks = await store.tracks(engine, start, now, area.bbox)
         infrastructure = await store.infrastructure_lines(engine, proj)
         depth = area.bathymetry.depth_at if area.bathymetry else None
+        shared = detect_shared_mmsi(tracks, proj)
+        two_transmitters = {e.mmsi for e in shared}  # their jumps are one event, not one each
         found = [
             *detect_gaps(tracks, t1, area.bbox, area.coast.at, proj, p),
             *detect_encounters(tracks, t0, t1, area.coast.at, proj, p),
             *detect_loitering(tracks, area.coast.at, p),
             *detect_infrastructure_loitering(tracks, infrastructure, area.coast.at, proj, p, depth),
-            *detect_jumps(tracks, proj, p),
+            *(e for e in detect_jumps(tracks, proj, p) if e.mmsi not in two_transmitters),
+            *shared,
+            *detect_on_land(tracks, area.coast.inland_at),
+            *detect_odd_mmsi(tracks, area.coast.at),
         ]
         events += downgrade_where_usually_silent(downgrade_in_crowds(found, stopped, proj, p), quiet, proj, p)
         tracked += len(tracks)
@@ -83,6 +89,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     events += detect_identity_changes(reports, start, await store.last_positions(engine, start), now)
     events += await store.sanctioned_present(engine, start, now)
     events += await store.network_present(engine, start, now)
+    events += await store.watched_present(engine, start, now)
     events += await store.shared_imos(engine, start, now)
 
     # Uatu deaf for 5 minutes or more (its connection, the recorder): no silence then says anything.
@@ -198,6 +205,38 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
             ongoing = e.end is None or e.end > datetime.now(UTC) - timedelta(minutes=30)
             message = f"{who} {'lleva' if ongoing else 'estuvo'} {d['hours']} h {stop_place(d)}."
             message += f" Posición {where}."
+        case "watched_vessel":
+            title = f"En tu lista de vigilancia: {name}"
+            message = f"{who} se oye en la zona. Lo vigilas por: {d['note'].rstrip('.')}. Última posición {where}."
+        case "position_on_land":
+            title = f"Posición en tierra: {name}"
+            why = (
+                "GPS falseado o interferido, o lo llevan por carretera"
+                if e.severity >= 2
+                else "un canal o varadero que el mapa no ve, o un GPS impreciso"
+            )
+            message = f"{who} ha dado {d['reports']} posiciones hasta {d['inland_km']} km tierra adentro: {why}."
+            message += f" Cerca de {where}."
+        case "shared_mmsi":
+            title = f"MMSI compartido: {name}"
+            message = (
+                f"{who} salta {d['jumps']} veces de ida y vuelta, unos {d['apart_km']} km, más rápido de lo que"
+                f" navega ningún barco: dos emisores con la misma identidad. Última posición {where}."
+            )
+        case "odd_mmsi":
+            what = {"invalid": "un número que no puede existir", "coast_station": "uno de estación costera",
+                    "group": "uno de grupo de barcos"}.get(d["mmsi_kind"], d["mmsi_kind"])  # fmt: skip
+            title = f"MMSI imposible: {name}"
+            message = (
+                f"{who} emite con un MMSI que no es de barco ({what}): mal configurado o identidad falsa."
+                f" {'Navegaba mar adentro' if d['at_sea'] and d['under_way'] else 'Parado o junto a la costa'}."
+                f" Última posición {where}."
+            )
+        case "emergency_beacon":
+            beacon = {"sart": "SART de supervivencia", "mob": "de hombre al agua", "epirb": "EPIRB"}[d["beacon"]]
+            title = f"Baliza de emergencia AIS ({beacon}): MMSI {e.mmsi}"
+            place = "en el mar" if d["at_sea"] else "junto a la costa o en puerto, probablemente una prueba"
+            message = f"Baliza {beacon} emitiendo {place}. Salvamento Marítimo la recibe también. Posición {where}."
         case "identity_change":
             title = f"Cambio de identidad: {name}"
             message = f"MMSI {e.mmsi} ha cambiado su {d['field']}: {d['before']} → {d['after']}."
@@ -238,6 +277,11 @@ def digest(
         "sanctioned_owner": ("barco de armador o gestor sancionado", "barcos de armadores o gestores sancionados"),
         "watchlisted_vessel": ("barco en listas de vigilancia", "barcos en listas de vigilancia"),
         "listed_stop": ("parada de un barco vigilado", "paradas de barcos vigilados"),
+        "watched_vessel": ("barco de tu lista", "barcos de tu lista"),
+        "position_on_land": ("posición en tierra", "posiciones en tierra"),
+        "shared_mmsi": ("MMSI compartido", "MMSI compartidos"),
+        "odd_mmsi": ("MMSI imposible", "MMSI imposibles"),
+        "emergency_beacon": ("baliza de emergencia", "balizas de emergencia"),
         "identity_change": ("cambio de identidad", "cambios de identidad"),
         "shared_imo": ("IMO duplicado", "IMO duplicados"),
     }
