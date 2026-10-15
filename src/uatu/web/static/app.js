@@ -36,6 +36,13 @@ const KIND = {
   fixed: { label: "Objeto fijo", color: C.fixed, rank: 6 },
 };
 const TO_REVIEW = ["went_silent", "unidentified", "reception_gap"];
+// Your verdict on a detection, once you have looked at it.
+const VERDICT = {
+  vessel_without_ais: { label: "Barco sin AIS", color: C.critical, vessel: true },
+  vessel_with_ais: { label: "Barco con AIS", color: C.blue, vessel: true },
+  reception_gap: { label: "Hueco de recepción", color: C.warning, vessel: true },
+  not_a_vessel: { label: "No es un barco", color: C.muted, vessel: false },
+};
 
 const SEVERITY = {
   3: { label: "Alerta", color: C.critical },
@@ -112,6 +119,7 @@ const EMPTY = { type: "FeatureCollection", features: [] };
 const ALL = "todas";
 
 const state = {
+  user: null, // who is signed in on this browser: needed to give verdicts and change your watch list
   zone: loadZonePref(), // a zone's key, or ALL for the whole coast
   zones: [], // the zones analysed, south-west to north-east
   wholeCoast: null,
@@ -820,7 +828,8 @@ function detectionPopup(p, lngLat) {
       h("p", { class: "text" }, `El radar ve desplazados a lo largo de su traza los barcos que se acercan o se alejan de él (efecto Doppler): a este, unos ${metres(Math.abs(p.doppler_shift_m))}. Por eso el eco no cae justo sobre su AIS.`),
     kv(rows),
     reception,
-    actions.length && h("div", { class: "actions" }, actions),
+    reviewBox(p),
+    actions.length > 0 && h("div", { class: "actions" }, actions),
     opticalBox(p.id, lngLat),
   ]);
   if (ais) link(lngLat, ais.geometry.coordinates);
@@ -1052,7 +1061,7 @@ function wireMapEvents() {
         showEvent(p, lngLat);
         break;
       case "detections":
-        detectionPopup(p, lngLat);
+        detectionPopup(byId.detections.get(p.id) ?? p, lngLat); // the pass's own: a verdict reaches its lists
         break;
       case "pass-ais":
         passAisPopup(p, lngLat);
@@ -1228,6 +1237,7 @@ function countsLine(p) {
     h("span", { class: "count" }, plural(p.detections, "detección", "detecciones")),
     h("span", { class: "count" }, svg("circle", C.blue), `${fmtNumber.format(p.matched)} con AIS`),
     p.candidates > 0 && h("span", { class: "count" }, svg("circle", C.critical), plural(p.candidates, "candidato", "candidatos")),
+    p.pending > 0 && h("span", { class: "count" }, `${fmtNumber.format(p.pending)} por revisar`),
   );
 }
 
@@ -1384,8 +1394,16 @@ function detectionRow(f) {
           detectionPopup(p, f.geometry.coordinates);
         },
       },
-      h("div", { class: "row-top" }, tag("circle", kind.color, kind.label), h("span", { class: "grow" }), h("span", { class: "row-time" }, fmtTime.format(new Date(p.seen_at)))),
+      h(
+        "div",
+        { class: "row-top" },
+        tag("circle", kind.color, kind.label),
+        p.review && tag("square", VERDICT[p.review.verdict].color, VERDICT[p.review.verdict].label),
+        h("span", { class: "grow" }),
+        h("span", { class: "row-time" }, fmtTime.format(new Date(p.seen_at))),
+      ),
       who && h("div", { class: "row-text" }, who),
+      p.review?.note && h("div", { class: "row-text" }, `«${p.review.note}»`),
       h("div", { class: "row-meta num" }, lines),
     ),
   );
@@ -1395,13 +1413,16 @@ function stat(value, label, marker) {
   return h("div", null, h("div", { class: "stat-value" }, marker, fmtNumber.format(value)), h("div", { class: "stat-label" }, label));
 }
 
-async function renderPass(id) {
-  fill(view, backButton("passes", "Pasadas"), message("loading", "Cargando pasada…"));
+async function renderPass(id, { fit = true } = {}) {
+  if (fit) fill(view, backButton("passes", "Pasadas"), message("loading", "Cargando pasada…"));
   const pass = await loadPass(id);
   if (route.id !== id) return;
-  fitToArea(bounds(pass.footprint.coordinates));
+  if (fit) fitToArea(bounds(pass.footprint.coordinates));
   const features = pass.detections_geojson.features;
-  const review = features.filter((f) => TO_REVIEW.includes(f.properties.kind)).sort((a, b) => KIND[a.properties.kind].rank - KIND[b.properties.kind].rank);
+  const review = features
+    .filter((f) => TO_REVIEW.includes(f.properties.kind) && !f.properties.review)
+    .sort((a, b) => KIND[a.properties.kind].rank - KIND[b.properties.kind].rank);
+  const reviewed = features.filter((f) => f.properties.review).sort((a, b) => b.properties.review.reviewed_at.localeCompare(a.properties.review.reviewed_at));
   const matched = features.filter((f) => f.properties.kind === "matched").sort((a, b) => b.properties.length_m - a.properties.length_m);
   const undetected = pass.ais_geojson.features.filter((f) => f.properties.status === "undetected").length;
   fill(view, 
@@ -1430,8 +1451,12 @@ async function renderPass(id) {
     !pass.images.length && h("p", { class: "note" }, "Esta pasada no tiene imagen radar guardada."),
     h("h3", { class: "section-title" }, `Para revisar (${review.length})`),
     review.length
-      ? h("ul", { class: "list" }, review.map(detectionRow))
-      : h("p", { class: "note" }, "Nada que revisar: cada detección tiene AIS, es un objeto fijo o está donde no se recibe AIS."),
+      ? [
+          h("ul", { class: "list" }, review.map(detectionRow)),
+          h("p", { class: "note" }, state.user ? "Pulsa una para dar tu veredicto." : h("button", { class: "text-button", onclick: openLogin }, "Entra para dar tu veredicto")),
+        ]
+      : h("p", { class: "note" }, reviewed.length ? "Todo revisado." : "Nada que revisar: cada detección tiene AIS, es un objeto fijo o está donde no se recibe AIS."),
+    reviewed.length > 0 && [h("h3", { class: "section-title" }, `Revisadas (${reviewed.length})`), h("ul", { class: "list" }, reviewed.map(detectionRow))],
     pass.no_coverage > 0 &&
       h("p", { class: "note" }, `${plural(pass.no_coverage, "detección no tiene", "detecciones no tienen")} AIS en sitios donde aisstream oye poco: puede que emitieran y no les llegara. Pulsa una para ver cuánto se oía alrededor.`),
     h("h3", { class: "section-title" }, `Con AIS (${matched.length})`),
@@ -1610,6 +1635,12 @@ async function send(method, path, body) {
   } catch {
     // not JSON: fall through to the status
   }
+  if (res.status === 401 && path !== "/auth/login") {
+    state.user = null;
+    renderAccount();
+    openLogin();
+    throw new Error("entra primero");
+  }
   if (!res.ok) throw new Error(data?.error?.message ?? `HTTP ${res.status}`);
   return data.data;
 }
@@ -1671,6 +1702,157 @@ function watchBox(v) {
       ),
     );
     note.focus();
+  };
+  show();
+  return box;
+}
+
+// Signing in: verdicts and your watch list need it; looking does not. ---------------------------------
+
+async function loadSession() {
+  try {
+    state.user = (await api("/auth/session")).username;
+  } catch {
+    state.user = null;
+  }
+  renderAccount();
+}
+
+function renderAccount() {
+  const el = document.getElementById("account");
+  el.hidden = false;
+  el.textContent = state.user ? `${state.user} · Salir` : "Entrar";
+  el.title = state.user ? "Cerrar sesión en este navegador" : "Entrar para dar veredictos y cambiar tu lista de vigilancia";
+  el.onclick = state.user ? signOut : openLogin;
+}
+
+async function signOut() {
+  await send("POST", "/auth/logout").catch(() => {});
+  state.user = null;
+  renderAccount();
+  render();
+}
+
+function openLogin() {
+  document.getElementById("login")?.remove();
+  let remembered = "";
+  try {
+    remembered = localStorage.getItem("uatu.user") ?? "";
+  } catch {
+    // no storage: type it
+  }
+  const username = h("input", { class: "field", name: "username", autocomplete: "username", required: true, maxlength: 40, value: remembered });
+  const password = h("input", { class: "field", name: "password", type: "password", autocomplete: "current-password", required: true, maxlength: 128 });
+  const error = h("p", { class: "form-error", role: "alert" });
+  const dialog = h("dialog", { class: "login", id: "login", "aria-labelledby": "login-title" });
+  const submit = async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    try {
+      const session = await send("POST", "/auth/login", { username: username.value.trim(), password: password.value });
+      state.user = session.username;
+      try {
+        localStorage.setItem("uatu.user", session.username);
+      } catch {
+        // fine
+      }
+      dialog.close();
+      renderAccount();
+      render();
+    } catch (e) {
+      error.textContent = e.message === "Wrong username or password" ? "Usuario o contraseña incorrectos." : `No se pudo entrar: ${e.message}`;
+      password.select();
+    }
+  };
+  fill(
+    dialog,
+    h(
+      "form",
+      { class: "watch-form", onsubmit: submit },
+      h("h2", { class: "detail-title", id: "login-title" }, "Entrar"),
+      h("p", { class: "form-hint" }, "Para dar veredictos sobre las detecciones y cambiar tu lista de vigilancia. Para mirar no hace falta."),
+      h("label", { class: "field-label" }, "Usuario", username),
+      h("label", { class: "field-label" }, "Contraseña", password),
+      error,
+      h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary-button" }, "Entrar"), h("button", { type: "button", class: "text-button", onclick: () => dialog.close() }, "Cancelar")),
+    ),
+  );
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  (remembered ? password : username).focus();
+}
+
+/** In a detection's popup: your verdict, or the way to give it. */
+function reviewBox(p) {
+  const box = h("div", { class: "review" });
+  const show = () => fill(box, p.review ? given() : state.user ? choose() : signIn());
+  const signIn = () => h("button", { class: "text-button", onclick: openLogin }, "Entra para dar tu veredicto");
+  const given = () => {
+    const r = p.review;
+    const v = VERDICT[r.verdict];
+    const who = r.mmsi ? `${r.vessel_name ?? "MMSI"} ${r.vessel_name ? "" : r.mmsi}`.trim() : null;
+    return [
+      h("div", { class: "review-head" }, "Tu veredicto", tag("square", v.color, v.label)),
+      who && h("p", { class: "text" }, `Es ${who}.`),
+      r.note && h("p", { class: "text" }, `«${r.note}»`),
+      h("p", { class: "form-hint" }, `${r.reviewed_by ?? "Alguien"}, ${when(r.reviewed_at)}`),
+      state.user &&
+        h("div", { class: "form-actions" }, h("button", { class: "text-button", onclick: () => fill(box, choose(r.verdict)) }, "Cambiar"), h("button", { class: "text-button", onclick: remove }, "Quitar")),
+    ];
+  };
+  const choose = (current = null) => {
+    let verdict = current;
+    const mmsi = h("input", { class: "field", inputmode: "numeric", maxlength: 9, placeholder: "MMSI, si sabes cuál es", value: p.review?.mmsi ?? p.mmsi ?? p.suspected_mmsi ?? "" });
+    const note = h("input", { class: "field", maxlength: 500, placeholder: "Nota (opcional)", value: p.review?.note ?? "" });
+    const error = h("p", { class: "form-error", role: "alert" });
+    const options = h("div", { class: "verdicts" });
+    const details = h("div", { class: "watch-form" });
+    const pick = (key) => {
+      verdict = key;
+      fill(options, Object.entries(VERDICT).map(([k, v]) => h("button", { type: "button", class: "chip", "aria-pressed": String(k === verdict), onclick: () => pick(k) }, svg("square", v.color), v.label)));
+      fill(details, verdict && [VERDICT[verdict].vessel && mmsi, note]);
+    };
+    const save = async (event) => {
+      event.preventDefault();
+      if (!verdict) return void (error.textContent = "Elige un veredicto.");
+      const body = { verdict };
+      if (VERDICT[verdict].vessel && mmsi.value.trim()) {
+        if (!/^\d{1,9}$/.test(mmsi.value.trim())) return void (error.textContent = "El MMSI tiene hasta 9 cifras.");
+        body.mmsi = Number(mmsi.value.trim());
+      }
+      if (note.value.trim()) body.note = note.value.trim();
+      try {
+        p.review = await send("PUT", `/detections/${p.id}/review`, body);
+        reviewed();
+      } catch (e) {
+        error.textContent = `No se pudo guardar: ${e.message}`;
+      }
+    };
+    pick(verdict);
+    return h(
+      "form",
+      { class: "watch-form", onsubmit: save },
+      h("div", { class: "review-head" }, "Tu veredicto"),
+      options,
+      details,
+      error,
+      h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary-button" }, "Guardar"), current && h("button", { type: "button", class: "text-button", onclick: show }, "Cancelar")),
+    );
+  };
+  const remove = async () => {
+    try {
+      await send("DELETE", `/detections/${p.id}/review`);
+      p.review = null;
+      reviewed();
+    } catch (e) {
+      fill(box, given(), h("p", { class: "form-error", role: "alert" }, `No se pudo quitar: ${e.message}`));
+    }
+  };
+  // The detection's properties are the pass's: lists and counts follow.
+  const reviewed = () => {
+    show();
+    if (route.tab === "passes" && route.id === state.pass?.id) renderPass(route.id, { fit: false }).catch(() => {});
   };
   show();
   return box;
@@ -2168,6 +2350,7 @@ async function start() {
   watchMapLoading();
   document.getElementById("time-toggle").onclick = () => enterTime(Date.now() - HOUR);
   renderLayers();
+  loadSession();
   const [zones, land, satellite] = await Promise.all([api("/zones"), api("/map/land"), api("/map/satellite")]);
   api("/reports").then((reports) => {
     state.reports = reports;

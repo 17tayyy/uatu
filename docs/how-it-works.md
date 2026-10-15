@@ -91,6 +91,13 @@ minimising the sum of distances. Each distance is measured in units of that ship
 beyond tolerance are forbidden. That is the classic assignment problem, solved exactly by the
 Hungarian method (`scipy.optimize.linear_sum_assignment`).
 
+**Verdicts.** No rule tells a vessel without AIS from sea clutter or a gap in reception with
+certainty. On the dashboard, signed in, each detection gets a verdict: a vessel without AIS, a
+vessel with AIS the pairing missed, a reception gap, or not a vessel. They empty the list of what
+is left to look at, and they are the labels a classifier will learn from. A verdict is kept by
+scene and place too: processing a scene again (after a change to the pairing) replaces its
+detections, and the verdict moves to the new detection in the same place.
+
 ## 6. No AIS: dark, or deaf?
 
 A detection left without AIS is not yet a dark vessel. Uatu may simply not hear AIS there. The

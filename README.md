@@ -306,7 +306,10 @@ coast or one zone at a time (the selector in the header):
 - **Pasadas**: every Sentinel-1 pass since AIS recording began, with the radar image laid on
   the map and each detection coloured by what AIS says about it (paired, where AIS is barely
   received, a fixed object, or a candidate with no AIS). Candidates come first, with the vessel
-  that went silent and could be there.
+  that went silent and could be there. Signed in, you give each detection a verdict (a vessel
+  without AIS, a vessel with AIS, a reception gap, not a vessel; which vessel, a note): "Para
+  revisar" keeps only those without one, and a pass counts what is left. The verdicts are stored
+  (`detection_reviews`) as the labels of a future classifier, and survive processing a scene again.
 - **Eventos**: the AIS events (gaps, encounters, loitering, vessels over cables, sanctioned
   vessels...) of the last 24 h to 7 days.
 - **Barcos**: the vessels heard in the last hour (sanctioned and watchlisted ones first), search
@@ -347,11 +350,20 @@ the watched area (its edge dashed), and from [Natural Earth](https://www.natural
 satellite's frame, which is tilted (Sentinel-1 flies a near-polar orbit and looks sideways): a pass
 can leave part of the area without image. It is saved in Web Mercator, the projection web maps draw
 in, so that each ship's echo lands under its detection.
-The API behind it is read-only, under `/api/v1` (documented at `/docs`), but for your watch list
-(`/api/v1/watches`), which it writes only from the dashboard's own page (the Origin header).
+The API behind it is read-only, under `/api/v1` (documented at `/docs`), but for the verdicts and
+your watch list, which need you signed in ("Entrar" in the header), and only from the dashboard's
+own page (the Origin header). A user and its password (argon2) are set on the server, and setting
+a new one signs that user out everywhere:
 
-**It has no authentication: keep it on the local network, never forward the port.** Anyone on that
-network can read everything and change the watch list.
+```sh
+docker compose exec web uatu-web set-password            # user oscar; --user NAME for another
+```
+
+A session lasts 30 days in an HttpOnly, SameSite=Strict cookie; the database keeps only a hash of
+it. Ten sign-in attempts per 10 minutes from one address, right or wrong.
+
+**Reading needs no sign-in: keep the dashboard on the local network, never forward the port.** It
+is served over plain HTTP there, so the password crosses the local network unencrypted.
 
 Scenes processed before the dashboard existed have no radar overlay
 (`backscatter.png` + `backscatter.json` in the scene's output folder); the worker writes it for
