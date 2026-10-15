@@ -1,92 +1,95 @@
-// Small building blocks shared by every panel.
-import { ChevronRight } from "lucide-react";
-import { type ButtonHTMLAttributes, type ReactNode, useId, useState } from "react";
-import { Shape, type ShapeKind } from "./Shape";
+// Small building blocks shared by every panel, after Linear.
+import { ChevronDown } from "lucide-react";
+import { type ButtonHTMLAttributes, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import s from "./ui.module.css";
 
-export { Shape } from "./Shape";
-
-/** A status marker: the shape in its colour beside a label. */
-export function Tag({ shape = "circle", color, children }: { shape?: ShapeKind; color: string; children: ReactNode }) {
-  return (
-    <span className={s.tag}>
-      <Shape kind={shape} color={color} />
-      {children}
-    </span>
-  );
-}
-
-export function Pill({ children, color }: { children: ReactNode; color?: string }) {
-  return (
-    <span className={s.pill}>
-      {color && <Shape kind="circle" color={color} size={9} />}
-      {children}
-    </span>
-  );
-}
-
-export function Badge({ children }: { children: ReactNode }) {
-  return <span className={s.badge}>{children}</span>;
-}
+export { Glyph, Shape } from "./Shape";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "default" | "primary" | "ghost";
   size?: "default" | "small";
+  icon?: boolean; // square, an icon only
 };
 
-export function Button({ variant = "default", size = "default", className, ...props }: ButtonProps) {
-  const classes = [s.button, variant !== "default" && s[variant], size === "small" && s.small, className];
+export function Button({ variant = "default", size = "default", icon, className, ...props }: ButtonProps) {
+  const classes = [
+    s.button,
+    variant !== "default" && s[variant],
+    size === "small" && s.small,
+    icon && s.icon,
+    className,
+  ];
   return <button type="button" {...props} className={classes.filter(Boolean).join(" ")} />;
 }
 
-export function LinkButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button type="button" {...props} className={[s.linkButton, props.className].filter(Boolean).join(" ")} />;
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className={s.kbd}>{children}</kbd>;
 }
 
-/** A titled part of a panel; collapsible when given `collapsed` (its initial state). */
-export function Section({
+/** A panel's top bar: where you are (breadcrumbs) and what you can do there. */
+export function Header({ crumbs, actions }: { crumbs: [string, (() => void) | null][]; actions?: ReactNode }) {
+  return (
+    <header className={s.header}>
+      <nav className={s.crumbs} aria-label="Ruta">
+        {crumbs.map(([label, go], i) => {
+          const last = i === crumbs.length - 1;
+          return (
+            <span key={label} style={{ display: "contents" }}>
+              {last ? (
+                <span className={s.crumbCurrent}>{label}</span>
+              ) : go ? (
+                <button type="button" className={s.crumb} onClick={go}>
+                  {label}
+                </button>
+              ) : (
+                <span className={s.crumb}>{label}</span>
+              )}
+              {!last && <span className={s.crumbSep}>/</span>}
+            </span>
+          );
+        })}
+      </nav>
+      {actions && <div className={s.actions}>{actions}</div>}
+    </header>
+  );
+}
+
+export function Toolbar({ children }: { children: ReactNode }) {
+  return <div className={s.toolbar}>{children}</div>;
+}
+
+/** A list's section: a sticky bar with a count, collapsible. */
+export function Group({
   title,
+  icon,
   count,
-  collapsed,
-  action,
+  right,
+  collapsed = false,
   children,
 }: {
   title: string;
+  icon?: ReactNode;
   count?: number;
+  right?: ReactNode;
   collapsed?: boolean;
-  action?: ReactNode;
   children: ReactNode;
 }) {
-  const [closed, setClosed] = useState(collapsed ?? false);
+  const [closed, setClosed] = useState(collapsed);
   const id = useId();
-  const head = (
-    <>
-      {title}
-      {count != null && <span className={s.sectionCount}>{count}</span>}
-    </>
-  );
-  if (collapsed == null) {
-    return (
-      <section className={s.section}>
-        <div className={s.sectionHead}>
-          {head}
-          {action && <span style={{ marginLeft: "auto" }}>{action}</span>}
-        </div>
-        {children}
-      </section>
-    );
-  }
   return (
-    <section className={`${s.section} ${closed ? "" : s.open}`}>
+    <section className={closed ? s.closed : undefined}>
       <button
         type="button"
-        className={s.sectionHead}
+        className={s.group}
         aria-expanded={!closed}
         aria-controls={id}
         onClick={() => setClosed(!closed)}
       >
-        {head}
-        <ChevronRight size={14} className={s.chevron} />
+        <ChevronDown size={13} className={s.chevron} />
+        {icon}
+        {title}
+        {count != null && <span className={s.groupCount}>{count}</span>}
+        {right && <span className={s.groupRight}>{right}</span>}
       </button>
       <div id={id} hidden={closed}>
         {children}
@@ -95,10 +98,11 @@ export function Section({
   );
 }
 
-export function KeyValues({ rows }: { rows: [string, ReactNode][] }) {
+/** Label and value, one under the other: Linear's issue properties. */
+export function Properties({ rows }: { rows: [string, ReactNode][] }) {
   const shown = rows.filter(([, v]) => v != null && v !== "" && v !== false);
   return (
-    <dl className={s.kv}>
+    <dl className={s.properties}>
       {shown.map(([k, v]) => (
         <div key={k} style={{ display: "contents" }}>
           <dt>{k}</dt>
@@ -109,54 +113,41 @@ export function KeyValues({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-export function Callout({
-  tone,
-  title,
-  icon,
-  children,
-}: {
-  tone: string;
-  title: ReactNode;
-  icon?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className={s.callout} style={{ "--tone": tone } as React.CSSProperties}>
-      <div className={s.calloutTitle}>
-        {icon}
-        {title}
-      </div>
-      {children}
-    </div>
-  );
+/** Data (times, MMSI, dB...) in Geist Mono. */
+export function mono(text: ReactNode) {
+  return <span className="mono">{text}</span>;
 }
 
 export function Note({ children }: { children: ReactNode }) {
   return <p className={s.note}>{children}</p>;
 }
 
-export function Loading({ children = "Cargando…" }: { children?: ReactNode }) {
+export function Loading() {
   return (
-    <div className={s.state} role="status">
+    <div className={s.state} role="status" aria-label="Cargando">
       <span className={s.spinner} />
-      {children}
     </div>
   );
 }
 
 export function Spinner() {
-  return <span className={`${s.spinner} ${s.spinnerSmall}`} />;
+  return <span className={s.spinner} />;
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className={s.state}>{children}</div>;
+export function Empty({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+  return (
+    <div className={s.state}>
+      {icon}
+      {children}
+    </div>
+  );
 }
 
 export function ErrorNote({ error }: { error: unknown }) {
   return <div className={s.state}>No se pudo cargar: {error instanceof Error ? error.message : String(error)}</div>;
 }
 
-export function Segmented<T extends string | number>({
+export function ToggleGroup<T extends string | number>({
   label,
   options,
   value,
@@ -168,12 +159,12 @@ export function Segmented<T extends string | number>({
   onChange: (value: T) => void;
 }) {
   return (
-    <fieldset className={s.segmented} aria-label={label}>
+    <fieldset className={s.toggleGroup} aria-label={label}>
       {options.map(([v, text]) => (
         <button
           type="button"
           key={String(v)}
-          className={s.segment}
+          className={s.toggleItem}
           aria-pressed={v === value}
           onClick={() => onChange(v)}
         >
@@ -184,6 +175,52 @@ export function Segmented<T extends string | number>({
   );
 }
 
+/** A menu that opens from a button and closes on a click outside or Esc. */
+export function Popover({
+  trigger,
+  children,
+  align = "start",
+  side = "bottom",
+}: {
+  trigger: (props: { open: boolean; toggle: () => void }) => ReactNode;
+  children: (close: () => void) => ReactNode;
+  align?: "start" | "end";
+  side?: "bottom" | "top" | "right";
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  const place: React.CSSProperties =
+    side === "top"
+      ? { bottom: "calc(100% + 6px)", [align === "end" ? "right" : "left"]: 0 }
+      : side === "right"
+        ? { left: "calc(100% + 6px)", bottom: 0 }
+        : { top: "calc(100% + 6px)", [align === "end" ? "right" : "left"]: 0 };
+  return (
+    <div className={s.popoverWrap} ref={wrap}>
+      {trigger({ open, toggle: () => setOpen(!open) })}
+      {open && (
+        <div className={s.popover} style={place}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export const menu = { item: s.menuItem, check: s.menuCheck, label: s.menuLabel, sep: s.menuSep };
 export const fieldClass = s.field;
 export const labelClass = s.label;
 export const formErrorClass = s.formError;

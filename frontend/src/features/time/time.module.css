@@ -1,212 +1,173 @@
 .context {
   position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 10px;
+  left: 10px;
   z-index: 3;
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 300px);
-  padding: 6px 8px 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--overlay);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(6px);
-  font-size: 12.5px;
+  max-width: calc(100% - 320px);
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-2);
+  background: var(--bg-3);
+  box-shadow: var(--pop);
   color: var(--text-2);
+  font-size: 12.5px;
   white-space: nowrap;
 }
-.context span {
+
+.contextText {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .context button {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--surface-3);
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-1);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
-  font-weight: 550;
   font-size: 12px;
-}
-.context button:hover {
-  background: var(--border-strong);
+  font-weight: 500;
 }
 
-.open {
-  position: absolute;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 36px;
-  padding: 0 16px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--overlay);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(6px);
-  font-size: 13px;
-  font-weight: 550;
-}
-.open:hover {
-  border-color: var(--border-strong);
+.context button:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .bar {
   position: absolute;
-  left: 16px;
-  right: 70px;
-  bottom: 16px;
-  z-index: 3;
-  display: grid;
-  gap: 6px;
-  padding: 10px 14px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  background: var(--overlay);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(6px);
-  animation: fade-in 0.16s ease-out;
-}
-.top {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  height: 52px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+  animation: rise 0.12s ease-out;
 }
-.play {
+
+.when {
   display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: var(--text);
-  color: var(--bg);
+  min-width: 128px;
+  line-height: 1.25;
 }
-.play:hover {
-  background: #fff;
-}
-.step {
-  padding: 4px 8px;
-  border-radius: var(--radius-s);
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 550;
-}
-.step:hover {
-  background: var(--surface-3);
-  color: var(--text);
-}
+
 .label {
-  min-width: 120px;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-.grow {
-  flex: 1;
-}
-.speed {
-  height: 28px;
-  padding: 0 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-  background: var(--surface-2);
-  font-size: 12px;
-}
-.close {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-s);
-  color: var(--text-3);
-}
-.close:hover {
-  background: var(--surface-3);
   color: var(--text);
+  font-size: 13px;
+}
+
+.count {
+  color: var(--text-4);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.count[data-warning] {
+  color: var(--yellow);
 }
 
 .track {
   position: relative;
-  height: 22px;
+  flex: 1;
+  height: 24px;
+  min-width: 80px;
 }
+
 .slider {
   position: absolute;
   inset: 0;
   width: 100%;
   margin: 0;
-  accent-color: var(--text);
+  appearance: none;
   background: transparent;
 }
+
+.slider::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-2);
+}
+
+.slider::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line-2);
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 3px var(--bg-1);
+}
+
+.slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 3px var(--bg-1);
+}
+
 .outage {
   position: absolute;
-  top: 7px;
-  height: 8px;
-  border-radius: 2px;
-  background: repeating-linear-gradient(135deg, rgba(229, 72, 77, 0.5) 0 3px, transparent 3px 6px);
-  pointer-events: auto;
+  top: 9px;
+  height: 6px;
+  border-radius: 1px;
+  background: repeating-linear-gradient(135deg, rgba(235, 87, 87, 0.55) 0 2px, transparent 2px 4px);
 }
+
 .passTick {
   position: absolute;
-  top: 1px;
+  top: 2px;
   z-index: 1;
-  width: 3px;
-  height: 9px;
-  margin-left: -1.5px;
-  border-radius: 2px;
+  width: 2px;
+  height: 7px;
+  margin-left: -1px;
+  border-radius: 1px;
   background: var(--blue);
-  opacity: 0.9;
 }
+
 .passTick:hover {
-  transform: scaleY(1.4);
-  opacity: 1;
+  height: 10px;
 }
-.count {
-  color: var(--text-3);
-  font-size: 12px;
-}
-.count[data-warning] {
-  color: var(--warning);
+
+.speed {
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font: 11.5px var(--mono);
 }
 
 @media (max-width: 760px) {
   .context {
-    max-width: calc(100% - 24px);
-    top: 56px;
+    max-width: calc(100% - 100px);
   }
-  .bar {
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
-  }
-  .label {
+  .when {
     min-width: 0;
-    font-size: 13px;
   }
-  .step {
+  .count {
     display: none;
   }
-}
-
-/* With the inspector open: centred on the map left free (on a phone, the inspector is a sheet). */
-@media (min-width: 761px) {
-  :global([data-inspector]) .context,
-  :global([data-inspector]) .open {
-    left: calc(50% - var(--inspector) / 2 - 12px);
-  }
-
-  :global([data-inspector]) .context {
-    max-width: calc(100% - var(--inspector) - 160px);
-  }
-
-  :global([data-inspector]) .bar {
-    right: calc(var(--inspector) + 24px);
+  .bar > button:nth-of-type(2),
+  .bar > button:nth-of-type(3) {
+    display: none;
   }
 }

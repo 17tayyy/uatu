@@ -1,42 +1,51 @@
-/* Uatu's look: a dark operations console. Colours as in lib/constants.ts (the map needs literals). */
+/* Uatu's look, after Linear: near-black, hairline borders, dense rows, one accent; data in Geist Mono. */
 :root {
   color-scheme: dark;
 
-  --bg: #0b0d10;
-  --surface-1: #12151a;
-  --surface-2: #181c22;
-  --surface-3: #20252d;
-  --overlay: rgba(18, 21, 26, 0.92);
-  --border: #262b33;
-  --border-strong: #353c46;
+  --bg: #08090a;
+  --bg-1: #0c0d0f; /* sidebar, panels */
+  --bg-2: #111214; /* group headers, inputs */
+  --bg-3: #17181b; /* popovers, menus */
+  --hover: rgba(255, 255, 255, 0.035);
+  --active: rgba(255, 255, 255, 0.065);
+  --line: rgba(255, 255, 255, 0.065);
+  --line-2: rgba(255, 255, 255, 0.1);
 
-  --text: #e8eaed;
-  --text-2: #b4bac3;
-  --text-3: #7d8590;
+  --text: #f7f8f8;
+  --text-2: #c9ced6;
+  --text-3: #8a8f98;
+  --text-4: #62666d;
 
-  --blue: #4c8dff;
-  --blue-soft: rgba(76, 141, 255, 0.14);
-  --good: #3fb950;
-  --warning: #f5b83d;
-  --serious: #f0883e;
-  --critical: #e5484d;
-  --critical-soft: rgba(229, 72, 77, 0.12);
-  --fixed: #3a3f47;
+  --accent: #5e6ad2;
+  --accent-hover: #6c77da;
+  --accent-soft: rgba(94, 106, 210, 0.18);
 
-  --radius-s: 6px;
-  --radius: 10px;
-  --radius-l: 14px;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  --red: #eb5757;
+  --orange: #f2994a;
+  --yellow: #f2c94c;
+  --green: #4cb782;
+  --blue: #4ea7fc;
+  --gray: #8a8f98;
 
-  --rail: 60px;
-  --panel: 380px;
-  --inspector: 380px;
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --pop: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 10px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
 
-  --font: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sidebar: 220px;
+  --list: 372px;
+  --inspector: 392px;
+  --bar: 44px;
+
+  --font: "Inter Variable", -apple-system, "Segoe UI", sans-serif;
+  --mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.45;
-  font-feature-settings: "cv11", "ss01";
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: -0.006em;
+  font-feature-settings: "cv01", "cv08", "ss03";
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }

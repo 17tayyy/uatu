@@ -51,9 +51,7 @@ export function LoginDialog() {
         <h2 id="login-title" className={s.title}>
           Entrar
         </h2>
-        <p className={s.hint}>
-          Para dar veredictos sobre las detecciones y cambiar tu lista de vigilancia. Para mirar no hace falta.
-        </p>
+        <p className={s.hint}>Para dar veredictos y cambiar tu lista de vigilancia.</p>
         <label className={labelClass}>
           Usuario
           <input
@@ -84,11 +82,11 @@ export function LoginDialog() {
           {error}
         </p>
         <div className={s.actions}>
-          <Button type="submit" variant="primary" disabled={login.isPending}>
-            Entrar
-          </Button>
           <Button variant="ghost" onClick={() => setOpen(false)}>
             Cancelar
+          </Button>
+          <Button type="submit" variant="primary" disabled={login.isPending}>
+            Entrar
           </Button>
         </div>
       </form>

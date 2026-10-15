@@ -45,6 +45,7 @@ interface Ui {
   vesselQuery: string;
   lastVessel: { mmsi: number; name: string } | null;
   layersOpen: boolean;
+  paletteOpen: boolean;
   reviewList: ReviewItem[];
 
   setZone(zone: string): void;
@@ -62,6 +63,7 @@ interface Ui {
   setVesselQuery(q: string): void;
   setLastVessel(v: Ui["lastVessel"]): void;
   setLayersOpen(open: boolean): void;
+  setPaletteOpen(open: boolean): void;
   setReviewList(list: ReviewItem[]): void;
   /** Open a detection: its pass on the map, the detection in the inspector, the map on it. */
   openDetection(item: ReviewItem): void;
@@ -84,7 +86,8 @@ export const useUi = create<Ui>((set, get) => ({
   eventFilter: { minSeverity: 2, hours: 48 },
   vesselQuery: "",
   lastVessel: null,
-  layersOpen: !matchMedia("(max-width: 760px)").matches,
+  layersOpen: false,
+  paletteOpen: false,
   reviewList: [],
 
   setZone: (zone) => {
@@ -121,6 +124,7 @@ export const useUi = create<Ui>((set, get) => ({
   setVesselQuery: (vesselQuery) => set({ vesselQuery }),
   setLastVessel: (lastVessel) => set({ lastVessel }),
   setLayersOpen: (layersOpen) => set({ layersOpen }),
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setReviewList: (reviewList) => set({ reviewList }),
   openDetection: (item) => {
     get().showPass(item.passId);

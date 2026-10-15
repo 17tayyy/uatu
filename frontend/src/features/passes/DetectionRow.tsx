@@ -1,22 +1,20 @@
-// A radar detection in a list: what it reads as, your verdict, and who it may be.
+// A radar detection in a list: what it reads as, who it may be, your verdict.
 import type { Detection } from "../../api/types";
 import { useUi } from "../../app/store";
 import { type DetectionKind, KIND, VERDICT, type VerdictKey } from "../../lib/constants";
-import { duration, fmtTime, metres } from "../../lib/format";
+import { fmtTime, metres } from "../../lib/format";
 import type { LngLat } from "../../lib/geo";
-import { Tag } from "../../ui";
+import { Glyph } from "../../ui";
 import p from "../panel.module.css";
 
 export function DetectionRow({
   detection: d,
   passId,
   lngLat,
-  extra,
 }: {
   detection: Detection;
   passId: string;
   lngLat: LngLat;
-  extra?: string;
 }) {
   const selected = useUi((u) => u.selection?.kind === "detection" && u.selection.id === d.id);
   const openDetection = useUi((u) => u.openDetection);
@@ -24,34 +22,32 @@ export function DetectionRow({
   const verdict = d.review ? VERDICT[d.review.verdict as VerdictKey] : null;
   const who =
     d.kind === "matched"
-      ? `${d.vessel_name ?? `MMSI ${d.mmsi}`} · a ${metres(d.distance_m ?? 0)}`
+      ? (d.vessel_name ?? `MMSI ${d.mmsi}`)
       : d.suspected_mmsi
-        ? `Posible: ${d.suspect_name ?? `MMSI ${d.suspected_mmsi}`}, ${duration(d.suspect_silent_minutes ?? 0)} sin emitir`
-        : null;
-  const facts = [`${Math.round(d.length_m)} m`, d.contrast_db != null && `contraste ${d.contrast_db} dB`, extra];
+        ? `¿${d.suspect_name ?? d.suspected_mmsi}?`
+        : kind.label;
+  const meta = [
+    `${Math.round(d.length_m)} m`,
+    d.kind === "matched" && d.distance_m != null ? `a ${metres(d.distance_m)}` : null,
+    d.kind !== "matched" && d.suspected_mmsi ? kind.label.toLowerCase() : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <li>
       <button
         type="button"
         className={p.row}
         aria-current={selected || undefined}
-        onClick={() => {
-          openDetection({ id: d.id, passId, lngLat });
-        }}
+        onClick={() => openDetection({ id: d.id, passId, lngLat })}
       >
-        <div className={p.rowTop}>
-          <Tag color={kind.color}>{kind.label}</Tag>
-          {verdict && (
-            <Tag shape="square" color={verdict.color}>
-              {verdict.label}
-            </Tag>
-          )}
-          <span className={p.grow} />
-          <span className={p.rowTime}>{fmtTime.format(new Date(d.seen_at))}</span>
-        </div>
-        {who && <div className={p.rowText}>{who}</div>}
-        {d.review?.note && <div className={p.rowText}>«{d.review.note}»</div>}
-        <div className={p.rowMeta}>{facts.filter(Boolean).join(" · ")}</div>
+        <Glyph kind={kind.glyph} color={kind.color} title={kind.label} />
+        <span className={p.main}>
+          <span className={p.title}>{who}</span>
+          <span className={p.meta}>{meta}</span>
+        </span>
+        {verdict && <Glyph kind={verdict.glyph} color={verdict.color} title={verdict.label} />}
+        <span className={p.time}>{fmtTime.format(new Date(d.seen_at))}</span>
       </button>
     </li>
   );

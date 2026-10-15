@@ -1,162 +1,25 @@
 .app {
   display: grid;
-  grid-template-columns: var(--rail) var(--panel) 1fr;
+  grid-template-columns: var(--sidebar) var(--list) 1fr;
   height: 100dvh;
   background: var(--bg);
 }
 
-/* --- rail ---------------------------------------------------------------------------------- */
-
-.rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 0;
-  border-right: 1px solid var(--border);
-  background: var(--bg);
-  z-index: 3;
-}
-
-.logo {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  margin-bottom: 14px;
-  border: 2px solid var(--text);
-  border-radius: 50%;
-}
-.logo span {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--critical);
-}
-
-.railItem {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 3px;
-  width: 52px;
-  padding: 8px 0 6px;
-  border-radius: var(--radius);
-  color: var(--text-3);
-  text-decoration: none;
-  font-size: 10.5px;
-  font-weight: 550;
-  transition:
-    background 0.12s,
-    color 0.12s;
-}
-.railItem:hover {
-  background: var(--surface-1);
-  color: var(--text-2);
-}
-.railItem[aria-current="page"] {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.railItem[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  left: -4px;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--text);
-}
-.railLabel {
-  max-width: 50px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.railBadge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-}
-.railDot {
-  position: absolute;
-  top: 7px;
-  right: 13px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--critical);
-  box-shadow: 0 0 0 2px var(--bg);
-}
-.railFoot {
-  display: grid;
-  gap: 4px;
-  margin-top: auto;
-}
-
-.account {
-  position: relative;
-}
-
-.menu {
-  position: absolute;
-  left: calc(100% + 8px);
-  bottom: 0;
-  z-index: 10;
-  display: grid;
-  gap: 2px;
-  min-width: 180px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  box-shadow: var(--shadow);
-}
-
-.menuWho {
-  padding: 6px 8px;
-  color: var(--text-3);
-  font-size: 12.5px;
-}
-
-.menuWho strong {
-  color: var(--text);
-}
-
-.menuItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
-  border-radius: var(--radius-s);
-  font-size: 13px;
-  text-align: left;
-}
-
-.menuItem:hover {
-  background: var(--surface-3);
-}
-
-/* --- panel --------------------------------------------------------------------------------- */
-
-.panel {
-  display: flex;
-  flex-direction: column;
+.list {
+  min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface-1);
+  border-right: 1px solid var(--line);
+  background: var(--bg-1);
   z-index: 2;
 }
-.panelBody {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  animation: fade-in 0.18s ease-out;
-}
 
-/* --- splash -------------------------------------------------------------------------------- */
+/* The map, and the inspector docked to its right when something is open. */
+.stage {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  min-width: 0;
+  min-height: 0;
+}
 
 .splash {
   position: fixed;
@@ -165,86 +28,61 @@
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 10px;
+  gap: 14px;
   background: var(--bg);
 }
-.splash .logo {
-  width: 56px;
-  height: 56px;
-  border-width: 3px;
-  margin: 0;
-  animation: spin 3s linear infinite;
+
+.splashLogo {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--text);
+  border-radius: 50%;
+  animation: spin 2.4s linear infinite;
 }
-.splash .logo span {
-  width: 14px;
-  height: 14px;
+
+.splashLogo span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--red);
 }
-.splashName {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
+
 .splashText {
   color: var(--text-3);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
-/* --- phone: the map on top, the panel as a sheet below, the rail at the bottom ---------------- */
-
-@media (max-width: 760px) {
-  .menu {
-    left: auto;
-    right: 0;
-    bottom: calc(100% + 8px);
+@media (max-width: 1360px) {
+  .app {
+    grid-template-columns: 52px var(--list) 1fr;
   }
+}
 
+/* Phone: the map on top, the list as a sheet below, the sections at the bottom. */
+@media (max-width: 760px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: 1fr 45dvh 58px;
+    grid-template-rows: 1fr 44dvh auto;
   }
-  .rail {
+  .app > nav {
     grid-row: 3;
-    flex-direction: row;
-    justify-content: space-around;
-    gap: 0;
-    padding: 0 4px;
-    border-right: 0;
-    border-top: 1px solid var(--border);
   }
-  .logo,
-  .railFoot a {
-    display: none;
-  }
-  .railFoot {
-    margin: 0;
-    display: contents;
-  }
-  .railItem {
-    width: auto;
-    flex: 1;
-    padding: 6px 0;
-  }
-  .railItem[aria-current="page"]::before {
-    left: 20%;
-    right: 20%;
-    top: -1px;
-    bottom: auto;
-    width: auto;
-    height: 3px;
-    border-radius: 0 0 3px 3px;
-  }
-  .panel {
+  .list {
     grid-row: 2;
     border-right: 0;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--line);
   }
-  .app > :nth-child(3) {
+  .stage {
     grid-row: 1;
+    grid-template-columns: 1fr;
+    position: relative;
   }
-  .app[data-inspector] .panel {
+  .app[data-inspector] .list {
     display: none;
   }
   .app[data-inspector] {
-    grid-template-rows: 1fr 0 58px;
+    grid-template-rows: 1fr 0 auto;
   }
 }

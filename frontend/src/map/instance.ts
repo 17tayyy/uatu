@@ -25,11 +25,22 @@ export function setData(source: string, data: unknown): void {
   );
 }
 
+/** Once the page has laid out what changed with it (the inspector opening narrows the map, and a resize
+ * stops a camera animation half way): two frames on, with the map's size measured again. */
+function afterLayout(move: (map: MapLibre) => void): void {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      if (!instance) return;
+      instance.resize();
+      move(instance);
+    }),
+  );
+}
+
 export function flyTo(lngLat: LngLat, zoom = 11): void {
-  if (!instance) return;
-  instance.flyTo({ center: lngLat, zoom: Math.max(instance.getZoom(), zoom), duration: 700 });
+  afterLayout((map) => map.flyTo({ center: lngLat, zoom: Math.max(map.getZoom(), zoom), duration: 700 }));
 }
 
 export function fitBounds(bounds: LngLatBoundsLike, maxZoom = 11): void {
-  instance?.fitBounds(bounds, { padding: 48, maxZoom, duration: 600 });
+  afterLayout((map) => map.fitBounds(bounds, { padding: 48, maxZoom, duration: 600 }));
 }

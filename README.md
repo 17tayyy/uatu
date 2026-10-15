@@ -300,9 +300,11 @@ ORDER BY d.seen_at DESC;
 
 ## Dashboard
 
-A map with a rail of sections and their panel at `http://<host>:8000` (the `web` service), in
-Spanish, over the whole coast or one zone at a time (the selector at the top of the panel). What is
-picked on the map or in a list opens in an inspector over the map's right side.
+A map with a sidebar of sections and their list at `http://<host>:8000` (the `web` service), in
+Spanish, over the whole coast or one zone at a time (the switcher at the top of the sidebar). What is
+picked on the map or in a list opens in an inspector beside the map. `⌘K` (or `Ctrl+K`) finds any
+vessel, goes to a pass or a section, switches a layer or the zone. The look follows Linear's: dense
+rows, hairlines, one accent; data in Geist Mono.
 
 - **Pasadas**: every Sentinel-1 pass since AIS recording began, with the radar image laid on
   the map and each detection coloured by what AIS says about it (paired, where AIS is barely
