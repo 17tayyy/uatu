@@ -98,7 +98,7 @@ const LAYERS = {
   recent: { label: "Radar reciente", hint: "7 días", on: true, ids: ["radar-recent"] },
   unimaged: { label: "Rayar lo que no ve la pasada", on: true, ids: ["unimaged"] },
   radar: { label: "Imagen radar", on: true, ids: ["radar-0", "radar-1", "radar-2", "radar-3"] }, // one per frame
-  detections: { label: "Detecciones radar", on: true, ids: ["footprint", "detections"] },
+  detections: { label: "Detecciones radar", on: true, ids: ["footprint", "pass-links", "detections"] },
   passAis: { label: "AIS en la pasada", on: false, ids: ["pass-ais"] },
   vessels: { label: "Barcos en vivo", on: true, ids: ["vessels-moving", "vessels-stopped"] },
   events: { label: "Eventos AIS", on: true, ids: ["events"] },
@@ -201,6 +201,7 @@ function tag(shape, color, label) {
 
 const dayKey = new Intl.DateTimeFormat("en-CA", { timeZone: TZ });
 const fmtTime = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
+const fmtSeconds = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const fmtDay = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, day: "numeric", month: "short" });
 const fmtFull = new Intl.DateTimeFormat("es-ES", { timeZone: TZ, dateStyle: "long", timeStyle: "short" });
 const fmtNumber = new Intl.NumberFormat("es-ES");
@@ -208,13 +209,13 @@ const fmtMonth = new Intl.DateTimeFormat("es-ES", { timeZone: "UTC", month: "sho
 const month = (isoDate) => fmtMonth.format(new Date(isoDate));
 const capitalise = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
-function when(iso) {
+function when(iso, seconds = false) {
   const d = new Date(iso);
   const today = dayKey.format(new Date());
   const yesterday = dayKey.format(new Date(Date.now() - 86_400_000));
   const day = dayKey.format(d);
   const prefix = day === today ? "hoy" : day === yesterday ? "ayer" : fmtDay.format(d);
-  return `${prefix} ${fmtTime.format(d)}`;
+  return `${prefix} ${(seconds ? fmtSeconds : fmtTime).format(d)}`;
 }
 
 function ago(iso) {
@@ -414,7 +415,7 @@ function addLayers() {
   ]) {
     map.addImage(name, image, { pixelRatio: 2 });
   }
-  for (const id of ["land", "zones", "unimaged", "coverage", "density", "infra", "footprint", "detections", "pass-ais", "events", "time-trails", "vessels", "track", "link", "selected"]) {
+  for (const id of ["land", "zones", "unimaged", "coverage", "density", "infra", "footprint", "pass-links", "detections", "pass-ais", "events", "time-trails", "vessels", "track", "link", "selected"]) {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
@@ -500,6 +501,15 @@ function addLayers() {
     source: "track",
     layout: { "line-join": "round", "line-cap": "round" },
     paint: { "line-color": C.ink, "line-width": 1.5, "line-opacity": 0.75 },
+  });
+  // Each paired echo to where its vessel was by AIS: moving towards or away from the radar, a vessel
+  // shows shifted along the satellite's track (the Doppler effect), hundreds of metres in the Strait.
+  map.addLayer({
+    id: "pass-links",
+    type: "line",
+    source: "pass-links",
+    minzoom: 9,
+    paint: { "line-color": C.ink2, "line-width": 1, "line-opacity": 0.7, "line-dasharray": [2, 2] },
   });
   map.addLayer({
     id: "pass-ais",
@@ -806,6 +816,8 @@ function detectionPopup(p, lngLat) {
     h("p", { class: "popup-title" }, "Detección radar"),
     text && h("p", { class: "text" }, text),
     ais && h("p", { class: "text" }, "La línea discontinua lleva a donde estaba ese barco según su AIS."),
+    Math.abs(p.doppler_shift_m ?? 0) >= 50 &&
+      h("p", { class: "text" }, `El radar ve desplazados a lo largo de su traza los barcos que se acercan o se alejan de él (efecto Doppler): a este, unos ${metres(Math.abs(p.doppler_shift_m))}. Por eso el eco no cae justo sobre su AIS.`),
     kv(rows),
     reception,
     actions.length && h("div", { class: "actions" }, actions),
@@ -1261,6 +1273,27 @@ async function renderPasses() {
   );
 }
 
+/** Lines from each paired echo to its vessel's AIS position at that moment. */
+function passLinks(pass) {
+  const features = pass.detections_geojson.features
+    .filter((f) => f.properties.ais_lon != null)
+    .map((f) => ({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: [f.geometry.coordinates, [f.properties.ais_lon, f.properties.ais_lat]] },
+      properties: {},
+    }));
+  return { type: "FeatureCollection", features };
+}
+
+/** When the radar looked at the pass's sea: the middle of its detections' times (a frame takes ~25 s). */
+function passMoment(pass) {
+  if (pass.moment == null) {
+    const times = pass.detections_geojson.features.map((f) => new Date(f.properties.seen_at).getTime()).sort((a, b) => a - b);
+    pass.moment = times.length ? times[Math.floor(times.length / 2)] : new Date(pass.acquired_at).getTime();
+  }
+  return pass.moment;
+}
+
 async function loadPass(id) {
   if (state.pass?.id === id) return state.pass;
   const pass = await api(`/passes/${id}`);
@@ -1272,6 +1305,7 @@ async function loadPass(id) {
   byId.passAis = new Map(pass.ais_geojson.features.map((f) => [f.properties.mmsi, f]));
   setData("footprint", { type: "Feature", geometry: pass.footprint, properties: {} });
   setData("detections", pass.detections_geojson);
+  setData("pass-links", passLinks(pass));
   setData("pass-ais", pass.ais_geojson);
   showRadarImage(pass);
   loadUnimaged();
@@ -1295,7 +1329,7 @@ function clearPass(note) {
   byId.detections = new Map();
   byId.detectionFeatures = new Map();
   byId.passAis = new Map();
-  for (const source of ["footprint", "detections", "pass-ais", "link"]) setData(source, EMPTY);
+  for (const source of ["footprint", "pass-links", "detections", "pass-ais", "link"]) setData(source, EMPTY);
   showRadarImage(null);
   loadUnimaged();
   renderLegend();
@@ -1313,6 +1347,7 @@ function renderMapContext() {
       el,
       svg("circle", C.blue),
       h("span", null, `Radar: pasada de ${when(pass.acquired_at)}${state.zone === ALL ? ` · ${zoneName(pass.zone)}` : ""}`),
+      state.time && Math.abs(state.time.t - passMoment(pass)) >= 1000 && h("button", { onclick: () => enterTime(passMoment(pass)) }, "Ir al instante"),
       !onIt && h("button", { onclick: () => navigate(`passes/${pass.id}`) }, "Ver"),
     );
   } else if (state.passNote) {
@@ -2190,7 +2225,7 @@ document.getElementById("handle").addEventListener("click", () => {
 // vessel is placed on the straight line joining them.
 
 const HOUR = 3_600_000;
-const STALE_S = 30 * 60; // unheard for longer than this, a vessel is not drawn
+const STALE_S = 30 * 60; // unheard for longer than this, a vessel is not drawn (as the radar pairing: sar/ais.py)
 const TRAIL_S = 60 * 60;
 const SPEEDS = [10, 60, 300, 1800]; // times real time: 1 s plays 10 s ... 30 min
 
@@ -2217,6 +2252,7 @@ function exitTime() {
   setData("time-trails", EMPTY);
   setData("events", state.events);
   renderTimebar();
+  renderMapContext(); // without "Ir al instante"
   // Back to the present: its latest pass.
   if (state.status?.latest_pass) loadPass(state.status.latest_pass.id).catch(() => {});
 }
@@ -2344,6 +2380,11 @@ function renderTime() {
     setData("events", { type: "FeatureCollection", features: going });
   }
   syncPassToTime();
+  const atPass = Boolean(state.pass) && Math.abs(time.t - passMoment(state.pass)) < 1000;
+  if (atPass !== time.atPass) {
+    time.atPass = atPass;
+    renderMapContext(); // "Ir al instante" only when not there already
+  }
   updateTimebar(vessels.length, keys.some((key) => !time.chunks.get(key)?.data));
 }
 
@@ -2401,7 +2442,7 @@ function updateTimebar(vessels = null, loading = false) {
   slider.min = String(Math.floor((time.from ?? time.t - 7 * 24 * HOUR) / 60_000) * 60_000); // whole minutes
   slider.max = String(Date.now());
   slider.value = String(time.t);
-  label.textContent = when(new Date(time.t).toISOString());
+  label.textContent = when(new Date(time.t).toISOString(), time.t % 60_000 !== 0); // to the second at a pass's moment
   const outage = time.outages.find(([start, end]) => start <= time.t && time.t <= end);
   count.classList.toggle("warning", Boolean(outage));
   if (outage) {

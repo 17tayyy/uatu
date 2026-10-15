@@ -285,6 +285,8 @@ should have shown, detected or not), plus GeoJSON and a quicklook in the `sardat
 
 ```sh
 uv run uatu-sar candidates --days 7    # dark vessel candidates of recent passes
+uv run uatu-sar reprocess --days 7     # after a change to the pairing: the worker downloads and pairs again,
+                                       # without announcing the passes again
 ```
 
 ```sql

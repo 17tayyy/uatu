@@ -68,7 +68,9 @@ AIS track is interpolated to the exact instant the radar looked at that spot, re
 per-line times in the product's annotation. Between two sparse reports the ship may have slowed
 or turned: the tolerance grows with the distance it could have sailed since its nearest report.
 That distance is computed from the faster of the two reports' speeds. A fast ferry slowing into
-Ceuta (29 knots, then 7) went unpaired until it was.
+Ceuta (29 knots, then 7) went unpaired until it was. A vessel counts if it was heard within 30
+minutes of the pass: aisstream hears many only every 10 to 30 minutes, and at 10 minutes 12 of the
+48 vessels the radar saw on 14 October went unpaired, though the map showed them right there.
 
 **The Doppler shift.** A synthetic aperture radar places a target along the track from the
 Doppler frequency of its echo. A ship moving towards or away from the satellite adds its own
@@ -76,7 +78,9 @@ Doppler, so the radar draws it displaced along the track by −(R/V) × range ra
 (slant range) and V ≈ 7.6 km/s (satellite speed), that is about 110 s × range rate: a ship
 closing at 5 m/s appears about 560 m away from where it really is. Uatu shifts each expected AIS
 position the same way. Validated on real pairs, the median distance between AIS and radar
-dropped from about 530 m uncorrected to about 50 m.
+dropped from about 530 m uncorrected to about 50 m. On the map, the echo stays where the radar
+drew it and a dashed line leads to its vessel's AIS position: in the Strait, where ships sail
+east-west across the radar's north-south track, half of them are 300 m or more apart.
 
 ## 5. Pairing: the Hungarian method
 

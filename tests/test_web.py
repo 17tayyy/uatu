@@ -280,7 +280,7 @@ async def rows():
             ],
         )
         check = {"mmsi": MMSI_A, "seen_at": NOW - timedelta(hours=1), "lat": 36.0, "lon": -5.5, "length_m": 250,
-                 "sog": 12.0, "report_gap_s": 10.0, "doppler_shift_m": 0.0}  # fmt: skip
+                 "sog": 12.0, "report_gap_s": 10.0, "doppler_shift_m": -412.3}  # fmt: skip
         await conn.execute(
             insert(SarAisCheck),
             [
@@ -364,6 +364,11 @@ async def test_passes(client, tmp_path):
     assert set(kinds) == {"matched", "went_silent", "no_coverage"}
     assert kinds["matched"]["vessel_name"] == "TEST ALFA"
     assert kinds["matched"]["length_m"] == 240
+    # Where its AIS put it, from the frame that saw it: the echo shows shifted along the track.
+    assert (kinds["matched"]["ais_lon"], kinds["matched"]["ais_lat"], kinds["matched"]["doppler_shift_m"]) == (
+        -5.5, 36.0, -412
+    )  # fmt: skip
+    assert kinds["no_coverage"]["ais_lon"] is None
     assert kinds["matched"]["vh_db"] == -9.9
     assert kinds["went_silent"]["suspect_name"] == "TEST SILENT"
     assert (kinds["no_coverage"]["ais_vessels_nearby"], kinds["no_coverage"]["ais_reports_nearby"]) == (2, 3)
