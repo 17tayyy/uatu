@@ -4,6 +4,7 @@ It has no authentication: serve it on the local network only, never on the inter
 """
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -118,7 +119,9 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         api.include_router(router)
     app.include_router(api)
     app.include_router(health_router)
-    # The dashboard, as built from frontend/ (npm run build); the API works without it.
+    # The dashboard, as built from frontend/ (npm run build). The API works without it: an empty folder then.
+    with contextlib.suppress(OSError):
+        STATIC_DIR.mkdir(exist_ok=True)
     app.frontend("/", directory=STATIC_DIR, fallback=None, check_dir=False)
     return app
 
