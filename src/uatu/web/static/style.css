@@ -89,6 +89,35 @@ a { color: var(--ink); text-decoration-color: var(--muted); text-underline-offse
 
 .zone-select option { background: var(--panel); color: var(--ink); }
 
+.account { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+.account:hover { color: var(--ink); }
+
+/* Signing in, and verdicts on detections ---------------------------------------------------------- */
+
+.login {
+  width: min(360px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.login::backdrop { background: rgba(0, 0, 0, 0.55); }
+
+.review { display: grid; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+.review-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 550; letter-spacing: 0.04em; text-transform: uppercase; }
+
+.review-head .tag { text-transform: none; letter-spacing: 0; }
+
+.verdicts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+
+.verdicts .chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); text-align: left; }
+
+.verdicts .chip svg { width: 10px; height: 10px; }
+
 .status {
   display: grid;
   gap: 2px;
