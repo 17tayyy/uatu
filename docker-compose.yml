@@ -74,11 +74,13 @@ services:
       REDIS_URL: redis://redis:6379
       SAR_DATA_DIR: /data/sar
       BACKUP_DIR: /data/backups
+      REPORTS_DIR: /data/reports
       GDAL_CACHEMAX: "64"  # MB; by default GDAL takes 5% of the host's RAM, ignoring the container's limit
       MALLOC_ARENA_MAX: "2"  # GDAL's warper threads otherwise each keep an arena of freed memory
     volumes:
       - sardata:/data/sar
       - backups:/data/backups
+      - reports:/data/reports
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -102,9 +104,11 @@ services:
       <<: *app-env
       SAR_DATA_DIR: /data/sar
       WEB_CACHE_DIR: /data/web-cache
+      REPORTS_DIR: /data/reports
     volumes:
       - sardata:/data/sar:ro  # radar overlays and the land mask, written by the worker
       - webcache:/data/web-cache  # optical chips, fetched on first request
+      - reports:/data/reports:ro  # written by the worker every Monday
     ports:
       - "${WEB_PORT:-8000}:8000"
     depends_on:
@@ -129,3 +133,4 @@ volumes:
   redisdata:
   sardata:
   backups:
+  reports:

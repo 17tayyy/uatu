@@ -1126,6 +1126,13 @@ function renderStatus(error) {
         `Última pasada ${when(s.latest_pass.acquired_at)} · Sentinel-${s.latest_pass.platform.slice(1)}`,
         state.zone === ALL ? ` · ${zoneName(s.latest_pass.zone)}` : "",
       ),
+    state.reports?.length > 0 &&
+      h(
+        "div",
+        { class: "facts" },
+        h("a", { href: state.reports[0].url, target: "_blank", rel: "noopener" }, `Informe hasta el ${fmtDay.format(new Date(`${state.reports[0].last_day}T12:00:00Z`))}`),
+        state.reports.length > 1 ? ` · ${state.reports.length} informes` : "",
+      ),
   );
 }
 
@@ -1914,6 +1921,10 @@ async function start() {
   document.getElementById("time-toggle").onclick = () => enterTime(Date.now() - HOUR);
   renderLayers();
   const [zones, land, satellite] = await Promise.all([api("/zones"), api("/map/land"), api("/map/satellite")]);
+  api("/reports").then((reports) => {
+    state.reports = reports;
+    renderStatus();
+  }).catch(() => {});
   state.zones = zones.zones;
   state.wholeCoast = zones.whole_coast;
   if (state.zone !== ALL && !state.zones.some((z) => z.key === state.zone)) state.zone = ALL;

@@ -22,6 +22,9 @@ AIS
     ref.sanctions       daily: from OpenSanctions, sanctioned vessels, who owns and manages vessels
                         (sanctions lists, Ukraine's GUR, port state control) and other watchlists.
     ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports; the World Port Index.
+Reports
+    report.weekly       Mondays at 05:00 UTC: the report of the week before (uatu-report), in REPORTS_DIR,
+                        announced through ntfy with a link to the dashboard's copy if DASHBOARD_URL is set.
 
     ardiq run uatu.worker:app
 """
@@ -44,8 +47,10 @@ from uatu.ais import analysis as ais_analysis
 from uatu.ais import reference, sanctions
 from uatu.ais import store as ais_store
 from uatu.ais.bathymetry import Bathymetry, load_bathymetry
-from uatu.config import BBox, ZoneSettings
+from uatu.config import ZONES, BBox, ZoneSettings
 from uatu.log import configure_logging
+from uatu.report.data import MADRID
+from uatu.report.write import announcement, write_report
 from uatu.sar import store
 from uatu.sar.analysis import analyse, write_outputs
 from uatu.sar.catalog import search, worth_processing
@@ -61,6 +66,8 @@ class WorkerSettings(SarSettings, ZoneSettings):
     backup_keep: int = Field(14, gt=0)
     ntfy_url: str | None = None  # https://ntfy.sh/<an unguessable topic>, to get alerts on a phone
     healthcheck_url: str | None = None  # dead man's switch ping URL, e.g. https://hc-ping.com/<uuid>
+    reports_dir: Path = Path("data/reports")
+    dashboard_url: str | None = None  # e.g. http://192.168.1.41:8000, to link the weekly report from its notification
     ais_stale_minutes: float = Field(15.0, gt=0)  # alert when no AIS has arrived for this long
     min_free_disk: float = Field(0.1, gt=0, lt=1)
 
@@ -310,6 +317,20 @@ async def ais_digest() -> int:
         title, message = ais_analysis.digest(events, names, hours=12)
         await state.alerter.notify(title, message, "default")
     return len(events)
+
+
+@app.cron("0 5 * * 1", name="report.weekly", max_retries=1, backoff_ms=30 * 60_000, timeout=900)
+async def weekly_report() -> str:
+    """Monday morning: the report of the week before, Monday to Sunday in Spanish time."""
+    state = app.state
+    until = datetime.now(MADRID).date()
+    folder, r = await write_report(
+        state.engine, until, 7, settings.zones, ZONES, settings.sar_data_dir, settings.reports_dir
+    )
+    title, message, link = announcement(folder, r, settings.dashboard_url)
+    await state.alerter.notify(title, message, "default", link)
+    log.info("report_written", folder=str(folder))
+    return str(folder)
 
 
 @app.cron("0 4 * * *", name="ref.sanctions", max_retries=2, backoff_ms=30 * 60_000, timeout=900)

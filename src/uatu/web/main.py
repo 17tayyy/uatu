@@ -30,6 +30,7 @@ from uatu.web.middleware import RequestContextMiddleware, SecurityHeadersMiddlew
 from uatu.web.optical.router import router as optical_router
 from uatu.web.passes.router import router as passes_router
 from uatu.web.radar.router import router as radar_router
+from uatu.web.reports.router import router as reports_router
 from uatu.web.schemas import FeatureCollection
 from uatu.web.status.router import router as status_router
 from uatu.web.vessels.router import router as vessels_router
@@ -104,6 +105,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         vessels_router,
         companies_router,
         history_router,
+        reports_router,
         coverage_router,
         basemap_router,
     ):
