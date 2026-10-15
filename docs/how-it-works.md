@@ -123,7 +123,10 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
 
 - **AIS gaps**: a vessel under way, out at sea, that stops transmitting for over an hour while
   others around it are still heard. Others must also be heard where it was heading, or it may
-  just have sailed out of coverage.
+  just have sailed out of coverage. And not where many go quiet: in its first three days Uatu
+  saw 65 westbound vessels fall silent off Tarifa, where aisstream's receivers stop hearing the
+  westbound lane. Where 5 or more other vessels went quiet within 5 km in the past week, a
+  silence is the receivers', not the vessel's.
 - **Encounters**: two vessels within 500 m, both under 2 knots, for over 2 hours, away from the
   coast. That is the signature of a ship-to-ship transfer. Within 2 km of the coast they are not
   kept: the first day of Catalonia brought 1,600 "encounters" of yachts moored side by side in
