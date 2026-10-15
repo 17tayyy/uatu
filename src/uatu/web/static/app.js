@@ -1103,7 +1103,7 @@ function renderLegend() {
     parts.push(h("h3", null, "Eventos AIS"), [3, 2, 1].filter((s) => s >= state.eventFilter.minSeverity).map((s) => legendItem("diamond", SEVERITY[s].color, SEVERITY[s].label)));
   }
   if (state.layers.vessels) {
-    parts.push(h("h3", null, "Barcos en vivo"), legendItem("arrow", C.ink2, "Navegando (rumbo)"), legendItem("circle", C.ink2, "Parado"), legendItem("arrow", C.critical, "Sancionado o con gestor sancionado"), legendItem("arrow", C.serious, "En listas de vigilancia"));
+    parts.push(h("h3", null, "Barcos en vivo"), legendItem("arrow", C.ink2, "Navegando (rumbo)"), legendItem("circle", C.ink2, "Parado"), legendItem("arrow", C.critical, "Sancionado o con gestor sancionado"), legendItem("arrow", C.serious, "En listas de vigilancia o en la tuya"));
   }
   if (state.layers.infrastructure) {
     parts.push(h("h3", null, "Infraestructura"), legendItem("dash", C.infra, "Cable submarino"), legendItem("line", C.infra, "Gasoducto u oleoducto"));
