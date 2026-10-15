@@ -149,7 +149,10 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
   GUR's lists or banned from European ports. A share, not a count: one sanctioned hull in a
   large fleet says little about the rest, most of a fleet sanctioned says a lot. Detentions
   older than 3 years are left out, as ISM companies change.
-- **Identity changes, shared IMO numbers, impossible jumps** (spoofing or broken GPS).
+- **Identity changes, shared IMO numbers, impossible jumps** (spoofing or broken GPS). A change
+  counts once it has held for an hour, to a value the vessel had not used: one night brought
+  eight "renames" in an hour from a vessel whose two transponders share an MMSI, and a name made
+  up by a corrupt message for three minutes. A name corrected by a letter or two is informative.
 
 Where 4 or more vessels have sat stopped within 8 km over the past week, an anchorage or waiting
 area learnt from the record itself, stopping is routine and only informative.
