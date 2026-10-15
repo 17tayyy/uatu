@@ -134,7 +134,7 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `position_on_land` | 3+ reports over 2 km inland (ESA WorldCover land mask, 100 m blocks, harbours and wide rivers staying water) | 5 km inland or more (GPS spoofing, as off the Baltic and Black Sea coasts); nearer, informative: canals the mask can't see (Empuriabrava's) or a boatyard |
 | `odd_mmsi` | a vessel transmitting with an MMSI that cannot be a ship's: a flag no country was allocated, a placeholder (123456789), a coast station's or a group's | under way, over 2 km from the coast |
 | `emergency_beacon` | an AIS-SART, man-overboard or EPIRB-AIS beacon | over 2 km from the coast; in port, most likely a test |
-| `watched_vessel` | a vessel on your own watch list (`uatu-ais watch`), by IMO, MMSI or name | always (alert), once per visit; never in the reports |
+| `watched_vessel` | a vessel on your own watch list (dashboard, or `uatu-ais watch`), by IMO, MMSI or name | always (alert), once per visit; never in the reports |
 
 Gaps and encounters within 2 km of the coast are not kept at all: in a harbour, vessels lie side
 by side for days and go quiet at their berth (Barcelona's marinas alone made ~2,000 "encounters" a
@@ -175,7 +175,7 @@ A vessel's card shows its last 30 days of stops and crossings.
 uv run uatu-ais around 36.10 -5.40 --at 2026-10-13T18:25Z   # who was there: AIS, events, radar
 uv run uatu-ais events --hours 24
 uv run uatu-ais stops --listed --days 7                     # where sanctioned and watchlisted vessels stopped
-uv run uatu-ais watch add --imo 9384447 --note "Russian oil, seen off Ceuta"   # an alert whenever it is heard
+uv run uatu-ais watch add --imo 9384447 --note "Russian oil, seen off Ceuta"   # as "Vigilar este barco" on the dashboard
 uv run uatu-ais watch list                                   # and watch remove ID
 ```
 
@@ -345,9 +345,11 @@ the watched area (its edge dashed), and from [Natural Earth](https://www.natural
 satellite's frame, which is tilted (Sentinel-1 flies a near-polar orbit and looks sideways): a pass
 can leave part of the area without image. It is saved in Web Mercator, the projection web maps draw
 in, so that each ship's echo lands under its detection.
-The API behind it is read-only, under `/api/v1` (documented at `/docs`).
+The API behind it is read-only, under `/api/v1` (documented at `/docs`), but for your watch list
+(`/api/v1/watches`), which it writes only from the dashboard's own page (the Origin header).
 
-**It has no authentication: keep it on the local network, never forward the port.**
+**It has no authentication: keep it on the local network, never forward the port.** Anyone on that
+network can read everything and change the watch list.
 
 Scenes processed before the dashboard existed have no radar overlay
 (`backscatter.png` + `backscatter.json` in the scene's output folder); the worker writes it for

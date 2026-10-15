@@ -1555,8 +1555,182 @@ async function renderVessels() {
     clearTimeout(timer);
     timer = setTimeout(() => renderVesselResults(list).catch((e) => fill(list, message("error-note", e.message))), 250);
   });
-  fill(view, h("div", { class: "toolbar" }, input), list);
+  const watches = h("div");
+  fill(view, h("div", { class: "toolbar" }, input), watches, list);
+  renderWatchList(watches).catch((e) => fill(watches, message("error-note", `No se pudo cargar tu lista: ${e.message}`)));
   await renderVesselResults(list);
+}
+
+// Your own watch list: an alert whenever one of its vessels is heard (the AIS analysis, every 10 minutes).
+
+/** A write to the API, JSON in and out; null for 204. */
+async function send(method, path, body) {
+  const headers = { Accept: "application/json" };
+  if (body) headers["Content-Type"] = "application/json";
+  const res = await fetch(API + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 204) return null;
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    // not JSON: fall through to the status
+  }
+  if (!res.ok) throw new Error(data?.error?.message ?? `HTTP ${res.status}`);
+  return data.data;
+}
+
+const watchSince = (w) => `desde el ${fmtDay.format(new Date(w.added_at))}`;
+
+/** On a vessel's card: why you watch it and a way to stop, or a way to start. */
+function watchBox(v) {
+  const box = h("div");
+  const show = () => fill(box, v.watched.length ? watched() : start());
+  const watched = () => {
+    const stop = async (event) => {
+      event.currentTarget.disabled = true;
+      try {
+        await Promise.all(v.watched.map((w) => send("DELETE", `/watches/${w.id}`)));
+        v.watched = [];
+        show();
+        loadLive().catch(() => {});
+      } catch (e) {
+        fill(box, watched(), h("p", { class: "form-error", role: "alert" }, `No se pudo quitar: ${e.message}`));
+      }
+    };
+    return h(
+      "div",
+      { class: "callout watch" },
+      h("strong", null, svg("arrow", C.serious), "En tu lista de vigilancia"),
+      v.watched.length === 1
+        ? `${capitalise(v.watched[0].note)} (${watchSince(v.watched[0])}).`
+        : h("ul", { class: "reasons" }, v.watched.map((w) => h("li", null, `${capitalise(w.note)} (${watchSince(w)})`))),
+      h("div", { class: "form-actions" }, h("button", { class: "text-button", onclick: stop }, "Dejar de vigilar")),
+    );
+  };
+  const start = () => h("div", { class: "watch-start" }, h("button", { class: "text-button", onclick: form }, svg("arrow", C.serious), "Vigilar este barco"));
+  const form = () => {
+    const note = h("textarea", { class: "field", rows: 2, maxlength: 300, required: true, "aria-label": "Por qué lo vigilas", placeholder: "Por qué lo vigilas (p. ej. «fondea frente a Ceuta sin AIS»)" });
+    const error = h("p", { class: "form-error", role: "alert" });
+    const save = async (event) => {
+      event.preventDefault();
+      if (!note.value.trim()) return void (error.textContent = "Escribe por qué lo vigilas.");
+      try {
+        const by = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
+        v.watched = [...v.watched, await send("POST", "/watches", { ...by, note: note.value.trim() })];
+        show();
+        loadLive().catch(() => {});
+      } catch (e) {
+        error.textContent = `No se pudo guardar: ${e.message}`;
+      }
+    };
+    fill(
+      box,
+      h(
+        "form",
+        { class: "callout watch watch-form", onsubmit: save },
+        h("strong", null, svg("arrow", C.serious), "Vigilar este barco"),
+        note,
+        h("p", { class: "form-hint" }, v.imo ? "Por su IMO: sigue valiendo aunque cambie de nombre, MMSI o bandera. Te avisa al móvil cada vez que se le oiga en la costa." : "Por su MMSI (no emite IMO). Te avisa al móvil cada vez que se le oiga en la costa."),
+        error,
+        h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary-button" }, "Vigilar"), h("button", { type: "button", class: "text-button", onclick: show }, "Cancelar")),
+      ),
+    );
+    note.focus();
+  };
+  show();
+  return box;
+}
+
+let watchListOpen = false;
+
+/** The Barcos tab's list of what you watch, with a form for vessels not heard yet (by IMO, MMSI or name). */
+async function renderWatchList(box) {
+  const watches = await api("/watches");
+  const reload = () => renderWatchList(box).catch((e) => fill(box, message("error-note", e.message)));
+  const adding = h("div");
+  const details = h(
+    "details",
+    { class: "watch-list", open: watchListOpen },
+    h("summary", { class: "section-title" }, `Tu lista de vigilancia (${watches.length})`),
+    watches.length
+      ? h("ul", { class: "list" }, watches.map((w) => watchRow(w, reload)))
+      : h("p", { class: "note" }, "Vacía. Añade barcos desde su ficha («Vigilar este barco») o aquí, aunque no se hayan oído aún."),
+    adding,
+  );
+  details.addEventListener("toggle", () => (watchListOpen = details.open));
+  const addButton = () => h("div", { class: "watch-start" }, h("button", { class: "text-button", onclick: () => fill(adding, watchForm(reload, () => fill(adding, addButton()))) }, "+ Añadir un barco por IMO, MMSI o nombre"));
+  fill(adding, addButton());
+  fill(box, details);
+}
+
+function watchRow(w, reload) {
+  const [heard, ...others] = w.vessels;
+  const title = heard?.name ?? w.name ?? (w.imo ? `IMO ${w.imo}` : `MMSI ${w.mmsi}`);
+  const by = [w.imo && `IMO ${w.imo}`, w.mmsi && `MMSI ${w.mmsi}`, w.name && `nombre «${w.name}»`].filter(Boolean).join(" · ");
+  const remove = async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      await send("DELETE", `/watches/${w.id}`);
+      loadLive().catch(() => {});
+    } finally {
+      reload();
+    }
+  };
+  return h(
+    "li",
+    null,
+    h(
+      "div",
+      { class: "row" },
+      h(
+        "div",
+        { class: "row-top" },
+        heard ? h("button", { class: "row-title text-link", onclick: () => navigate(`vessels/${heard.mmsi}`) }, title) : h("span", { class: "row-title" }, title),
+        h("span", { class: "row-time" }, heard?.last_seen_at ? `oído ${ago(heard.last_seen_at)}` : "aún no oído"),
+      ),
+      h("div", { class: "row-meta" }, `Por ${by} · ${watchSince(w)}`),
+      h("div", { class: "row-text" }, capitalise(w.note)),
+      others.length > 0 && h("div", { class: "row-meta" }, `Coincide también con ${others.map((o) => o.name ?? `MMSI ${o.mmsi}`).join(", ")}`),
+      h("div", { class: "form-actions" }, h("button", { class: "text-button", onclick: remove }, "Quitar")),
+    ),
+  );
+}
+
+function watchForm(done, cancel) {
+  const input = (label, props) => h("label", { class: "field-label" }, label, h("input", { class: "field", ...props }));
+  const imo = input("IMO", { inputmode: "numeric", pattern: "[0-9]{7}", maxlength: 7, placeholder: "7 cifras" });
+  const mmsi = input("MMSI", { inputmode: "numeric", pattern: "[0-9]{1,9}", maxlength: 9, placeholder: "9 cifras" });
+  const name = input("Nombre", { maxlength: 40, placeholder: "como lo emite", class: "field wide" });
+  const note = h("textarea", { class: "field", rows: 2, maxlength: 300, "aria-label": "Por qué lo vigilas", placeholder: "Por qué lo vigilas" });
+  const error = h("p", { class: "form-error", role: "alert" });
+  const value = (label) => label.querySelector("input").value.trim();
+  const save = async (event) => {
+    event.preventDefault();
+    const body = { note: note.value.trim() };
+    if (value(imo)) body.imo = Number(value(imo));
+    if (value(mmsi)) body.mmsi = Number(value(mmsi));
+    if (value(name)) body.name = value(name);
+    if (value(imo) && !/^\d{7}$/.test(value(imo))) return void (error.textContent = "El IMO tiene 7 cifras.");
+    if (value(mmsi) && !/^\d{1,9}$/.test(value(mmsi))) return void (error.textContent = "El MMSI tiene hasta 9 cifras.");
+    if (!body.imo && !body.mmsi && !body.name) return void (error.textContent = "Pon un IMO, un MMSI o un nombre.");
+    if (!body.note) return void (error.textContent = "Escribe por qué lo vigilas.");
+    try {
+      await send("POST", "/watches", body);
+      loadLive().catch(() => {});
+      done();
+    } catch (e) {
+      error.textContent = `No se pudo guardar: ${e.message}`;
+    }
+  };
+  return h(
+    "form",
+    { class: "watch-form", onsubmit: save, novalidate: true },
+    h("div", { class: "fields" }, imo, mmsi, name),
+    note,
+    h("p", { class: "form-hint" }, "Basta uno: el IMO sigue al casco aunque cambie de nombre, MMSI o bandera."),
+    error,
+    h("div", { class: "form-actions" }, h("button", { type: "submit", class: "primary-button" }, "Vigilar"), h("button", { type: "button", class: "text-button", onclick: cancel }, "Cancelar")),
+  );
 }
 
 function clearVessel() {
@@ -1592,15 +1766,7 @@ async function renderVessel(mmsi) {
         ". Fuente: OpenSanctions.",
       ),
     v.risk && riskCallout(v.risk),
-    v.watched.length > 0 &&
-      h(
-        "div",
-        { class: "callout watch" },
-        h("strong", null, svg("arrow", C.serious), "En tu lista de vigilancia"),
-        v.watched.length === 1
-          ? `${capitalise(v.watched[0].note)} (desde ${month(v.watched[0].added_at)}).`
-          : h("ul", { class: "reasons" }, v.watched.map((w) => h("li", null, `${capitalise(w.note)} (desde ${month(w.added_at)})`))),
-      ),
+    watchBox(v),
     kv([
       ["MMSI", String(v.mmsi)],
       ["IMO", v.imo ? String(v.imo) : null],

@@ -164,9 +164,11 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
   wrong or a made-up identity. Most turn out to be stationary in port, which is informative. AIS
   search-and-rescue beacons (SART, man overboard, EPIRB) are notable at sea, informative in port,
   where they are tested; they reach Salvamento Marítimo directly, so Uatu adds nothing in time.
-- **Your own watch list**: vessels you name by IMO, MMSI or name with a note
-  (`uatu-ais watch add`), an alert whenever one is heard on the coast, once per visit. The
-  dashboard marks them; the reports leave them out, as the list is yours.
+- **Your own watch list**: vessels you name by IMO, MMSI or name with a note, from a vessel's
+  card ("Vigilar este barco"), the Barcos tab or `uatu-ais watch add`: an alert whenever one is
+  heard on the coast, once per visit. The dashboard marks them; the reports leave them out, as
+  the list is yours. It is the only thing the dashboard can change, and only from its own page:
+  with no login, the API refuses writes whose Origin is another site's.
 
 Where 4 or more vessels have sat stopped within 8 km over the past week, an anchorage or waiting
 area learnt from the record itself, stopping is routine and only informative.

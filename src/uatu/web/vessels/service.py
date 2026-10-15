@@ -151,7 +151,7 @@ async def get_vessel(db: AsyncSession, mmsi: int, track_hours: float) -> VesselD
         companies = await vessel_companies(db, vessel.imo)
     identifiers = _watched(mmsi, vessel.imo if vessel else None, vessel.name if vessel else None)
     watched = [
-        Watch(note=w.note, added_at=w.added_at)
+        Watch(id=w.id, note=w.note, added_at=w.added_at)
         for w in await db.scalars(select(WatchedVessel).where(identifiers).order_by(WatchedVessel.id))
     ]
 

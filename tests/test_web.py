@@ -39,12 +39,19 @@ WEB = Path(__file__).parent.parent / "src" / "uatu" / "web"
 # --- architecture --------------------------------------------------------------------------------
 
 
-def test_api_is_read_only():
-    """No authentication, so nothing in the API may change anything: GET only."""
+WRITABLE = {"/api/v1/watches", "/api/v1/watches/{watch_id}"}  # your own watch list, nothing else
+
+
+def test_api_is_read_only_but_for_your_watch_list():
+    """No authentication: GET only, but for the watch list, which only the dashboard's own page can write."""
+    from uatu.web.dependencies import same_origin
+    from uatu.web.watches.router import router as watches
+
     paths = create_app(WebSettings()).openapi()["paths"]
     assert any(path.startswith("/api/v1/") for path in paths)
     for path, operations in paths.items():
-        assert set(operations) == {"get"}, f"{path} accepts {set(operations)}"
+        assert set(operations) == {"get"} or path in WRITABLE, f"{path} accepts {set(operations)}"
+    assert same_origin in [d.dependency for d in watches.dependencies]
 
 
 @pytest.mark.parametrize("path", sorted(WEB.glob("*/service.py")), ids=lambda p: p.parent.name)
@@ -392,6 +399,34 @@ async def test_events(client):
     assert all(f["properties"]["mmsi"] != MMSI_BARCELONA for f in events["features"])
     mmsis = {f["properties"]["mmsi"] for f in (await ok(client, "/api/v1/events?hours=2"))["features"]}
     assert {MMSI_A, MMSI_BARCELONA} <= mmsis  # the whole coast
+
+
+@needs_db
+async def test_your_watch_list(client):
+    [fixture] = [w for w in await ok(client, "/api/v1/watches") if w["note"] == "uatu test"]
+    assert (fixture["name"], [v["mmsi"] for v in fixture["vessels"]]) == ("test alfa", [MMSI_A])  # by name, any case
+
+    same = {"Origin": "http://test"}
+    added = await client.post("/api/v1/watches", json={"imo": IMO_A, "note": "uatu test"}, headers=same)
+    assert added.status_code == 201, added.text
+    watch = added.json()["data"]
+    assert (watch["imo"], watch["mmsi"], [v["mmsi"] for v in watch["vessels"]]) == (IMO_A, None, [MMSI_A])
+    detail = await ok(client, f"/api/v1/vessels/{MMSI_A}")
+    assert sorted(w["id"] for w in detail["watched"]) == sorted([fixture["id"], watch["id"]])
+
+    # Another site open in the same browser, or a request with no Origin at all, can't write.
+    for headers in ({"Origin": "http://evil.example"}, {}):
+        refused = await client.post("/api/v1/watches", json={"mmsi": 1, "note": "uatu test"}, headers=headers)
+        assert refused.status_code == 403
+        assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=headers)).status_code == 403
+    nothing = await client.post("/api/v1/watches", json={"note": "uatu test"}, headers=same)
+    assert nothing.status_code == 422
+    too_short = await client.post("/api/v1/watches", json={"imo": 123, "note": "uatu test"}, headers=same)
+    assert too_short.status_code == 422
+
+    assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=same)).status_code == 204
+    assert (await client.delete(f"/api/v1/watches/{watch['id']}", headers=same)).status_code == 404
+    assert [w["id"] for w in await ok(client, "/api/v1/watches") if w["note"] == "uatu test"] == [fixture["id"]]
 
 
 @needs_db
