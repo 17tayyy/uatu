@@ -189,8 +189,32 @@ def test_identity_changes_only_on_different_known_values():
         StaticReport(1, t + timedelta(hours=2), "NEW NAME", 9876543, "ABC1", 80),
         StaticReport(2, t + timedelta(hours=2), "SAME", None, None, 70),
     ]
-    [e] = detect_identity_changes(reports, since=t, where={1: (LAT0, LON0), 2: (LAT0, LON0)})
+    where = {1: (LAT0, LON0), 2: (LAT0, LON0)}
+    # Told once it has held for an hour; until then, too early to tell.
+    assert detect_identity_changes(reports, since=t, where=where, now=t + timedelta(hours=2, minutes=30)) == []
+    [e] = detect_identity_changes(reports, since=t, where=where, now=t + timedelta(hours=4))
     assert (e.mmsi, e.severity, e.details) == (1, 2, {"field": "name", "before": "OLD NAME", "after": "NEW NAME"})
+
+
+def test_names_that_flip_or_garble_or_get_corrected_are_not_renames():
+    """15 October: I DYNASTY and TT-IDYNASTY eight times in an hour; MARELLA EZS*ORER for three
+    minutes; SVITER OUED ALIANE corrected to SVITZER OUED ALIANE."""
+    t = datetime.fromtimestamp(T0, UTC)
+
+    def name(mmsi: int, minutes: float, value: str) -> StaticReport:
+        return StaticReport(mmsi, t + timedelta(minutes=minutes), value, None, None, None)
+
+    flipping = [name(1, m, "I DYNASTY" if k % 2 == 0 else "TT-IDYNASTY") for k, m in enumerate(range(0, 75, 6))]
+    garbled = [name(2, 0, "MARELLA EXPLORER"), name(2, 30, "MARELLA EZS*ORER"), name(2, 33, "MARELLA EXPLORER")]
+    corrected = [
+        name(3, 0, "SVITER OUED ALIANE"),
+        name(3, 30, "SVITZER OUED ALIANE"),
+        name(3, 120, "SVITZER OUED ALIANE"),
+    ]
+    reports = sorted([*flipping, *garbled, *corrected], key=lambda r: r.t)
+    where = dict.fromkeys((1, 2, 3), (LAT0, LON0))
+    [e] = detect_identity_changes(reports, since=t, where=where, now=t + timedelta(hours=5))
+    assert (e.mmsi, e.severity, e.details["correction"]) == (3, 1, True)
 
 
 def test_vessels_sailing_out_or_into_port_are_not_hiding():

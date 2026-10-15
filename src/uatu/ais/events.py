@@ -512,6 +512,7 @@ def detect_jumps(tracks: Sequence[Track], proj: LocalProjection, p: Params = DEF
 # --- identity --------------------------------------------------------------------------------------
 
 IDENTITY_FIELDS = {"name": 2, "imo": 2, "callsign": 1, "ship_type": 1}  # field -> severity of a change
+IDENTITY_SETTLE = timedelta(hours=1)  # a change must hold this long to count
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,28 +526,65 @@ class StaticReport:
 
 
 def detect_identity_changes(
-    reports: Sequence[StaticReport], since: datetime, where: dict[int, tuple[float, float]]
+    reports: Sequence[StaticReport],
+    since: datetime,
+    where: dict[int, tuple[float, float]],
+    now: datetime | None = None,
+    settle: timedelta = IDENTITY_SETTLE,
 ) -> list[Event]:
     """A vessel announcing a different name, IMO, callsign or type than before.
 
-    reports: time-ordered, starting well before `since` so earlier values are known; only
-    changes after `since` are returned. where: last known (lat, lon) per MMSI.
+    A change counts once it has held for `settle`, to a value the vessel had not used: two
+    transponders sharing an MMSI flip between their names all day, and a corrupt message makes up a
+    name for one report (I DYNASTY and TT-IDYNASTY eight times in an hour; MARELLA EZS*ORER for three
+    minutes). A name changed by a letter or two is a correction, only informative.
+
+    reports: time-ordered, starting well before `since` so earlier values are known; only changes
+    after `since` (and at least `settle` before `now`) are returned. where: last known (lat, lon).
     """
-    known: dict[tuple[int, str], object] = {}
-    events = []
+    now = now or (reports[-1].t if reports else since)
+    values: dict[tuple[int, str], list[tuple[datetime, object]]] = defaultdict(list)
     for r in reports:
-        for name, severity in IDENTITY_FIELDS.items():
+        for name in IDENTITY_FIELDS:
             value = getattr(r, name)
-            if value is None:
+            if value is not None:
+                values[r.mmsi, name].append((r.t, value))
+    events = []
+    for (mmsi, name), seen in values.items():
+        if mmsi not in where:
+            continue
+        used = {seen[0][1]}
+        for i in range(1, len(seen)):
+            t, value = seen[i]
+            before = seen[i - 1][1]
+            if value == before:
                 continue
-            before = known.get((r.mmsi, name))
-            known[(r.mmsi, name)] = value
-            if before is None or before == value or r.t < since or r.mmsi not in where:
-                continue
-            lat, lon = where[r.mmsi]
+            new = value not in used
+            used.add(value)
+            if not new or t < since or now - t < settle:
+                continue  # back to an earlier value, too old, or too early to tell
+            if any(v != value for when, v in seen[i + 1 :] if when <= t + settle):
+                continue  # it did not hold
+            severity = IDENTITY_FIELDS[name]
             details = {"field": name, "before": before, "after": value}
-            events.append(Event("identity_change", severity, r.mmsi, r.t, lat, lon, details, r.t))
-    return events
+            if name == "name" and _corrected(str(before), str(value)):
+                severity, details = 1, details | {"correction": True}
+            lat, lon = where[mmsi]
+            events.append(Event("identity_change", severity, mmsi, t, lat, lon, details, t))
+    return sorted(events, key=lambda e: e.start)
+
+
+def _corrected(a: str, b: str) -> bool:
+    """Two names a letter or two apart: a spelling corrected, not a vessel renamed."""
+    if min(len(a), len(b)) < 6:
+        return False
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        current = [i]
+        for j, cb in enumerate(b, start=1):
+            current.append(min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (ca != cb)))
+        previous = current
+    return previous[-1] <= 2
 
 
 def ais_day(t: datetime) -> datetime:

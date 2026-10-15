@@ -128,7 +128,7 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `sanctioned_owner` | a vessel off the lists whose owner or manager is on one | always (alert) |
 | `listed_stop` | a sanctioned or watchlisted vessel at a berth, at anchor or lying still for an hour or more | always; alert alongside in a port if sanctioned or run by a sanctioned company |
 | `watchlisted_vessel` | off the lists, but run by a company with a mostly sanctioned fleet (2+ vessels, half or more), on GUR's lists (shadow fleet, vessels working for Russia), banned from European ports (Paris MoU) or insured by a sanctioned club | always |
-| `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes |
+| `identity_change`, `shared_imo` | new name / IMO / callsign / type; two MMSIs with the same valid IMO | name or IMO changes to a value the vessel had not used, held for an hour (two transponders on one MMSI flip between names; a corrupt message makes one up); a name corrected by a letter or two is informative |
 | `position_jump` | positions further apart than any ship could sail (spoofing, broken GPS) | informative |
 
 Gaps and encounters within 2 km of the coast are not kept at all: in a harbour, vessels lie side

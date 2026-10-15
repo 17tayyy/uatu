@@ -80,7 +80,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
         stopped_now += len(stops)
         crossed += await store.save_transits(engine, detect_transits(tracks))
     reports = await store.static_reports(engine, now - IDENTITY_HISTORY)
-    events += detect_identity_changes(reports, start, await store.last_positions(engine, start))
+    events += detect_identity_changes(reports, start, await store.last_positions(engine, start), now)
     events += await store.sanctioned_present(engine, start, now)
     events += await store.network_present(engine, start, now)
     events += await store.shared_imos(engine, start, now)
