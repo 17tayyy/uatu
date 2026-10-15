@@ -193,6 +193,10 @@ It has six parts:
 The hours of the period that Uatu was recording count from when it began, less its outages.
 Unidentified radar detections, which may be small boats, are given to ~10 km only.
 
+Every Monday at 05:00 UTC the worker writes the report of the week before into the `reports`
+volume and announces it through ntfy, with a link when `DASHBOARD_URL` is set. The dashboard
+links the latest report under its status.
+
 ## SAR ship detection
 
 ```sh
@@ -443,3 +447,5 @@ Environment variables (or `.env`):
 | `WEB_PORT`           | `8000`                                | dashboard port on the host (docker compose) |
 | `MAPTILER_KEY`       | unset                                 | satellite imagery on land; else Sentinel-2 cloudless |
 | `WEB_CACHE_DIR`      | `data/web-cache`                      | optical chips the dashboard fetched (`webcache` volume) |
+| `REPORTS_DIR`        | `data/reports`                        | reports (`reports` volume: written by the worker, read by the dashboard) |
+| `DASHBOARD_URL`      | unset                                 | the dashboard's address, to link the weekly report from its notification |

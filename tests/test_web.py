@@ -322,7 +322,9 @@ async def rows():
 
 @pytest.fixture
 async def client(rows, tmp_path):
-    settings = WebSettings(database_url=os.environ["UATU_TEST_DATABASE_URL"], sar_data_dir=tmp_path)
+    settings = WebSettings(
+        database_url=os.environ["UATU_TEST_DATABASE_URL"], sar_data_dir=tmp_path, reports_dir=tmp_path / "reports"
+    )
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
@@ -558,3 +560,25 @@ def test_land_outlines_that_touch_themselves_are_mended(monkeypatch):
     monkeypatch.setattr(service, "context_land", lambda covered: FeatureCollection(features=[]))
     land = service.land([(None, None, (36.9, -2.1, 37.2, -1.8))])
     assert len(land.features) == 1 and land.features[0].geometry.type in ("Polygon", "MultiPolygon")
+
+
+@needs_db
+async def test_reports(client, tmp_path):
+    folder = tmp_path / "reports" / "informe-2026-10-18"
+    folder.mkdir(parents=True)
+    (folder / "informe.html").write_text("<!doctype html><title>Uatu</title>")
+    (folder / "densidad.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (tmp_path / "reports" / "not-a-report").mkdir()
+    reports = await ok(client, "/api/v1/reports")
+    assert reports == [{"name": "informe-2026-10-18", "last_day": "2026-10-18",
+                        "url": "/api/v1/reports/informe-2026-10-18/informe.html"}]  # fmt: skip
+    page = await client.get(reports[0]["url"])
+    assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
+    assert (await client.get("/api/v1/reports/informe-2026-10-18/densidad.png")).headers["content-type"] == "image/png"
+    for bad in (
+        "informe-2026-10-18/..%2F..%2Fsecret.html",
+        "../informe.html",
+        "informe-2026-10-18/x.sh",
+        "informe-x/informe.html",
+    ):
+        assert (await client.get(f"/api/v1/reports/{bad}")).status_code == 404

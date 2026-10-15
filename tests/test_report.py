@@ -51,13 +51,18 @@ async def test_a_whole_report_with_its_figures(tmp_path):
     from uatu import db
     from uatu.report import figures
     from uatu.report.data import gather
+    from uatu.report.write import write_report
 
     engine = db.create_engine(os.environ["UATU_TEST_DATABASE_URL"])
     try:
         end = datetime.now(UTC)
         report = await gather(engine, end - timedelta(days=3), end, [ZONES["estrecho"]], ZONES, tmp_path)
+        # As the weekly task writes it: the folder named after the last whole day.
+        folder, _ = await write_report(engine, end.date(), 7, [ZONES["estrecho"]], ZONES, tmp_path, tmp_path / "out")
     finally:
         await engine.dispose()
+    assert folder.name == f"informe-{end.date() - timedelta(days=1)}"
+    assert (folder / "informe.md").exists() and (folder / "informe.html").exists()
     report.listed = report.listed or made_up().listed  # the figures with something to draw, whatever the database
     report.transits_by_day = report.transits_by_day or made_up().transits_by_day
     report.density = report.density or [(-5.5, 36.0, 12), (-5.48, 36.0, 3)]
@@ -73,3 +78,17 @@ async def test_a_whole_report_with_its_figures(tmp_path):
     md.write_text(render(report, {"density": "density.png"}))
     page = to_html(md).read_text()
     assert page.startswith("<!doctype html>") and "data:image/png;base64," in page and "<table>" in page
+
+
+def test_the_weekly_report_is_announced_with_a_link():
+    from pathlib import Path
+
+    from uatu.report.write import announcement
+
+    title, message, link = announcement(
+        Path("/data/reports/informe-2026-10-13"), made_up(), "http://192.168.1.41:8000/"
+    )
+    assert title == "Uatu: informe del 7 oct al 14 oct"
+    assert message == "1.234 barcos oídos, 0 pasadas de radar, 1 candidato sin AIS, 1 barco sancionado o vigilado."
+    assert link == "http://192.168.1.41:8000/api/v1/reports/informe-2026-10-13/informe.html"
+    assert announcement(Path("informe-2026-10-13"), made_up(), None)[2] is None
