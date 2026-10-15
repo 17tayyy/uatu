@@ -188,6 +188,11 @@ first two days): counts of passages are a floor, not a census.
   a minute for the first screen. A window read past the image's edge (a "boundless" read in
   rasterio) goes through a warped VRT, which ignores the overviews and resamples the full 20 m
   image. Reading only the part inside the image and placing it takes 0.03 s.
+- **Uatu's own deafness must be subtracted.** A tanker of the shadow fleet came out as notably
+  silent off Tarifa, 356 minutes. It had been last heard heading west, into the waters aisstream
+  hears poorly, and Uatu's connection dropped 38 minutes later for almost three hours: others
+  heard in those 38 minutes proved nothing about the rest. A gap now counts only if Uatu heard the
+  whole of its first hour; five other "gaps" that night began minutes before the outage.
 - **Only something outside can say everything is down.** When the home router lost its
   connection one night, every component was fine, and silent. An external dead man's switch is
   the only alarm that works then.

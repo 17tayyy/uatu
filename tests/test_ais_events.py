@@ -70,6 +70,23 @@ def test_a_vessel_going_silent_where_others_are_heard_is_a_gap():
     assert gap.details["silent_minutes"] == 120
 
 
+def test_a_gap_when_uatu_itself_went_deaf_says_nothing():
+    """CHEM NICHOLAS, 13 October: last heard at 21:55 UTC off Tarifa; Uatu's connection dropped at 22:34."""
+    from datetime import timedelta
+
+    from uatu.ais.events import downgrade_when_blind
+
+    silent = track(1, range(0, 61))
+    [gap] = detect_gaps([silent, *neighbours(4, range(0, 181)), *ahead(3, range(0, 181))], T0 + 180 * 60,
+                        STRAIT_OF_GIBRALTAR, at_sea(10), PROJ)  # fmt: skip
+    assert gap.severity == 2
+    outage = (gap.start + timedelta(minutes=38), gap.start + timedelta(hours=3, minutes=24))
+    [blind] = downgrade_when_blind([gap], [outage])
+    assert blind.severity == 1 and blind.details["uatu_blind"]
+    earlier = (gap.start - timedelta(hours=3), gap.start - timedelta(hours=1))
+    assert downgrade_when_blind([gap], [earlier]) == [gap]  # deaf before it went quiet: no matter
+
+
 def test_sailing_into_a_coverage_hole_is_not_going_dark():
     silent = track(1, range(0, 61))
     [gap] = gaps([silent, *neighbours(4, range(0, 181))], minutes_now=180)  # nobody heard ahead
