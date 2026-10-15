@@ -1,17 +1,17 @@
-// The time machine's controls: a moment since recording began, played back at 10 s to 30 min a second.
-// Passes are marked on the track (a click goes there) and Uatu's own outages shaded.
-import { History, Pause, Play, X } from "lucide-react";
+// The time machine, docked under the map: a moment since recording began, played at 10 s to 30 min a
+// second. Passes are marked on the track (a click goes there), Uatu's own outages hatched.
+import { Pause, Play, X } from "lucide-react";
 import { useHistoryRange, usePasses } from "../../api/queries";
 import { useUi } from "../../app/store";
 import { number, when } from "../../lib/format";
 import { useTimeInfo } from "../../map/TimeSync";
 import { HOUR, SPEEDS } from "../../map/time";
+import { Button } from "../../ui";
 import s from "./time.module.css";
 
 export function Timebar() {
   const time = useUi((u) => u.time);
   const zone = useUi((u) => u.zone);
-  const enterTime = useUi((u) => u.enterTime);
   const setTime = useUi((u) => u.setTime);
   const setPlaying = useUi((u) => u.setPlaying);
   const setSpeed = useUi((u) => u.setSpeed);
@@ -19,14 +19,7 @@ export function Timebar() {
   const info = useTimeInfo();
   const range = useHistoryRange(time != null).data;
   const passes = usePasses(zone).data ?? [];
-
-  if (!time) {
-    return (
-      <button type="button" className={s.open} onClick={() => enterTime(Date.now() - HOUR)}>
-        <History size={15} /> Máquina del tiempo
-      </button>
-    );
-  }
+  if (!time) return null;
 
   const from = range ? new Date(range.start).getTime() : Date.now() - 7 * 24 * HOUR;
   const to = Date.now();
@@ -34,47 +27,27 @@ export function Timebar() {
   const outage = range?.outages.find(
     (o) => new Date(o.start).getTime() <= time.t && time.t <= new Date(o.end).getTime(),
   );
-
   const play = () => {
-    if (!time.playing && time.t >= Date.now() - 60_000) setTime(Date.now() - 6 * HOUR); // at the end: from six hours ago
+    if (!time.playing && time.t >= Date.now() - 60_000) setTime(Date.now() - 6 * HOUR); // at the end: from 6 h ago
     setPlaying(!time.playing);
   };
 
   return (
     <section className={s.bar} aria-label="Máquina del tiempo">
-      <div className={s.top}>
-        <button type="button" className={s.play} onClick={play} aria-label={time.playing ? "Pausa" : "Reproducir"}>
-          {time.playing ? <Pause size={16} /> : <Play size={16} />}
-        </button>
-        <button type="button" className={s.step} onClick={() => setTime(time.t - 10 * 60_000)} title="10 min antes">
-          −10 min
-        </button>
-        <span className={s.label}>{when(time.t, time.t % 60_000 !== 0)}</span>
-        <button type="button" className={s.step} onClick={() => setTime(time.t + 10 * 60_000)} title="10 min después">
-          +10 min
-        </button>
-        <span className={s.grow} />
-        <select
-          className={s.speed}
-          value={time.speed}
-          onChange={(e) => setSpeed(Number(e.target.value))}
-          aria-label="Velocidad"
-        >
-          {SPEEDS.map((x) => (
-            <option key={x} value={x}>
-              {x < 60 ? `1 s = ${x} s` : `1 s = ${x / 60} min`}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className={s.close}
-          onClick={exitTime}
-          aria-label="Volver al presente"
-          title="Volver al presente"
-        >
-          <X size={16} />
-        </button>
+      <Button icon variant="primary" onClick={play} aria-label={time.playing ? "Pausa" : "Reproducir"}>
+        {time.playing ? <Pause size={14} /> : <Play size={14} />}
+      </Button>
+      <div className={s.when}>
+        <span className={`${s.label} mono`}>{when(time.t, true)}</span>
+        <span className={s.count} data-warning={outage ? true : undefined}>
+          {outage
+            ? `Uatu sin grabar hasta ${when(outage.end)}: lo que falta no es un barco callado`
+            : info.loading
+              ? "cargando…"
+              : info.vessels != null
+                ? `${number(info.vessels)} barcos`
+                : ""}
+        </span>
       </div>
       <div className={s.track}>
         {range?.outages.map((o) => (
@@ -112,15 +85,34 @@ export function Timebar() {
           aria-label="Momento"
         />
       </div>
-      <div className={s.count} data-warning={outage ? true : undefined}>
-        {outage
-          ? `⚠ Uatu no grababa AIS de ${when(outage.start)} a ${when(outage.end)} (sin conexión): lo que falta no es un barco callado`
-          : info.loading
-            ? "Cargando el AIS de ese momento…"
-            : info.vessels != null
-              ? `${number(info.vessels)} barcos oídos en la última media hora · las marcas son pasadas del radar`
-              : ""}
-      </div>
+      <Button size="small" variant="ghost" onClick={() => setTime(time.t - 10 * 60_000)} title="10 min antes">
+        −10′
+      </Button>
+      <Button size="small" variant="ghost" onClick={() => setTime(time.t + 10 * 60_000)} title="10 min después">
+        +10′
+      </Button>
+      <select
+        className={s.speed}
+        value={time.speed}
+        onChange={(e) => setSpeed(Number(e.target.value))}
+        aria-label="Velocidad"
+      >
+        {SPEEDS.map((x) => (
+          <option key={x} value={x}>
+            {x < 60 ? `×${x}` : `×${x / 60} min/s`}
+          </option>
+        ))}
+      </select>
+      <Button
+        icon
+        size="small"
+        variant="ghost"
+        onClick={exitTime}
+        aria-label="Volver al presente"
+        title="Volver al presente"
+      >
+        <X size={14} />
+      </Button>
     </section>
   );
 }

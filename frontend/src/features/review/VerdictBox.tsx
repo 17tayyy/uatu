@@ -1,11 +1,13 @@
 // Your verdict on a detection: one click (or key) to give it, then which vessel and a note if you like.
+
+import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDeleteReview, usePutReview, useSession } from "../../api/queries";
 import type { Detection, ReviewWrite } from "../../api/types";
 import { useUi } from "../../app/store";
 import { VERDICT, VERDICT_KEYS, type VerdictKey } from "../../lib/constants";
 import { when } from "../../lib/format";
-import { Button, fieldClass, formErrorClass, LinkButton, Shape, Tag } from "../../ui";
+import { Button, fieldClass, formErrorClass, Glyph, Kbd } from "../../ui";
 import s from "./review.module.css";
 
 export function VerdictBox({ detection: d, passId }: { detection: Detection; passId: string }) {
@@ -55,104 +57,111 @@ export function VerdictBox({ detection: d, passId }: { detection: Detection; pas
 
   if (!user) {
     return (
-      <div className={s.given}>
+      <div className={s.extra}>
         {review && current && (
-          <div className={s.givenHead}>
-            <Tag shape="square" color={VERDICT[current].color}>
-              {VERDICT[current].label}
-            </Tag>
-            <span className={s.meta}>
-              {review.reviewed_by ?? "alguien"}, {when(review.reviewed_at)}
+          <div className={s.given}>
+            <Glyph kind={VERDICT[current].glyph} color={VERDICT[current].color} size={13} />
+            <span style={{ color: "var(--text-2)" }}>{VERDICT[current].label}</span>
+            <span>
+              · {review.reviewed_by ?? "alguien"}, {when(review.reviewed_at)}
             </span>
           </div>
         )}
-        <LinkButton onClick={() => setLoginOpen(true)}>Entra para dar tu veredicto</LinkButton>
+        <div>
+          <Button size="small" onClick={() => setLoginOpen(true)}>
+            Entrar para dar un veredicto
+          </Button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className={s.given}>
-      <div className={s.verdicts}>
+    <div className={s.extra}>
+      <div className={s.menu}>
         {VERDICT_KEYS.map((key, i) => (
           <button
             key={key}
             type="button"
-            className={s.verdict}
-            style={{ "--tone": VERDICT[key].color } as React.CSSProperties}
+            className={s.option}
             aria-pressed={current === key}
             disabled={put.isPending}
             onClick={() => give(key)}
           >
-            <span className={s.verdictTop}>
-              <Shape kind="square" color={VERDICT[key].color} size={10} />
-              {VERDICT[key].label}
-              <span className={s.verdictKey}>{i + 1}</span>
-            </span>
-            <span className={s.verdictHint}>{VERDICT[key].hint}</span>
+            <Glyph kind={VERDICT[key].glyph} color={VERDICT[key].color} size={14} />
+            {VERDICT[key].label}
+            <span className={s.optionHint}>{VERDICT[key].hint}</span>
+            {current === key ? (
+              <Check size={14} className={s.check} />
+            ) : (
+              <span className={s.optionKey}>
+                <Kbd>{i + 1}</Kbd>
+              </span>
+            )}
           </button>
         ))}
       </div>
-      {review && (
-        <>
-          {!editing && (
-            <div className={s.meta}>
-              {review.mmsi && <>Es {review.vessel_name ?? `MMSI ${review.mmsi}`}. </>}
-              {review.note && <>«{review.note}» </>}
-              {review.reviewed_by ?? "Alguien"}, {when(review.reviewed_at)} ·{" "}
-              <LinkButton onClick={() => setEditing(true)}>
-                {review.mmsi || review.note ? "Cambiar barco o nota" : "Añadir barco o nota"}
-              </LinkButton>{" "}
-              ·{" "}
-              <LinkButton
-                onClick={() =>
-                  remove.mutate({ id: d.id, passId }, { onError: (e) => setError(`No se pudo quitar: ${e.message}`) })
-                }
-              >
-                Quitar
-              </LinkButton>
-            </div>
-          )}
-          {editing && (
-            <div className={s.extra}>
-              {current && VERDICT[current].vessel && (
-                <div className={s.row}>
-                  <input
-                    className={fieldClass}
-                    inputMode="numeric"
-                    maxLength={9}
-                    placeholder="MMSI del barco, si lo sabes"
-                    value={mmsi}
-                    onChange={(e) => setMmsi(e.target.value)}
-                    aria-label="MMSI del barco"
-                  />
-                  {suggestion && String(suggestion) !== mmsi && (
-                    <Button size="small" onClick={() => setMmsi(String(suggestion))}>
-                      {suggestionName ?? suggestion}
-                    </Button>
-                  )}
-                </div>
-              )}
-              <textarea
+      {review && !editing && (
+        <div className={s.given}>
+          {review.mmsi && <span className={s.note}>Es {review.vessel_name ?? `MMSI ${review.mmsi}`}.</span>}
+          {review.note && <span className={s.note}>«{review.note}»</span>}
+          <span>
+            {review.reviewed_by ?? "alguien"}, {when(review.reviewed_at)}
+          </span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
+            <Button size="small" variant="ghost" onClick={() => setEditing(true)}>
+              {review.mmsi || review.note ? "Editar" : "Barco o nota"}
+            </Button>
+            <Button
+              size="small"
+              variant="ghost"
+              onClick={() =>
+                remove.mutate({ id: d.id, passId }, { onError: (e) => setError(`No se pudo quitar: ${e.message}`) })
+              }
+            >
+              Quitar
+            </Button>
+          </span>
+        </div>
+      )}
+      {review && editing && (
+        <div className={s.extra}>
+          {current && VERDICT[current].vessel && (
+            <div className={s.row}>
+              <input
                 className={fieldClass}
-                rows={2}
-                maxLength={500}
-                placeholder="Nota (opcional): por qué"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                aria-label="Nota"
+                inputMode="numeric"
+                maxLength={9}
+                placeholder="MMSI del barco, si lo sabes"
+                value={mmsi}
+                onChange={(e) => setMmsi(e.target.value)}
+                aria-label="MMSI del barco"
               />
-              <div className={s.row}>
-                <Button variant="primary" size="small" onClick={saveDetails} disabled={put.isPending}>
-                  Guardar
+              {suggestion && String(suggestion) !== mmsi && (
+                <Button size="small" onClick={() => setMmsi(String(suggestion))} title="Usar el barco sugerido">
+                  {suggestionName ?? suggestion}
                 </Button>
-                <Button variant="ghost" size="small" onClick={() => setEditing(false)}>
-                  Cancelar
-                </Button>
-              </div>
+              )}
             </div>
           )}
-        </>
+          <textarea
+            className={fieldClass}
+            rows={2}
+            maxLength={500}
+            placeholder="Nota: por qué"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            aria-label="Nota"
+          />
+          <div className={s.row}>
+            <Button variant="primary" size="small" onClick={saveDetails} disabled={put.isPending}>
+              Guardar
+            </Button>
+            <Button variant="ghost" size="small" onClick={() => setEditing(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
       )}
       <p className={formErrorClass} role="alert">
         {error}

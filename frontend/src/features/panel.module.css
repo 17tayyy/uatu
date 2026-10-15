@@ -1,213 +1,235 @@
-/* What every panel is made of: a header, toolbars, lists of rows, stats. */
+/* A panel's list: dense one-line rows, as Linear lists issues. */
 
-.header {
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.eyebrow {
-  color: var(--text-3);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.title {
-  margin: 2px 0 0;
-  font-size: 18px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  overflow-wrap: anywhere;
-}
-.subtitle {
-  margin-top: 3px;
-  color: var(--text-3);
-  font-size: 13px;
-}
-.intro {
-  margin: 0;
-  padding: 12px 20px 4px;
-  color: var(--text-3);
-  font-size: 13px;
-}
-
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 12px 0 0 14px;
-  padding: 3px 6px;
-  border-radius: var(--radius-s);
-  color: var(--text-3);
-  font-size: 12.5px;
-  font-weight: 550;
-}
-.back:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.toolbar {
+.panel {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.grow {
-  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
-.search {
-  width: 100%;
-  height: 36px;
-  padding: 0 12px 0 34px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-s);
-  background: var(--bg) no-repeat 11px center;
-  color: var(--text);
-  font-size: 13.5px;
-}
-.search:focus {
-  border-color: var(--blue);
-  outline: none;
-}
-.searchWrap {
-  position: relative;
+.scroll {
   flex: 1;
-}
-.searchIcon {
-  position: absolute;
-  left: 11px;
-  top: 10px;
-  color: var(--text-3);
-  pointer-events: none;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .list {
   margin: 0;
-  padding: 0 10px;
+  padding: 0;
   list-style: none;
-}
-.list > li + li {
-  margin-top: 2px;
 }
 
 .row {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  padding: 10px 10px;
-  border-radius: var(--radius);
-  text-align: left;
-  transition: background 0.1s;
-}
-button.row:hover,
-a.row:hover {
-  background: var(--surface-2);
-}
-.row[aria-current="true"] {
-  background: var(--surface-3);
-  box-shadow: inset 2px 0 0 var(--text);
-}
-.rowTop {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
 }
-.rowTitle {
+
+button.row:hover,
+a.row:hover {
+  background: var(--hover);
+}
+
+.row[aria-current="true"] {
+  background: var(--active);
+}
+
+.row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+}
+
+/* The title keeps its room; what follows it gives way first. */
+.title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
+  color: var(--text);
+  font-weight: 500;
 }
-.rowTime {
+
+.meta {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex: none;
   color: var(--text-3);
-  font-size: 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
-.rowMeta {
+
+.time {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: rgba(235, 87, 87, 0.14);
+  color: #f08a8a;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* A detail's head: its title and facts, before the properties. */
+.head {
+  display: grid;
+  gap: 6px;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.headTitle {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+
+.headMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   color: var(--text-3);
   font-size: 12.5px;
 }
-.rowText {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  color: var(--text-2);
-  font-size: 13px;
-}
-.pills {
+
+.headActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-}
-
-.dayHeading {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  margin: 0;
-  padding: 12px 20px 6px;
-  background: var(--surface-1);
-  color: var(--text-3);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  margin: 14px 20px 6px;
-  border-radius: var(--radius);
-  overflow: hidden;
-  background: var(--border);
-}
-.stat {
-  padding: 10px 12px;
-  background: var(--surface-2);
-}
-.statValue {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  font-size: 19px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-.statLabel {
-  color: var(--text-3);
-  font-size: 11.5px;
-  line-height: 1.3;
+  margin-top: 6px;
 }
 
 .block {
-  padding: 6px 20px 10px;
   display: grid;
   gap: 10px;
+  padding: 12px 16px 14px;
+  border-bottom: 1px solid var(--line);
 }
-.callouts {
-  display: grid;
-  gap: 8px;
-  padding: 14px 20px 4px;
+
+.blockTitle {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
 }
-.links {
+
+/* Figures in a row: what a pass found. */
+.figures {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 16px;
-  padding: 4px 20px 10px;
-  font-size: 13px;
+  gap: 4px 16px;
+  font-size: 12.5px;
+  color: var(--text-3);
 }
-.cta {
+
+.figure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.figure strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 12.5px;
+}
+
+.alert {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  background: var(--tint);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.alertTitle {
   display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.searchField {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 10px 20px;
+  flex: 1;
+  height: 28px;
+  color: var(--text-3);
+}
+
+.searchField input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.searchField input::placeholder {
+  color: var(--text-4);
+}
+
+.grow {
+  flex: 1;
+}
+
+.link {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-decoration-color: var(--text-4);
+  text-underline-offset: 3px;
+}
+
+.link:hover {
+  color: var(--text);
 }

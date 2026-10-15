@@ -1,35 +1,70 @@
+.rowWrap {
+  position: relative;
+}
+
+.remove {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  opacity: 0;
+  background: var(--bg-1) !important;
+}
+
+.rowWrap:hover .remove,
+.remove:focus-visible {
+  opacity: 1;
+}
+
 .form {
   display: grid;
   gap: 8px;
-  margin: 0 20px 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
 }
+
+.addForm {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
 .fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
 }
+
 .wide {
   grid-column: 1 / -1;
 }
+
 .hint {
   margin: 0;
-  color: var(--text-3);
+  color: var(--text-4);
   font-size: 12px;
 }
+
 .actions {
   display: flex;
+  gap: 6px;
+}
+
+.watched {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, var(--orange) 10%, transparent);
+  color: var(--text-2);
+  font-size: 12.5px;
 }
-.titleLink {
-  text-align: left;
-  text-decoration: underline;
-  text-decoration-color: var(--text-3);
-  text-underline-offset: 3px;
+
+.eye {
+  color: var(--orange);
+  flex: none;
 }
-.titleLink:hover {
-  text-decoration-color: var(--text);
+
+.watchedText {
+  flex: 1;
+  min-width: 0;
 }

@@ -1,4 +1,5 @@
 // What things are called and how they look: one place for the map and the panels alike.
+import type { GlyphKind } from "../ui/Shape";
 
 export const API = "/api/v1";
 export const ALL = "todas"; // the whole coast, as a zone key
@@ -6,22 +7,24 @@ export const REFRESH_MS = 60_000;
 
 /** The palette. Map styles need literal colours; the CSS has the same values as custom properties. */
 export const C = {
-  bg: "#0b0d10",
-  surface: "#12151a",
-  line: "#262b33",
-  text: "#e8eaed",
-  text2: "#b4bac3",
-  muted: "#7d8590",
-  blue: "#4c8dff",
-  good: "#3fb950",
-  warning: "#f5b83d",
-  serious: "#f0883e",
-  critical: "#e5484d",
-  fixed: "#3a3f47",
-  land: "#1b1f25",
-  coast: "#3a414b",
-  infra: "#6b7280",
-  coverage: { good: "#8ab4f8", patchy: "#4c8dff", poor: "#1d4ea8" },
+  bg: "#08090a",
+  surface: "#0c0d0f",
+  line: "#25272b",
+  text: "#f7f8f8",
+  text2: "#c9ced6",
+  muted: "#8a8f98",
+  faint: "#62666d",
+  accent: "#5e6ad2",
+  blue: "#4ea7fc",
+  good: "#4cb782",
+  warning: "#f2c94c",
+  serious: "#f2994a",
+  critical: "#eb5757",
+  fixed: "#3b3e44",
+  land: "#101113",
+  coast: "#2c2f35",
+  infra: "#6b7079",
+  coverage: { good: "#9cc9fd", patchy: "#4ea7fc", poor: "#1f5ea8" },
 } as const;
 
 export type DetectionKind =
@@ -34,42 +37,57 @@ export type DetectionKind =
   | "fixed";
 
 /** How each radar detection reads, most worth a look first. */
-export const KIND: Record<DetectionKind, { label: string; color: string; rank: number; explain: string }> = {
+export const KIND: Record<
+  DetectionKind,
+  { label: string; color: string; rank: number; glyph: GlyphKind; explain: string }
+> = {
   went_silent: {
     label: "Dejó de emitir",
     color: C.critical,
     rank: 0,
+    glyph: "dot",
     explain: "Ningún AIS aquí, pero un barco que dejó de emitir hace rato pudo llegar hasta este punto.",
   },
   unidentified: {
     label: "Oscuro",
     color: C.critical,
     rank: 1,
+    glyph: "dot",
     explain: "Ningún AIS aquí, ningún barco callado que lo explique y buena recepción alrededor.",
   },
   reception_gap: {
     label: "Hueco de recepción",
     color: C.warning,
     rank: 2,
+    glyph: "half",
     explain: "Sin AIS aquí, pero un barco que lleva poco sin oírse pudo estar en este punto: probablemente recepción.",
   },
-  matched: { label: "Con AIS", color: C.blue, rank: 3, explain: "Emparejado con un barco que emitía AIS." },
+  matched: {
+    label: "Con AIS",
+    color: C.blue,
+    rank: 3,
+    glyph: "ring",
+    explain: "Emparejado con un barco que emitía AIS.",
+  },
   no_coverage: {
     label: "Sin AIS · mala recepción",
     color: C.muted,
     rank: 4,
+    glyph: "dotted",
     explain: "Ningún AIS aquí, pero alrededor aisstream oye poco: puede que emitiera y no le llegara.",
   },
   unpaired: {
     label: "Antes de grabar AIS",
     color: C.muted,
     rank: 5,
+    glyph: "dotted",
     explain: "Pasada anterior a la grabación de AIS.",
   },
   fixed: {
     label: "Objeto fijo",
     color: C.fixed,
     rank: 6,
+    glyph: "square",
     explain: "Un punto que aparece pasada tras pasada: plataforma, boya o fondeo largo.",
   },
 };
@@ -78,11 +96,20 @@ export const TO_REVIEW: DetectionKind[] = ["went_silent", "unidentified", "recep
 export type VerdictKey = "vessel_without_ais" | "vessel_with_ais" | "reception_gap" | "not_a_vessel";
 
 /** Your verdict on a detection. The order is the keyboard's: 1 to 4. */
-export const VERDICT: Record<VerdictKey, { label: string; color: string; vessel: boolean; hint: string }> = {
-  vessel_without_ais: { label: "Barco sin AIS", color: C.critical, vessel: true, hint: "Un barco que no emitía" },
-  vessel_with_ais: { label: "Barco con AIS", color: C.blue, vessel: true, hint: "Emitía; el emparejado falló" },
-  reception_gap: { label: "Hueco de recepción", color: C.warning, vessel: true, hint: "Emitía y no se oyó" },
-  not_a_vessel: { label: "No es un barco", color: C.muted, vessel: false, hint: "Ruido, estructura o artefacto" },
+export const VERDICT: Record<
+  VerdictKey,
+  { label: string; color: string; vessel: boolean; hint: string; glyph: GlyphKind }
+> = {
+  vessel_without_ais: { label: "Barco sin AIS", color: C.critical, vessel: true, hint: "No emitía", glyph: "check" },
+  vessel_with_ais: { label: "Barco con AIS", color: C.blue, vessel: true, hint: "Falló el emparejado", glyph: "check" },
+  reception_gap: {
+    label: "Hueco de recepción",
+    color: C.warning,
+    vessel: true,
+    hint: "Emitía, no se oyó",
+    glyph: "check",
+  },
+  not_a_vessel: { label: "No es un barco", color: C.muted, vessel: false, hint: "Ruido o estructura", glyph: "cross" },
 };
 export const VERDICT_KEYS = Object.keys(VERDICT) as VerdictKey[];
 

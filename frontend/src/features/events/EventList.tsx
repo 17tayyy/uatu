@@ -1,14 +1,14 @@
-// The AIS events of the last day to week: gaps, encounters, loitering, sanctioned vessels...
+// The AIS events of the last day to week, by day.
 import { useMemo } from "react";
 import { useEvents } from "../../api/queries";
 import type { EventFeature } from "../../api/types";
 import { type EventFilter, useUi } from "../../app/store";
 import { SEVERITY } from "../../lib/constants";
-import { dayHeading, when } from "../../lib/format";
+import { dayHeading, fmtTime } from "../../lib/format";
 import type { LngLat } from "../../lib/geo";
 import { flyTo } from "../../map/instance";
 import { selectEvent } from "../../map/interactions";
-import { Empty, ErrorNote, Loading, Segmented, Tag } from "../../ui";
+import { Empty, ErrorNote, Glyph, Group, Header, Loading, ToggleGroup, Toolbar } from "../../ui";
 import p from "../panel.module.css";
 
 function EventRow({ feature }: { feature: EventFeature }) {
@@ -16,6 +16,7 @@ function EventRow({ feature }: { feature: EventFeature }) {
   const selected = useUi((u) => u.selection?.kind === "event" && u.selection.event.id === e.id);
   const sev = SEVERITY[e.severity] ?? SEVERITY[1]!;
   const lngLat = feature.geometry.coordinates as LngLat;
+  const [what, who] = e.title.includes(": ") ? e.title.split(/: (.*)/s) : [e.title, ""];
   return (
     <li>
       <button
@@ -26,16 +27,14 @@ function EventRow({ feature }: { feature: EventFeature }) {
           selectEvent(e, lngLat);
           flyTo(lngLat, 10);
         }}
+        title={e.message}
       >
-        <div className={p.rowTop}>
-          <Tag shape="diamond" color={sev.color}>
-            {sev.label}
-          </Tag>
-          <span className={p.grow} />
-          <span className={p.rowTime}>{when(e.start_at)}</span>
-        </div>
-        <div style={{ fontWeight: 600 }}>{e.title}</div>
-        <div className={p.rowText}>{e.message}</div>
+        <Glyph kind="diamond" color={sev.color} title={sev.label} />
+        <span className={p.main}>
+          <span className={p.title}>{who || what}</span>
+          {who && <span className={p.meta}>{what}</span>}
+        </span>
+        <span className={p.time}>{fmtTime.format(new Date(e.start_at))}</span>
       </button>
     </li>
   );
@@ -62,16 +61,10 @@ export function EventList() {
   }, [events.data]);
 
   return (
-    <>
-      <div className={p.header}>
-        <div className={p.eyebrow}>AIS</div>
-        <h1 className={p.title}>Eventos</h1>
-        <div className={p.subtitle}>
-          Apagones, encuentros, merodeos, barcos sobre cables, sancionados y lo que el AIS no puede decir de verdad.
-        </div>
-      </div>
-      <div className={p.toolbar}>
-        <Segmented<EventFilter["minSeverity"]>
+    <div className={p.panel}>
+      <Header crumbs={[["Eventos", null]]} />
+      <Toolbar>
+        <ToggleGroup<EventFilter["minSeverity"]>
           label="Gravedad"
           options={[
             [3, "Alertas"],
@@ -82,7 +75,7 @@ export function EventList() {
           onChange={(minSeverity) => setFilter({ minSeverity })}
         />
         <span className={p.grow} />
-        <Segmented<EventFilter["hours"]>
+        <ToggleGroup<EventFilter["hours"]>
           label="Periodo"
           options={[
             [24, "24 h"],
@@ -92,25 +85,26 @@ export function EventList() {
           value={filter.hours}
           onChange={(hours) => setFilter({ hours })}
         />
+      </Toolbar>
+      <div className={p.scroll}>
+        {events.isPending ? (
+          <Loading />
+        ) : events.isError ? (
+          <ErrorNote error={events.error} />
+        ) : days.length === 0 ? (
+          <Empty>Ningún evento con este filtro.</Empty>
+        ) : (
+          days.map(([day, list]) => (
+            <Group key={day} title={day} count={list.length}>
+              <ul className={p.list}>
+                {list.map((f) => (
+                  <EventRow key={f.properties.id} feature={f} />
+                ))}
+              </ul>
+            </Group>
+          ))
+        )}
       </div>
-      {events.isPending ? (
-        <Loading />
-      ) : events.isError ? (
-        <ErrorNote error={events.error} />
-      ) : days.length === 0 ? (
-        <Empty>Ningún evento con este filtro.</Empty>
-      ) : (
-        days.map(([day, list]) => (
-          <section key={day}>
-            <h2 className={p.dayHeading}>{day}</h2>
-            <ul className={p.list}>
-              {list.map((f) => (
-                <EventRow key={f.properties.id} feature={f} />
-              ))}
-            </ul>
-          </section>
-        ))
-      )}
-    </>
+    </div>
   );
 }

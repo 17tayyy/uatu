@@ -46,6 +46,12 @@ export function dayHeading(iso: string): string {
   return capitalise(fmtWeekday.format(d));
 }
 
+/** "Hoy", "Ayer", "14 oct": a day, short. */
+export function dayShort(iso: string): string {
+  const heading = dayHeading(iso);
+  return heading === "Hoy" || heading === "Ayer" ? heading : fmtDay.format(new Date(iso));
+}
+
 export function duration(minutes: number): string {
   const m = Math.round(minutes);
   if (m < 60) return `${m} min`;

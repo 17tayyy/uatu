@@ -1,16 +1,15 @@
 // For an unpaired detection: how much AIS was heard around it, against what counts as well received.
 import type { Detection, ReceptionRule } from "../../api/types";
-import { decimal, metres, plural } from "../../lib/format";
+import { decimal, metres } from "../../lib/format";
+import { Properties } from "../../ui";
 import s from "./inspector.module.css";
 
-function Row({ value, minimum, met }: { value: string; minimum: string; met: boolean }) {
+function check(value: string, minimum: string, met: boolean) {
   return (
-    <div className={s.receptionRow}>
-      <span>{value}</span>
-      <span className={s.need}>
-        mínimo {minimum} <span className={met ? s.met : s.unmet}>{met ? "✓" : "✗"}</span>
-      </span>
-    </div>
+    <span>
+      <span className="mono">{value}</span> <span className={met ? s.ok : s.no}>{met ? "✓" : "✗"}</span>{" "}
+      <span className={s.dim}>mín. {minimum}</span>
+    </span>
   );
 }
 
@@ -20,27 +19,17 @@ export function Reception({ detection: d, rule }: { detection: Detection; rule: 
   const vessels = d.ais_vessels_nearby >= rule.min_vessels;
   const reports = perVessel >= rule.min_reports_per_vessel;
   return (
-    <div className={s.box}>
-      <div className={s.boxTitle}>
-        AIS alrededor ({metres(rule.radius_m)}, ±{decimal(rule.window_hours)} h)
+    <div className={s.section}>
+      <div className={s.sectionTitle}>
+        AIS alrededor · {metres(rule.radius_m)}, ±{decimal(rule.window_hours)} h
       </div>
-      <div className={s.reception}>
-        <Row
-          value={plural(d.ais_vessels_nearby, "barco oído", "barcos oídos")}
-          minimum={String(rule.min_vessels)}
-          met={vessels}
-        />
-        <Row
-          value={`${decimal(perVessel)} mensajes por barco`}
-          minimum={decimal(rule.min_reports_per_vessel)}
-          met={reports}
-        />
-        <div className={s.verdictLine}>
-          {vessels && reports
-            ? "Recepción buena: su silencio cuenta."
-            : "Recepción insuficiente: su silencio no dice nada."}
-        </div>
-      </div>
+      <Properties
+        rows={[
+          ["Barcos oídos", check(String(d.ais_vessels_nearby), String(rule.min_vessels), vessels)],
+          ["Mensajes/barco", check(decimal(perVessel), decimal(rule.min_reports_per_vessel), reports)],
+          ["Recepción", vessels && reports ? "buena: su silencio cuenta" : "insuficiente: su silencio no dice nada"],
+        ]}
+      />
     </div>
   );
 }

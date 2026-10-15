@@ -5,29 +5,38 @@ import { useLive, useVesselSearch } from "../../api/queries";
 import type { LiveVesselFeature } from "../../api/types";
 import { navigate } from "../../app/router";
 import { useUi } from "../../app/store";
+import { C } from "../../lib/constants";
 import { ago } from "../../lib/format";
 import { listing } from "../../lib/listing";
-import { Empty, ErrorNote, Loading, Section, Tag } from "../../ui";
+import { Empty, ErrorNote, Glyph, Group, Header, Loading, Toolbar } from "../../ui";
 import p from "../panel.module.css";
+import s from "./vessels.module.css";
+
+export function ListingLabel({ label, color }: { label: string | null; color: string }) {
+  if (!label) return null;
+  return (
+    <span className={s.label}>
+      <span className={s.labelDot} style={{ background: color }} />
+      {label}
+    </span>
+  );
+}
 
 function LiveRow({ feature }: { feature: LiveVesselFeature }) {
   const v = feature.properties;
   const l = listing(v);
   const moving = v.sog != null && v.sog >= 0.5;
-  const facts = [v.flag, v.ship_type, v.length_m && `${v.length_m} m`].filter(Boolean).join(" · ");
+  const meta = [v.flag, v.ship_type, v.length_m && `${v.length_m} m`].filter(Boolean).join(" · ");
   return (
     <li>
       <button type="button" className={p.row} onClick={() => navigate(`vessels/${v.mmsi}`)}>
-        <div className={p.rowTop}>
-          <span className={p.rowTitle}>{v.name ?? `MMSI ${v.mmsi}`}</span>
-          {l.label && (
-            <Tag shape="arrow" color={l.color}>
-              {l.label}
-            </Tag>
-          )}
-          <span className={p.rowTime}>{moving ? `${v.sog} nudos` : "parado"}</span>
-        </div>
-        {facts && <div className={p.rowMeta}>{facts}</div>}
+        <Glyph kind={moving ? "arrow" : "ring"} color={l.level ? l.color : C.muted} size={13} />
+        <span className={p.main}>
+          <span className={p.title}>{v.name ?? `MMSI ${v.mmsi}`}</span>
+          <span className={p.meta}>{meta}</span>
+        </span>
+        <ListingLabel label={l.label} color={l.color} />
+        <span className={p.time}>{moving ? `${v.sog} kn` : "parado"}</span>
       </button>
     </li>
   );
@@ -53,18 +62,16 @@ export function VesselList() {
       ),
     [live.data],
   );
+  const flagged = sorted.filter((f) => listing(f.properties).level > 0);
+  const rest = sorted.filter((f) => listing(f.properties).level === 0);
 
   return (
-    <>
-      <div className={p.header}>
-        <div className={p.eyebrow}>AIS</div>
-        <h1 className={p.title}>Barcos</h1>
-      </div>
-      <div className={p.toolbar}>
-        <div className={p.searchWrap}>
-          <Search size={15} className={p.searchIcon} />
+    <div className={p.panel}>
+      <Header crumbs={[["Barcos", null]]} />
+      <Toolbar>
+        <label className={p.searchField}>
+          <Search size={14} />
           <input
-            className={p.search}
             type="search"
             placeholder="Buscar por nombre o MMSI"
             aria-label="Buscar barco"
@@ -72,49 +79,59 @@ export function VesselList() {
             maxLength={40}
             onChange={(e) => setQuery(e.target.value)}
           />
-        </div>
-      </div>
-      {q.length >= 2 ? (
-        search.isPending ? (
-          <Loading />
-        ) : search.isError ? (
-          <ErrorNote error={search.error} />
-        ) : search.data.length === 0 ? (
-          <Empty>Ningún barco coincide.</Empty>
-        ) : (
-          <ul className={p.list} style={{ paddingTop: 8 }}>
-            {search.data.map((v) => (
-              <li key={v.mmsi}>
-                <button type="button" className={p.row} onClick={() => navigate(`vessels/${v.mmsi}`)}>
-                  <div className={p.rowTop}>
-                    <span className={p.rowTitle}>{v.name ?? `MMSI ${v.mmsi}`}</span>
-                    <span className={p.rowTime}>{v.mmsi}</span>
-                  </div>
-                  <div className={p.rowMeta}>
-                    {[v.flag, v.ship_type, v.last_seen_at && `visto ${ago(v.last_seen_at)}`]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )
-      ) : (
-        <Section title="En la zona en la última hora" count={sorted.length}>
-          {live.isPending ? (
+        </label>
+      </Toolbar>
+      <div className={p.scroll}>
+        {q.length >= 2 ? (
+          search.isPending ? (
             <Loading />
-          ) : sorted.length === 0 ? (
-            <Empty>Ningún barco oído en la última hora.</Empty>
+          ) : search.isError ? (
+            <ErrorNote error={search.error} />
+          ) : search.data.length === 0 ? (
+            <Empty>Ningún barco coincide.</Empty>
           ) : (
-            <ul className={p.list}>
-              {sorted.map((f) => (
-                <LiveRow key={f.properties.mmsi} feature={f} />
-              ))}
-            </ul>
-          )}
-        </Section>
-      )}
-    </>
+            <Group title="Resultados" count={search.data.length}>
+              <ul className={p.list}>
+                {search.data.map((v) => (
+                  <li key={v.mmsi}>
+                    <button type="button" className={p.row} onClick={() => navigate(`vessels/${v.mmsi}`)}>
+                      <Glyph kind="ring" color={C.muted} size={13} />
+                      <span className={p.main}>
+                        <span className={p.title}>{v.name ?? `MMSI ${v.mmsi}`}</span>
+                        <span className={p.meta}>{[v.flag, v.ship_type].filter(Boolean).join(" · ")}</span>
+                      </span>
+                      <span className={p.time}>{v.last_seen_at ? ago(v.last_seen_at) : v.mmsi}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Group>
+          )
+        ) : live.isPending ? (
+          <Loading />
+        ) : sorted.length === 0 ? (
+          <Empty>Ningún barco oído en la última hora.</Empty>
+        ) : (
+          <>
+            {flagged.length > 0 && (
+              <Group title="Sancionados y vigilados" count={flagged.length}>
+                <ul className={p.list}>
+                  {flagged.map((f) => (
+                    <LiveRow key={f.properties.mmsi} feature={f} />
+                  ))}
+                </ul>
+              </Group>
+            )}
+            <Group title="Oídos en la última hora" count={rest.length}>
+              <ul className={p.list}>
+                {rest.map((f) => (
+                  <LiveRow key={f.properties.mmsi} feature={f} />
+                ))}
+              </ul>
+            </Group>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

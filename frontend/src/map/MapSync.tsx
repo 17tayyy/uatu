@@ -265,7 +265,8 @@ export function MapSync() {
     map.setPaintProperty("events", "icon-opacity", opacity);
   }, [reviewing, time]);
 
-  // Keep what the map centres on clear of the inspector (on a phone, of the sheet below).
+  // On a phone the inspector is a sheet over the map: keep what the map centres on clear of it.
+  // (On a wider screen it sits beside the map, which simply gets narrower.)
   useEffect(() => {
     const map = getMap();
     if (!map) return;
@@ -273,7 +274,7 @@ export function MapSync() {
     map.setPadding({
       top: 0,
       left: 0,
-      right: !phone && selection ? 400 : 0,
+      right: 0,
       bottom: phone && selection ? map.getContainer().clientHeight * 0.62 : 0,
     });
   }, [selection]);

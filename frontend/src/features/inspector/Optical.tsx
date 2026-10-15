@@ -22,7 +22,7 @@ function caption(image: OpticalImage): string {
     when(image.acquired_at),
     `${gap} ${image.minutes_from_radar >= 0 ? "después" : "antes"} del radar`,
     `nubes ${Math.round(image.cloud * 100)} %`,
-    `${km} × ${km} km`,
+    `${km} km`,
   ].join(" · ");
 }
 
@@ -44,28 +44,21 @@ export function Optical({ detectionId, lngLat }: { detectionId: number; lngLat: 
     }
   };
 
+  if (here) return <span className={s.caption}>La foto óptica está en el mapa.</span>;
   return (
-    <div className={s.optical}>
-      {here ? (
-        <span className={s.caption}>Su foto óptica está en el mapa.</span>
-      ) : state === "busy" ? (
-        <span className={s.caption}>
-          <Spinner /> Buscando la foto más clara de ±3 días…
-        </span>
-      ) : (
-        <>
-          <Button size="small" onClick={look}>
-            <ImageIcon size={13} /> Foto óptica (Sentinel-2)
-          </Button>
-          <span className={s.caption}>
-            {state === "none"
-              ? "No hay ninguna foto de Sentinel-2 sin nubes de este sitio en ±3 días."
-              : state !== "idle"
-                ? state
-                : "Sentinel-2 pasa hacia mediodía: un barco en marcha ya no estará; uno fondeado, una plataforma o una granja, sí."}
-          </span>
-        </>
-      )}
+    <div style={{ display: "grid", gap: 6 }}>
+      <div>
+        <Button size="small" onClick={look} disabled={state === "busy"}>
+          {state === "busy" ? <Spinner /> : <ImageIcon size={13} />} Foto óptica (Sentinel-2)
+        </Button>
+      </div>
+      <span className={s.caption}>
+        {state === "none"
+          ? "Ninguna foto sin nubes de este sitio en ±3 días."
+          : state !== "idle" && state !== "busy"
+            ? state
+            : "Hacia mediodía: lo fondeado sigue ahí, lo que navega no."}
+      </span>
     </div>
   );
 }
@@ -115,9 +108,9 @@ export function OpticalCard() {
         <span>
           <strong>Foto óptica</strong> · {caption(optical.image)}
         </span>
-        <button type="button" onClick={() => showOptical(null)} aria-label="Quitar la foto" title="Quitar la foto">
-          <X size={15} />
-        </button>
+        <Button icon size="small" variant="ghost" onClick={() => showOptical(null)} aria-label="Quitar la foto">
+          <X size={13} />
+        </Button>
       </div>
       <label className={s.opacity}>
         Opacidad

@@ -1,52 +1,62 @@
 // Your own watch list: an alert to the phone whenever one of its vessels is heard on the coast.
-import { Eye, Plus } from "lucide-react";
+import { Eye, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { useAddWatch, useRemoveWatch, useSession, useWatches } from "../../api/queries";
 import type { WatchCreate, WatchRead } from "../../api/types";
 import { navigate } from "../../app/router";
 import { useUi } from "../../app/store";
-import { ago, capitalise, fmtDay } from "../../lib/format";
-import { Button, Empty, ErrorNote, fieldClass, formErrorClass, LinkButton, Loading, labelClass } from "../../ui";
+import { C } from "../../lib/constants";
+import { ago, capitalise } from "../../lib/format";
+import {
+  Button,
+  Empty,
+  ErrorNote,
+  fieldClass,
+  formErrorClass,
+  Glyph,
+  Group,
+  Header,
+  Loading,
+  labelClass,
+} from "../../ui";
 import p from "../panel.module.css";
 import s from "./watch.module.css";
 
 function WatchRow({ w, canEdit }: { w: WatchRead; canEdit: boolean }) {
   const remove = useRemoveWatch();
-  const [heard, ...others] = w.vessels;
+  const [heard] = w.vessels;
   const title = heard?.name ?? w.name ?? (w.imo ? `IMO ${w.imo}` : `MMSI ${w.mmsi}`);
-  const by = [w.imo && `IMO ${w.imo}`, w.mmsi && `MMSI ${w.mmsi}`, w.name && `nombre «${w.name}»`]
-    .filter(Boolean)
-    .join(" · ");
+  const by = [w.imo && `IMO ${w.imo}`, w.mmsi && `MMSI ${w.mmsi}`, w.name && `«${w.name}»`].filter(Boolean).join(", ");
   return (
-    <li>
-      <div className={p.row}>
-        <div className={p.rowTop}>
-          {heard ? (
-            <button
-              type="button"
-              className={`${p.rowTitle} ${s.titleLink}`}
-              onClick={() => navigate(`vessels/${heard.mmsi}`)}
-            >
-              {title}
-            </button>
-          ) : (
-            <span className={p.rowTitle}>{title}</span>
-          )}
-          <span className={p.rowTime}>{heard?.last_seen_at ? `oído ${ago(heard.last_seen_at)}` : "aún no oído"}</span>
-        </div>
-        <div className={p.rowText}>{capitalise(w.note)}</div>
-        <div className={p.rowMeta}>
-          Por {by} · desde el {fmtDay.format(new Date(w.added_at))}
-          {others.length > 0 && ` · coincide también con ${others.map((o) => o.name ?? `MMSI ${o.mmsi}`).join(", ")}`}
-        </div>
-        {canEdit && (
-          <div>
-            <LinkButton disabled={remove.isPending} onClick={() => remove.mutate(w.id)}>
-              Quitar
-            </LinkButton>
-          </div>
-        )}
-      </div>
+    <li className={s.rowWrap}>
+      <button
+        type="button"
+        className={p.row}
+        disabled={!heard}
+        onClick={() => heard && navigate(`vessels/${heard.mmsi}`)}
+        title={`Por ${by}`}
+      >
+        <Glyph kind={heard?.last_seen_at ? "dot" : "ring"} color={C.serious} size={13} />
+        <span className={p.main}>
+          <span className={p.title}>{title}</span>
+          <span className={p.meta}>{capitalise(w.note)}</span>
+        </span>
+        <span className={p.time}>{heard?.last_seen_at ? ago(heard.last_seen_at) : "sin oír"}</span>
+      </button>
+      {canEdit && (
+        <Button
+          icon
+          size="small"
+          variant="ghost"
+          className={s.remove}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate(w.id)}
+          title="Quitar"
+          aria-label={`Quitar ${title}`}
+        >
+          <X size={13} />
+        </Button>
+      )}
     </li>
   );
 }
@@ -71,7 +81,7 @@ function AddForm({ onDone }: { onDone: () => void }) {
     add.mutate(body, { onSuccess: onDone, onError: (err) => setError(`No se pudo guardar: ${err.message}`) });
   };
   return (
-    <form className={s.form} onSubmit={save} noValidate>
+    <form className={`${s.form} ${s.addForm}`} onSubmit={save} noValidate>
       <div className={s.fields}>
         <label className={labelClass}>
           IMO
@@ -79,7 +89,6 @@ function AddForm({ onDone }: { onDone: () => void }) {
             className={fieldClass}
             inputMode="numeric"
             maxLength={7}
-            placeholder="7 cifras"
             value={imo}
             onChange={(e) => setImo(e.target.value)}
           />
@@ -90,38 +99,32 @@ function AddForm({ onDone }: { onDone: () => void }) {
             className={fieldClass}
             inputMode="numeric"
             maxLength={9}
-            placeholder="9 cifras"
             value={mmsi}
             onChange={(e) => setMmsi(e.target.value)}
           />
         </label>
         <label className={`${labelClass} ${s.wide}`}>
           Nombre
-          <input
+          <input className={fieldClass} maxLength={40} value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className={`${labelClass} ${s.wide}`}>
+          Por qué
+          <textarea
             className={fieldClass}
-            maxLength={40}
-            placeholder="como lo emite"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            rows={2}
+            maxLength={300}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
           />
         </label>
       </div>
-      <textarea
-        className={fieldClass}
-        rows={2}
-        maxLength={300}
-        placeholder="Por qué lo vigilas"
-        aria-label="Por qué lo vigilas"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-      <p className={s.hint}>Basta uno: el IMO sigue al casco aunque cambie de nombre, MMSI o bandera.</p>
+      <p className={s.hint}>Basta uno. El IMO sigue al casco aunque cambie de nombre, MMSI o bandera.</p>
       <p className={formErrorClass}>{error}</p>
       <div className={s.actions}>
-        <Button type="submit" variant="primary" size="small" disabled={add.isPending}>
+        <Button type="submit" size="small" variant="primary" disabled={add.isPending}>
           Vigilar
         </Button>
-        <Button variant="ghost" size="small" onClick={onDone}>
+        <Button size="small" variant="ghost" onClick={onDone}>
           Cancelar
         </Button>
       </div>
@@ -135,42 +138,35 @@ export function WatchList() {
   const setLoginOpen = useUi((u) => u.setLoginOpen);
   const [adding, setAdding] = useState(false);
   return (
-    <>
-      <div className={p.header}>
-        <div className={p.eyebrow}>Tuya</div>
-        <h1 className={p.title}>Lista de vigilancia</h1>
-        <div className={p.subtitle}>
-          Te avisa al móvil cada vez que se oiga en la costa a uno de estos barcos. No sale en los informes.
-        </div>
-      </div>
-      <div className={p.cta}>
-        {user ? (
-          !adding && (
-            <Button onClick={() => setAdding(true)}>
-              <Plus size={14} /> Añadir por IMO, MMSI o nombre
-            </Button>
-          )
+    <div className={p.panel}>
+      <Header
+        crumbs={[["Vigilancia", null]]}
+        actions={
+          <Button size="small" onClick={() => (user ? setAdding(true) : setLoginOpen(true))} disabled={adding}>
+            <Plus size={13} /> Añadir
+          </Button>
+        }
+      />
+      <div className={p.scroll}>
+        {adding && <AddForm onDone={() => setAdding(false)} />}
+        {watches.isPending ? (
+          <Loading />
+        ) : watches.isError ? (
+          <ErrorNote error={watches.error} />
+        ) : watches.data.length === 0 ? (
+          <Empty icon={<Eye size={22} />}>
+            Tu lista está vacía. Aviso al móvil cuando se oiga a uno de sus barcos.
+          </Empty>
         ) : (
-          <Button onClick={() => setLoginOpen(true)}>Entra para cambiar tu lista</Button>
+          <Group title="Tu lista" count={watches.data.length}>
+            <ul className={p.list}>
+              {watches.data.map((w) => (
+                <WatchRow key={w.id} w={w} canEdit={Boolean(user)} />
+              ))}
+            </ul>
+          </Group>
         )}
       </div>
-      {adding && <AddForm onDone={() => setAdding(false)} />}
-      {watches.isPending ? (
-        <Loading />
-      ) : watches.isError ? (
-        <ErrorNote error={watches.error} />
-      ) : watches.data.length === 0 ? (
-        <Empty>
-          <Eye size={26} />
-          Vacía. Añade barcos aquí o desde su ficha («Vigilar este barco»).
-        </Empty>
-      ) : (
-        <ul className={p.list}>
-          {watches.data.map((w) => (
-            <WatchRow key={w.id} w={w} canEdit={Boolean(user)} />
-          ))}
-        </ul>
-      )}
-    </>
+    </div>
   );
 }
