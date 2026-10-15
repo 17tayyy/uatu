@@ -18,6 +18,7 @@ class Risk(OutputSchema):
 
 
 class Watch(OutputSchema):
+    id: int
     note: str
     added_at: datetime
 

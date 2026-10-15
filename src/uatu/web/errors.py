@@ -31,6 +31,12 @@ class NotFoundError(AppError):
         super().__init__(f"{resource} not found")
 
 
+class ForbiddenError(AppError):
+    status_code = 403
+    code = "forbidden"
+    default_message = "Forbidden"
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

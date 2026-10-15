@@ -29,7 +29,7 @@ body { background: var(--page); overflow: hidden; }
 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 
-button:focus-visible, input:focus-visible, a:focus-visible {
+button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible, a:focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
@@ -399,6 +399,68 @@ div.row:hover { background: none; }
 
 .note { padding: 12px 20px; color: var(--muted); font-size: 13px; }
 
+/* Your watch list ---------------------------------------------------------------------------- */
+
+.watch-list > summary { cursor: pointer; list-style: none; }
+
+.watch-list > summary::-webkit-details-marker { display: none; }
+
+.watch-list > summary::before { content: "▸ "; }
+
+.watch-list[open] > summary::before { content: "▾ "; }
+
+.watch-list { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+
+.watch-start { padding: 12px 20px 0; }
+
+.watch-start .text-button { display: inline-flex; align-items: center; gap: 6px; }
+
+.watch-start svg { width: 12px; height: 12px; }
+
+.watch-form { display: grid; gap: 8px; }
+
+div > .watch-form:not(.callout) { padding: 12px 20px; }
+
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.field-label { display: grid; gap: 3px; color: var(--muted); font-size: 12px; }
+
+.field-label:has(.wide) { grid-column: 1 / -1; }
+
+.field {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.field::placeholder { color: var(--muted); }
+
+.form-hint { margin: 0; color: var(--muted); font-size: 12px; }
+
+.form-error { margin: 0; color: var(--ink); font-size: 13px; }
+
+.form-error:empty { display: none; }
+
+.form-actions { display: flex; align-items: center; gap: 16px; margin-top: 6px; }
+
+.primary-button { padding: 6px 14px; border-radius: 8px; background: var(--ink); color: var(--page); font-weight: 550; }
+
+.primary-button:hover { background: var(--ink-2); }
+
+.text-button, .text-link { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
+
+.text-link { color: var(--ink); text-align: left; }
+
+.text-button:hover, .text-link:hover { color: var(--ink); }
+
+.text-button:disabled { opacity: 0.5; cursor: default; }
+
 .links { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0 20px 14px; font-size: 13px; }
 
 /* Map overlay -------------------------------------------------------------------------------- */
@@ -635,7 +697,8 @@ div.row:hover { background: none; }
 
   .tabs { padding: 0 8px; }
 
-  .row, .toolbar, .kv, .stats, .detail-head, .note, .section-title, .links { padding-left: 16px; padding-right: 16px; }
+  .row, .toolbar, .kv, .stats, .detail-head, .note, .section-title, .links, .watch-start { padding-left: 16px; padding-right: 16px; }
+  div > .watch-form:not(.callout) { padding-left: 16px; padding-right: 16px; }
   .source-note { margin-left: 16px; margin-right: 16px; }
 
   .back { margin-left: 16px; }

@@ -34,6 +34,7 @@ from uatu.web.reports.router import router as reports_router
 from uatu.web.schemas import FeatureCollection
 from uatu.web.status.router import router as status_router
 from uatu.web.vessels.router import router as vessels_router
+from uatu.web.watches.router import router as watches_router
 from uatu.web.zones.router import router as zones_router
 from uatu.zones import grid_of, land_path
 
@@ -103,6 +104,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         optical_router,
         events_router,
         vessels_router,
+        watches_router,
         companies_router,
         history_router,
         reports_router,
