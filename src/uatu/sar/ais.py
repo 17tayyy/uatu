@@ -14,7 +14,11 @@ from uatu.config import BBox
 from uatu.db.models import Position, Vessel
 from uatu.sar.annotation import AcquisitionGeometry
 
-MAX_GAP = timedelta(minutes=10)  # never estimate a position further than this from a real report
+# Never estimate a position further than this from a real report. aisstream.io hears many vessels only
+# every 10-30 minutes (anchored ones behind Gibraltar, about once an hour): at 10 minutes, 12 of the 48
+# vessels the radar saw on 14 October went unpaired. The time machine draws a vessel for as long, so the
+# map and the pairing agree on who was there.
+MAX_GAP = timedelta(minutes=30)
 SILENT_WINDOW = timedelta(hours=3)  # how long a vessel may have been silent to be a dark suspect
 _METRES_PER_DEGREE = 111_320.0
 

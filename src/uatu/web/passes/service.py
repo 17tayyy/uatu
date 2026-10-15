@@ -177,6 +177,7 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
     summary = _summary(row, data_dir)
 
     paired, suspect = Vessel.__table__.alias("paired"), Vessel.__table__.alias("suspect")
+    seen = SarAisCheck.__table__.alias("seen")
     detections = (
         await db.execute(
             select(
@@ -185,8 +186,19 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
                 paired.c.name.label("vessel_name"),
                 suspect.c.name.label("suspect_name"),
                 SarFixedObject.passes_seen,
+                seen.c.lon.label("ais_lon"),
+                seen.c.lat.label("ais_lat"),
+                seen.c.doppler_shift_m,
             )
             .outerjoin(paired, paired.c.mmsi == SarDetection.mmsi)
+            .outerjoin(
+                seen,
+                and_(
+                    seen.c.scene_id == SarDetection.scene_id,
+                    seen.c.mmsi == SarDetection.mmsi,
+                    seen.c.status == "detected",
+                ),
+            )
             .outerjoin(suspect, suspect.c.mmsi == SarDetection.suspected_mmsi)
             .outerjoin(SarFixedObject, SarFixedObject.id == SarDetection.fixed_object_id)
             .where(SarDetection.scene_id.in_(row.frame_ids))
@@ -246,6 +258,9 @@ async def get_pass(db: AsyncSession, data_dir: Path, id_: str) -> PassDetail:
                         mmsi=r.SarDetection.mmsi,
                         vessel_name=r.vessel_name,
                         distance_m=r.SarDetection.distance_m,
+                        ais_lon=r.ais_lon,
+                        ais_lat=r.ais_lat,
+                        doppler_shift_m=r.doppler_shift_m,
                         suspected_mmsi=r.SarDetection.suspected_mmsi,
                         suspect_name=r.suspect_name,
                         suspect_silent_minutes=r.SarDetection.suspect_silent_minutes,

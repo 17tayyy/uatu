@@ -120,7 +120,8 @@ def test_predict_dead_reckons_from_the_nearest_report():
     lon, lat, _, _, gap, _ = predict(reports, T0 + timedelta(seconds=60))
     assert lon == -5.6 and gap == 60
     assert abs((lat - 36.0) * 111_320 - 10 * 0.514444 * 60) < 1  # ~309 m
-    assert predict(reports, T0 + timedelta(minutes=11)) is None
+    assert predict(reports, T0 + timedelta(minutes=29)) is not None
+    assert predict(reports, T0 + timedelta(minutes=31)) is None
 
 
 def geometry(heading_deg: float = 180.0) -> AcquisitionGeometry:

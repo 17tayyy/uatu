@@ -222,7 +222,9 @@ async def backfill(days: float, zone: str) -> int:
 
 
 @app.task(name="sar.process_scene", max_retries=3, backoff_ms=10 * 60_000, timeout=45 * 60)
-async def process_scene(scene_id: str) -> dict[str, int]:
+async def process_scene(scene_id: str, announce: bool = True) -> dict[str, int]:
+    """Download a frame, detect ships, pair them with AIS and store it all; announce its pass once complete
+    (not when processed again, see uatu-sar reprocess: its pass was told already)."""
     state = app.state
     if state.auth is None:
         raise RuntimeError("CDSE credentials not configured")
@@ -251,7 +253,7 @@ async def process_scene(scene_id: str) -> dict[str, int]:
         path.unlink(missing_ok=True)
     objects = await store.rebuild_fixed_objects(state.engine, srid=geo.grid.crs.to_epsg())
     log.info("scene_processed", scene=scene.name, zone=zs.zone, historical=historical, **summary, **objects)
-    if not historical:
+    if not historical and announce:
         await announce_pass(uuid.UUID(scene_id))
     return summary
 

@@ -5,6 +5,8 @@ uatu-sar download (--latest | DATATAKE)  download every frame of a pass
 uatu-sar detect SCENE.zip [--ais]        detect ships, optionally pairing them with recorded AIS
 uatu-sar backfill ZONE [--days 90]       have the worker process a zone's passes before AIS recording began there
 uatu-sar candidates [--days 7]           dark vessel candidates of recent passes
+uatu-sar reprocess [--days 7]            have the worker process again the passes paired with AIS (after a
+                                         change to the pairing), without announcing them again
 """
 
 import argparse
@@ -124,6 +126,24 @@ async def cmd_backfill(settings: SarSettings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_reprocess(settings: SarSettings, args: argparse.Namespace) -> int:
+    from uatu.sar import store
+    from uatu.worker import process_scene  # the worker's app: same Redis and queue
+
+    engine = db.create_engine(settings.database_url)
+    try:
+        scenes = await store.live_scenes(engine, datetime.now(UTC) - timedelta(days=args.days))
+    finally:
+        await engine.dispose()
+    run = int(datetime.now(UTC).timestamp())  # a new task id: the scene's first one is done
+    for scene_id in scenes:
+        await process_scene.options(task_id=f"sar-reprocess:{scene_id}:{run}", priority="backfill").enqueue(
+            str(scene_id), False
+        )
+    print(f"{len(scenes)} frames queued to be processed again (downloaded again from Copernicus)")
+    return 0
+
+
 async def cmd_candidates(settings: SarSettings, args: argparse.Namespace) -> int:
     from uatu.sar import store
     from uatu.sar.report import scene_notification
@@ -185,6 +205,10 @@ def main() -> None:
     candidates_cmd = commands.add_parser("candidates", help="dark vessel candidates of recent passes")
     candidates_cmd.add_argument("--days", type=float, default=7)
     candidates_cmd.set_defaults(run=cmd_candidates)
+
+    reprocess_cmd = commands.add_parser("reprocess", help="process again the passes paired with AIS")
+    reprocess_cmd.add_argument("--days", type=float, default=7, help="acquired in the last days (default: 7)")
+    reprocess_cmd.set_defaults(run=cmd_reprocess)
 
     args = parser.parse_args()
     try:

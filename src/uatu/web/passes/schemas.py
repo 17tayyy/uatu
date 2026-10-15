@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from uatu.web.schemas import FeatureCollection, Geometry, OneDecimal, OutputSchema, Whole
+from uatu.web.schemas import Degrees, FeatureCollection, Geometry, OneDecimal, OutputSchema, Whole
 
 
 class DetectionKind(StrEnum):
@@ -42,7 +42,12 @@ class DetectionProperties(OutputSchema):
     vh_db: OneDecimal | None
     mmsi: int | None  # paired AIS vessel
     vessel_name: str | None
-    distance_m: Whole | None
+    distance_m: Whole | None  # to where its AIS says the radar should see it, Doppler shift included
+    # Paired: where its AIS put it when the radar looked. A vessel moving towards or away from the radar
+    # shows shifted along the satellite's track by doppler_shift_m: the echo is not on the vessel.
+    ais_lon: Degrees | None
+    ais_lat: Degrees | None
+    doppler_shift_m: Whole | None
     suspected_mmsi: int | None
     suspect_name: str | None
     suspect_silent_minutes: Whole | None

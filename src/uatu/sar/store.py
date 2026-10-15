@@ -46,6 +46,23 @@ async def recording_start(engine: AsyncEngine, zone: str) -> datetime | None:
         return await conn.scalar(select(RecordedZone.since).where(RecordedZone.key == zone))
 
 
+async def live_scenes(engine: AsyncEngine, since: datetime) -> list[uuid.UUID]:
+    """Frames processed since `since` that were paired with AIS (acquired once their zone was recorded)."""
+    async with engine.connect() as conn:
+        return list(
+            await conn.scalars(
+                select(SarScene.id)
+                .join(RecordedZone, RecordedZone.key == SarScene.zone)
+                .where(
+                    SarScene.status == "processed",
+                    SarScene.acquired_from >= since,
+                    SarScene.acquired_from >= RecordedZone.since,
+                )
+                .order_by(SarScene.acquired_from, SarScene.id)
+            )
+        )
+
+
 async def queue_new(engine: AsyncEngine, scenes: list[Scene], coverage: dict[str, float], zone: str) -> list[ZoneScene]:
     """Record the frames not seen before over the zone as queued; return those.
 
