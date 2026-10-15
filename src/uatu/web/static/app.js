@@ -101,6 +101,7 @@ const LAYERS = {
   vessels: { label: "Barcos en vivo", on: true, ids: ["vessels-moving", "vessels-stopped"] },
   events: { label: "Eventos AIS", on: true, ids: ["events"] },
   infrastructure: { label: "Infraestructura", on: false, ids: ["infra-cables", "infra-pipes", "infra-points"] },
+  density: { label: "Densidad de tráfico", hint: "7 días", on: false, ids: ["density"] },
   coverage: { label: "Cobertura AIS", hint: "7 días", on: false, ids: ["coverage"] },
 };
 
@@ -124,6 +125,8 @@ const state = {
   vesselQuery: "",
   layers: loadLayerPrefs(),
   coverageLoaded: false,
+  densityLoaded: false,
+  time: null, // the time machine, when on: see enterTime
 };
 
 // --- small helpers ----------------------------------------------------------------------------
@@ -388,7 +391,7 @@ function addLayers() {
   ]) {
     map.addImage(name, image, { pixelRatio: 2 });
   }
-  for (const id of ["land", "zones", "coverage", "infra", "footprint", "detections", "pass-ais", "events", "vessels", "track", "link", "selected"]) {
+  for (const id of ["land", "zones", "coverage", "density", "infra", "footprint", "detections", "pass-ais", "events", "time-trails", "vessels", "track", "link", "selected"]) {
     map.addSource(id, { type: "geojson", data: EMPTY });
   }
 
@@ -412,6 +415,19 @@ function addLayers() {
       "fill-color": ["match", ["get", "reception"], "good", C.coverage.good, "patchy", C.coverage.patchy, C.coverage.poor],
       "fill-opacity": 0.5,
       "fill-outline-color": C.page,
+    },
+  });
+  // Where traffic gathers: vessel-hours per ~2 km cell, one blue from faint to bright.
+  map.addLayer({
+    id: "density",
+    type: "heatmap",
+    source: "density",
+    paint: {
+      "heatmap-weight": ["get", "weight"],
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 0.7, 11, 1.6],
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 5, 8, 12, 11, 34],
+      "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(24,79,149,0)", 0.15, C.coverage.poor, 0.45, C.coverage.patchy, 0.75, C.coverage.good, 1, "#e6f0fc"],
+      "heatmap-opacity": 0.8,
     },
   });
   map.addLayer({ id: "coast", type: "line", source: "land", paint: { "line-color": C.coast, "line-width": 0.8 } });
@@ -491,6 +507,18 @@ function addLayers() {
         ["match", ["get", "kind"], "fixed", C.muted, C.page],
         10, ["match", ["get", "kind"], "fixed", C.muted, kindColor],
       ],
+    },
+  });
+  // The time machine: each vessel's last hour behind it.
+  map.addLayer({
+    id: "time-trails",
+    type: "line",
+    source: "time-trails",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": ["match", vesselListing, 2, C.critical, 1, C.serious, C.ink2],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.8, 12, 1.6],
+      "line-opacity": ["match", vesselListing, 0, 0.35, 0.8],
     },
   });
   map.addLayer({
@@ -903,6 +931,7 @@ function eventPopup(p, lngLat, pass) {
       { class: "actions" },
       vesselButton(p.mmsi),
       pass && h("button", { onclick: () => navigate(`passes/${pass.id}`) }, "Ver pasada"),
+      h("button", { onclick: () => replayEvent(p, lngLat) }, "Máquina del tiempo"),
     ),
   ]);
 }
@@ -957,7 +986,8 @@ function wireMapEvents() {
       const p = e.features[0].properties;
       const speed = p.sog != null && p.sog !== "null" ? ` · ${p.sog} nudos` : "";
       const listed = listing(p).label ? ` · ${listing(p).label}` : "";
-      tooltip(e, `${p.name && p.name !== "null" ? p.name : `MMSI ${p.mmsi}`}${speed} · ahora${listed}`);
+      const at = state.time ? ` · oído ${when(p.received_at)}` : " · ahora";
+      tooltip(e, `${p.name && p.name !== "null" ? p.name : `MMSI ${p.mmsi}`}${speed}${at}${listed}`);
     });
   }
   map.on("mousemove", "detections", (e) => {
@@ -1017,6 +1047,7 @@ function renderLayers() {
         saveLayerPrefs();
         applyLayerVisibility();
         if (key === "coverage" && input.checked) loadCoverage();
+        if (key === "density" && input.checked) loadDensity();
         renderLegend();
       });
       return h("label", { class: "toggle" }, input, layer.label, layer.hint && h("span", { class: "hint" }, layer.hint));
@@ -1054,6 +1085,9 @@ function renderLegend() {
   }
   if (state.layers.coverage) {
     parts.push(h("h3", null, "Recepción AIS"), Object.values(RECEPTION).map((r) => legendItem("square", r.color, r.label)));
+  }
+  if (state.layers.density) {
+    parts.push(h("h3", null, "Densidad de tráfico (7 días)"), legendItem("square", C.coverage.poor, "Poco tráfico"), legendItem("square", C.coverage.good, "Mucho tráfico"));
   }
   parts.push(h("h3", null, "Mapa"), legendItem("dash", C.muted, "Zonas vigiladas"));
   if (state.layers.recent) parts.push(legendItem("square", "#8a8a85", "Radar: última pasada de cada sitio, 7 días"));
@@ -1332,7 +1366,7 @@ async function loadEvents() {
   const { minSeverity, hours } = state.eventFilter;
   state.events = await api(inZone(`/events?hours=${hours}&min_severity=${minSeverity}&limit=500`));
   byId.events = new Map(state.events.features.map((f) => [f.properties.id, f.properties]));
-  setData("events", state.events);
+  if (!state.time) setData("events", state.events);
   renderLegend();
 }
 
@@ -1765,6 +1799,16 @@ async function renderCompany(id) {
 
 // --- data loading -----------------------------------------------------------------------------
 
+async function loadDensity() {
+  if (state.densityLoaded) return;
+  state.densityLoaded = true;
+  try {
+    setData("density", await api(inZone("/history/density?days=7")));
+  } catch {
+    state.densityLoaded = false;
+  }
+}
+
 async function loadCoverage() {
   if (state.coverageLoaded) return;
   state.coverageLoaded = true;
@@ -1777,7 +1821,7 @@ async function loadCoverage() {
 
 async function loadLive() {
   state.live = await api(inZone("/vessels/live?minutes=60"));
-  setData("vessels", state.live);
+  if (!state.time) setData("vessels", state.live); // the time machine draws its own
 }
 
 async function refresh() {
@@ -1839,6 +1883,13 @@ async function showZone({ fit }) {
   if (fit) map.fitBounds([[area.west, area.south], [area.east, area.north]], { padding: 20, duration: fit === "animate" ? 600 : 0 });
   state.coverageLoaded = false;
   if (state.layers.coverage) loadCoverage();
+  state.densityLoaded = false;
+  if (state.layers.density) loadDensity();
+  if (state.time) {
+    state.time.chunks.clear();
+    loadTimeEvents();
+    renderTime();
+  }
   setData("infra", await api(inZone("/map/infrastructure")).catch(() => EMPTY));
 }
 
@@ -1860,6 +1911,7 @@ async function start() {
   addLayers();
   wireMapEvents();
   watchMapLoading();
+  document.getElementById("time-toggle").onclick = () => enterTime(Date.now() - HOUR);
   renderLayers();
   const [zones, land, satellite] = await Promise.all([api("/zones"), api("/map/land"), api("/map/satellite")]);
   state.zones = zones.zones;
@@ -1908,6 +1960,240 @@ document.getElementById("handle").addEventListener("click", () => {
   document.getElementById("handle").setAttribute("aria-label", panel.classList.contains("expanded") ? "Reducir panel" : "Expandir panel");
 });
 
+// --- the time machine -----------------------------------------------------------------------
+// The AIS record played back: where every vessel was at a moment, with its last hour behind it.
+// Reports come an hour at a time (past hours stay in the browser's cache); between two reports a
+// vessel is placed on the straight line joining them.
+
+const HOUR = 3_600_000;
+const STALE_S = 30 * 60; // unheard for longer than this, a vessel is not drawn
+const TRAIL_S = 60 * 60;
+const SPEEDS = [10, 60, 300, 1800]; // times real time: 1 s plays 10 s ... 30 min
+
+function enterTime(t) {
+  if (!state.time) {
+    state.time = { t, playing: false, speed: 60, chunks: new Map(), from: null, events: null, ui: null };
+    api("/history").then((range) => {
+      if (!state.time) return;
+      state.time.from = new Date(range.start).getTime();
+      renderTimebar();
+    }).catch(() => {});
+    loadTimeEvents();
+    renderTimebar();
+  }
+  state.time.t = clampTime(t);
+  renderTime();
+}
+
+function exitTime() {
+  if (!state.time) return;
+  state.time = null;
+  setData("vessels", state.live);
+  setData("time-trails", EMPTY);
+  setData("events", state.events);
+  renderTimebar();
+}
+
+function clampTime(t) {
+  return Math.min(Math.max(t, state.time?.from ?? 0), Date.now());
+}
+
+/** An event, played back from a little before it started. */
+function replayEvent(p, lngLat) {
+  popup?.remove();
+  enterTime(new Date(p.start_at).getTime() - 20 * 60_000);
+  flyTo(lngLat, 11);
+  select(lngLat);
+}
+
+async function loadTimeEvents() {
+  const time = state.time;
+  const hours = Math.min(24 * 30, Math.ceil((Date.now() - (time.from ?? Date.now() - 7 * 24 * HOUR)) / HOUR) + 1);
+  const events = await api(inZone(`/events?hours=${hours}&min_severity=${state.eventFilter.minSeverity}&limit=1000`)).catch(() => null);
+  if (state.time === time) {
+    time.events = events;
+    renderTime();
+  }
+}
+
+/** The hour of reports starting at `key`, fetched once. */
+function timeChunk(key) {
+  const time = state.time;
+  let chunk = time.chunks.get(key);
+  if (!chunk) {
+    chunk = { data: null };
+    time.chunks.set(key, chunk);
+    api(inZone(`/history/tracks?start=${encodeURIComponent(new Date(key).toISOString())}&hours=1`))
+      .then((data) => {
+        chunk.data = data;
+        if (state.time === time) renderTime();
+      })
+      .catch(() => time.chunks.delete(key));
+  }
+  return chunk;
+}
+
+/** Index of the first element of a sorted array greater than x (or, `orEqual`, not less than x). */
+function bisect(a, x, orEqual = false) {
+  let lo = 0;
+  let hi = a.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (a[mid] < x || (!orEqual && a[mid] === x)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function renderTime() {
+  const time = state.time;
+  if (!time) return;
+  const ts = time.t / 1000;
+  const hour = Math.floor(time.t / HOUR) * HOUR;
+  const keys = [hour - HOUR, hour, hour + HOUR].filter((k) => k <= Date.now()); // the next one, to play into
+  for (const key of time.chunks.keys()) if (Math.abs(key - hour) > 3 * HOUR) time.chunks.delete(key);
+  const parts = new Map();
+  for (const key of keys) {
+    for (const track of timeChunk(key).data?.tracks ?? []) {
+      if (parts.has(track.mmsi)) parts.get(track.mmsi).push(track);
+      else parts.set(track.mmsi, [track]);
+    }
+  }
+  const vessels = [];
+  const trails = [];
+  for (const [mmsi, pieces] of parts) {
+    const t = pieces.flatMap((p) => p.t);
+    const lon = pieces.flatMap((p) => p.lon);
+    const lat = pieces.flatMap((p) => p.lat);
+    const i = bisect(t, ts) - 1; // its last report by then
+    if (i < 0 || ts - t[i] > STALE_S) continue;
+    let at = [lon[i], lat[i]];
+    const j = i + 1;
+    if (j < t.length && t[j] > t[i] && t[j] - t[i] <= STALE_S) {
+      const f = (ts - t[i]) / (t[j] - t[i]);
+      at = [lon[i] + f * (lon[j] - lon[i]), lat[i] + f * (lat[j] - lat[i])];
+    }
+    const meta = pieces[0];
+    const properties = {
+      mmsi,
+      name: meta.name,
+      ship_type: meta.ship_type,
+      length_m: meta.length_m,
+      flag: meta.flag,
+      sog: pieces.flatMap((p) => p.sog)[i],
+      cog: pieces.flatMap((p) => p.cog)[i],
+      received_at: new Date(t[i] * 1000).toISOString(),
+      sanctioned: meta.sanctioned,
+      risk: meta.risk,
+    };
+    vessels.push({ type: "Feature", geometry: { type: "Point", coordinates: at }, properties });
+    const trail = [];
+    for (let m = bisect(t, ts - TRAIL_S, true); m <= i; m++) trail.push([lon[m], lat[m]]);
+    trail.push(at);
+    if (trail.length >= 2) {
+      trails.push({ type: "Feature", geometry: { type: "LineString", coordinates: trail }, properties: { sanctioned: meta.sanctioned, risk: meta.risk } });
+    }
+  }
+  setData("vessels", { type: "FeatureCollection", features: vessels });
+  setData("time-trails", { type: "FeatureCollection", features: trails });
+  if (time.events) {
+    // Going on at that moment; an instant (an identity change) shows for half an hour.
+    const going = time.events.features.filter((f) => {
+      const start = new Date(f.properties.start_at).getTime();
+      const end = f.properties.end_at ? new Date(f.properties.end_at).getTime() : Date.now();
+      return start <= time.t && time.t <= Math.max(end, start + 30 * 60_000);
+    });
+    setData("events", { type: "FeatureCollection", features: going });
+  }
+  updateTimebar(vessels.length, keys.some((key) => !time.chunks.get(key)?.data));
+}
+
+function renderTimebar() {
+  const bar = document.getElementById("timebar");
+  const toggle = document.getElementById("time-toggle");
+  const time = state.time;
+  bar.hidden = !time;
+  toggle.hidden = Boolean(time);
+  if (!time) return fill(bar);
+  const play = h("button", { class: "time-play", onclick: togglePlay });
+  const slider = h("input", { type: "range", class: "time-slider", step: 60_000, "aria-label": "Momento" });
+  slider.addEventListener("input", () => {
+    time.t = clampTime(Number(slider.value));
+    renderTime();
+  });
+  const speed = h(
+    "select",
+    { class: "time-speed", "aria-label": "Velocidad" },
+    SPEEDS.map((x) => h("option", { value: x, selected: x === time.speed }, x < 60 ? `1 s = ${x} s` : `1 s = ${x / 60} min`)),
+  );
+  speed.addEventListener("change", () => (time.speed = Number(speed.value)));
+  const label = h("span", { class: "time-label num" });
+  const count = h("span", { class: "time-count" });
+  const nudge = (minutes) => () => {
+    time.t = clampTime(time.t + minutes * 60_000);
+    renderTime();
+  };
+  time.ui = { play, slider, label, count };
+  fill(
+    bar,
+    h(
+      "div",
+      { class: "time-top" },
+      play,
+      h("button", { class: "time-step", onclick: nudge(-10), title: "10 min antes" }, "−10 min"),
+      label,
+      h("button", { class: "time-step", onclick: nudge(10), title: "10 min después" }, "+10 min"),
+      h("span", { class: "grow" }),
+      speed,
+      h("button", { class: "close", onclick: exitTime, "aria-label": "Volver al presente", title: "Volver al presente" }, "×"),
+    ),
+    slider,
+    count,
+  );
+  updateTimebar();
+}
+
+function updateTimebar(vessels = null, loading = false) {
+  const time = state.time;
+  if (!time?.ui) return;
+  const { play, slider, label, count } = time.ui;
+  play.textContent = time.playing ? "❚❚" : "▶";
+  play.setAttribute("aria-label", time.playing ? "Pausa" : "Reproducir");
+  slider.min = String(Math.floor((time.from ?? time.t - 7 * 24 * HOUR) / 60_000) * 60_000); // whole minutes
+  slider.max = String(Date.now());
+  slider.value = String(time.t);
+  label.textContent = when(new Date(time.t).toISOString());
+  if (vessels != null) count.textContent = loading ? "Cargando AIS de ese momento…" : `${fmtNumber.format(vessels)} barcos oídos en la última media hora`;
+}
+
+function togglePlay() {
+  const time = state.time;
+  time.playing = !time.playing;
+  if (time.playing) {
+    if (time.t >= Date.now() - 60_000) time.t = clampTime(Date.now() - 6 * HOUR); // at the end: from six hours ago
+    time.lastFrame = performance.now();
+    requestAnimationFrame(playFrame);
+  }
+  updateTimebar();
+}
+
+function playFrame(now) {
+  const time = state.time;
+  if (!time?.playing) return;
+  time.t = clampTime(time.t + (now - time.lastFrame) * time.speed);
+  time.lastFrame = now;
+  if (now - (time.lastRender ?? 0) > 125) {
+    time.lastRender = now;
+    renderTime();
+  }
+  if (time.t >= Date.now() - 1000) {
+    time.playing = false;
+    renderTime();
+    return;
+  }
+  requestAnimationFrame(playFrame);
+}
+
 // --- loading ----------------------------------------------------------------------------------
 
 function splashText(text) {
@@ -1937,18 +2223,22 @@ function mapSettled(ms) {
 function watchMapLoading() {
   const busy = document.getElementById("map-busy");
   let timer = null;
-  map.on("dataloading", () => {
-    if (timer || !busy.hidden) return;
+  // Tiles only: GeoJSON is updated all the time (live vessels, the time machine playing).
+  map.on("dataloading", (e) => {
+    if (!e.tile || timer || !busy.hidden) return;
     timer = setTimeout(() => {
       timer = null;
-      if (!map.loaded()) busy.hidden = false;
+      if (!map.areTilesLoaded()) busy.hidden = false;
     }, 400);
   });
-  map.on("idle", () => {
+  const settled = () => {
+    if (!map.areTilesLoaded()) return;
     clearTimeout(timer);
     timer = null;
     busy.hidden = true;
-  });
+  };
+  map.on("data", settled);
+  map.on("idle", settled);
 }
 
 map.on("load", () =>

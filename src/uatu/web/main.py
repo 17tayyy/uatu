@@ -25,6 +25,7 @@ from uatu.web.coverage.router import router as coverage_router
 from uatu.web.errors import COMMON_ERROR_RESPONSES, register_exception_handlers
 from uatu.web.events.router import router as events_router
 from uatu.web.health.router import router as health_router
+from uatu.web.history.router import router as history_router
 from uatu.web.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from uatu.web.optical.router import router as optical_router
 from uatu.web.passes.router import router as passes_router
@@ -102,6 +103,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         events_router,
         vessels_router,
         companies_router,
+        history_router,
         coverage_router,
         basemap_router,
     ):
