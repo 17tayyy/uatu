@@ -7,7 +7,7 @@ but that are not broadcasting AIS, and the ones that are broadcasting but deserv
 (sanctioned tankers sailing under new names, transponders switched off at sea, ship-to-ship
 meetings, vessels idling over submarine cables).
 
-![The dashboard on the Strait of Gibraltar: a Sentinel-1 pass, each radar detection coloured by what AIS says about it](docs/dashboard.png)
+![The dashboard on the Strait of Gibraltar: a Sentinel-1 pass, each radar detection coloured by what AIS says about it, one of them open in the inspector](docs/dashboard.png)
 
 Running 24/7 on a homelab since 13 October 2026: the Strait of Gibraltar first, then the whole
 coast from Gibraltar to Cap de Creus and the Balearic Islands, in six zones brought into the
