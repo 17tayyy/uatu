@@ -285,8 +285,10 @@ coast or one zone at a time (the selector in the header):
 - **Máquina del tiempo**: the AIS record played back. A time bar sets any moment since recording
   began, or plays it at 10 s to 30 min a second. Every vessel is drawn where it was then,
   interpolated between reports, with its last hour behind it, along with the events going on at
-  that moment. Each event can be replayed from a little before it began. Reports come an hour at
-  a time, and the browser keeps past hours.
+  that moment and the radar pass of the moment, if a satellite passed within 45 minutes. Each
+  event can be replayed from a little before it began. When Uatu itself was not recording (its
+  connection down), the bar says so: what is missing then is not a vessel gone quiet. Reports
+  come an hour at a time, and the browser keeps past hours.
 
 The radar image of each pass is kept at 20 m (the sensor's actual resolution) as a tiled
 Web Mercator GeoTIFF with overviews (`radar.tif`, ~17 MB a frame), and served as map tiles: the

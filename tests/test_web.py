@@ -453,7 +453,7 @@ async def test_companies(client):
 @needs_db
 async def test_history(client):
     span = await ok(client, "/api/v1/history")
-    assert span["start"] <= span["end"]
+    assert span["start"] <= span["end"] and isinstance(span["outages"], list)
 
     start = (NOW - timedelta(hours=1)).isoformat()
     response = await client.get("/api/v1/history/tracks", params={"start": start, "zone": "estrecho"})

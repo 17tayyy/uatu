@@ -3,9 +3,15 @@ from datetime import datetime
 from uatu.web.schemas import OutputSchema
 
 
+class Outage(OutputSchema):
+    start: datetime
+    end: datetime
+
+
 class HistoryRange(OutputSchema):
     start: datetime  # AIS has been recorded since
     end: datetime  # now
+    outages: list[Outage]  # of 5 minutes or more, when Uatu itself recorded nothing
 
 
 class HistoryTrack(OutputSchema):

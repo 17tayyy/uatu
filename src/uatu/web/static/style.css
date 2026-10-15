@@ -313,6 +313,8 @@ div.row:hover { background: none; }
 
 .time-count { color: var(--muted); font-size: 12px; }
 
+.time-count.warning { color: var(--warning); }
+
 .error-note { color: var(--ink-2); }
 
 .section-title {
