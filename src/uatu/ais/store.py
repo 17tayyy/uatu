@@ -35,7 +35,8 @@ from uatu.db.models import StaticReport as Report
 
 # Events that span time and are re-detected on every run: a new detection that overlaps (or
 # follows within this gap) one already stored extends it instead of adding another.
-LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel", "listed_stop"}
+LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel"}
+# listed_stop is not one: each stop is its own event, keyed by the stop's first report.
 SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", *LISTED}
 MERGE_GAP = timedelta(minutes=30)
 # A listed vessel's visit lasts until it has been gone this long: one alert per visit, even

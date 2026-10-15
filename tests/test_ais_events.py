@@ -277,3 +277,21 @@ def test_heading_where_vessels_are_heard_only_now_and_then_is_not_notable():
     glimpses = [track(950 + k, [k * 10], LAT0 + 0.01, LON0 + 0.2 + 0.001 * k) for k in range(5)]  # once each
     [gap] = [g for g in gaps([silent, *neighbours(4, range(0, 181)), *glimpses], minutes_now=180) if g.mmsi == 1]
     assert gap.severity == 1 and gap.details["poor_reception_ahead"]
+
+
+def test_a_gap_is_told_as_far_as_uatu_knows():
+    from datetime import UTC, datetime, timedelta
+
+    from uatu.ais.analysis import describe
+    from uatu.ais.events import Event
+
+    now = datetime.now(UTC)
+    details = {"silent_minutes": 90, "coast_km": 5.2, "ais_heard_nearby": 51}
+
+    def told(start, end=None, names=None):
+        return describe(Event("ais_gap", 2, 248001000, start, 35.97, -5.55, details, end), names or {})[1]
+
+    assert told(now - timedelta(minutes=90)).startswith("MMSI 248001000 lleva 90 min sin emitir")
+    assert "estuvo 90 min sin emitir" in told(now - timedelta(hours=3), now - timedelta(hours=1, minutes=30))
+    gone = told(now - timedelta(days=2), names={248001000: "XT HOPE"})
+    assert gone.startswith("XT HOPE (MMSI 248001000) dejó de oírse y no se le ha vuelto a oír")

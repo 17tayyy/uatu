@@ -172,6 +172,27 @@ uv run uatu-ais events --hours 24
 uv run uatu-ais stops --listed --days 7                     # where sanctioned and watchlisted vessels stopped
 ```
 
+## Reports
+
+`uatu-report` writes a report of the last whole days, in Spanish, as Markdown with figures and as one
+self-contained HTML file, for reading anywhere or passing on:
+
+```sh
+uv run uatu-report --days 7                    # data/reports/informe-<last day>/informe.md, .html, figures
+uv run uatu-report --days 7 --until 2026-10-21 --zone estrecho
+```
+
+It has six parts:
+1. **Sanctioned and watchlisted vessels heard:** why each is listed, when it was heard, its Strait crossings and stops, and a map of their tracks.
+2. **Radar passes:** a table of the passes, and the candidates.
+3. **Notable AIS behaviour.**
+4. **Traffic:** crossings per day, a density map, and where vessels stop.
+5. **What Uatu heard:** per zone, with its own outages.
+6. **The limits:** what the numbers can and cannot say.
+
+The hours of the period that Uatu was recording count from when it began, less its outages.
+Unidentified radar detections, which may be small boats, are given to ~10 km only.
+
 ## SAR ship detection
 
 ```sh

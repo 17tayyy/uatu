@@ -140,7 +140,9 @@ def worth_alerting(e: Event, now: datetime) -> bool:
 def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
     """(title, message, link) for a notification, in Spanish."""
     d = e.details
-    name = names.get(e.mmsi) or d.get("name") or f"MMSI {e.mmsi}"
+    named = names.get(e.mmsi) or d.get("name")
+    name = named or f"MMSI {e.mmsi}"
+    who = f"{named} (MMSI {e.mmsi})" if named else name  # not "MMSI 1 (MMSI 1)"
     other = names.get(e.other_mmsi or 0) or d.get("other_name") or f"MMSI {e.other_mmsi}"
     where = f"{e.lat:.4f}, {e.lon:.4f}"
     link = f"https://www.openstreetmap.org/?mlat={e.lat:.5f}&mlon={e.lon:.5f}#map=12/{e.lat:.4f}/{e.lon:.4f}"
@@ -148,7 +150,7 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
         case "ais_gap":
             title = f"AIS apagado: {name}"
             message = (
-                f"{name} (MMSI {e.mmsi}) lleva {d['silent_minutes']} min sin emitir, a {d['coast_km']} km de la costa,"
+                f"{who} {_silence(e)}, a {d['coast_km']} km de la costa,"
                 f" mientras se oían {d['ais_heard_nearby']} barcos alrededor. Última posición {where}."
             )
         case "encounter":
@@ -163,7 +165,7 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
         case "infrastructure_loitering":
             title = f"Barco sobre {d['infrastructure']}: {name}"
             message = (
-                f"{name} (MMSI {e.mmsi}) lleva {d['minutes']} min a menos de 3 nudos y a {d['min_distance_m']} m"
+                f"{who} lleva {d['minutes']} min a menos de 3 nudos y a {d['min_distance_m']} m"
                 f" de {d['infrastructure']} ({d['infrastructure_kind']})"
                 + (f", en {d['depth_m']} m de agua" if d.get("depth_m") is not None else "")
                 + f". Posición {where}."
@@ -187,26 +189,38 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
                 f" Última posición {where}."
             )
         case "listed_stop":
-            who = {"sanctioned": "sancionado", "sanctioned_owner": "con gestor sancionado"}.get(d["listed"], "vigilado")
-            title = f"Barco {who} {stop_place(d)}: {name}"
+            status = {"sanctioned": "sancionado", "sanctioned_owner": "con gestor sancionado"}.get(
+                d["listed"], "vigilado"
+            )
+            title = f"Barco {status} {stop_place(d)}: {name}"
             ongoing = e.end is None or e.end > datetime.now(UTC) - timedelta(minutes=30)
-            message = f"{name} (MMSI {e.mmsi}) {'lleva' if ongoing else 'estuvo'} {d['hours']} h {stop_place(d)}."
+            message = f"{who} {'lleva' if ongoing else 'estuvo'} {d['hours']} h {stop_place(d)}."
             message += f" Posición {where}."
         case "identity_change":
             title = f"Cambio de identidad: {name}"
             message = f"MMSI {e.mmsi} ha cambiado su {d['field']}: {d['before']} → {d['after']}."
         case "shared_imo":
             title = f"IMO duplicado: {d['imo']}"
-            message = f"{name} (MMSI {e.mmsi}) y {other} (MMSI {e.other_mmsi}) emiten el mismo IMO {d['imo']}."
+            message = f"{who} y {other} (MMSI {e.other_mmsi}) emiten el mismo IMO {d['imo']}."
         case "position_jump":
             title = f"Salto de posición: {name}"
             message = (
-                f"{name} (MMSI {e.mmsi}) apareció {d['jump_km']} km más allá, a {d['implied_knots']} nudos"
+                f"{who} apareció {d['jump_km']} km más allá, a {d['implied_knots']} nudos"
                 f" aparentes: GPS falseado o averiado. Desde {where}."
             )
         case _:
             title, message = f"{e.kind}: {name}", f"{d} ({where})"
     return title, message, link
+
+
+def _silence(e: Event) -> str:
+    """How long a gap lasted, or lasts, as far as Uatu knows."""
+    minutes = e.details["silent_minutes"]
+    if e.end is not None:
+        return f"estuvo {minutes} min sin emitir"
+    if datetime.now(UTC) - e.start > WINDOW:  # out of the analysis' sight: not heard again since
+        return "dejó de oírse y no se le ha vuelto a oír"
+    return f"lleva {minutes} min sin emitir"
 
 
 def digest(
