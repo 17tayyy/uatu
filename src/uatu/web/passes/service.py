@@ -38,6 +38,7 @@ from uatu.db.models import (
 )
 from uatu.sar.analysis import DEFAULT_PAIRING
 from uatu.sar.store import RECEPTION_GAP_MINUTES
+from uatu.sar.wake import CLEAR_MARGIN
 from uatu.web.errors import NotFoundError
 from uatu.web.passes.schemas import (
     AisCheckProperties,
@@ -48,6 +49,7 @@ from uatu.web.passes.schemas import (
     PassSummary,
     PendingDetection,
     ReceptionRule,
+    WakeRead,
 )
 from uatu.web.reviews.service import REVIEW_COLUMNS, join_reviews, review_of
 from uatu.web.schemas import Feature, FeatureCollection, Geometry, point
@@ -241,8 +243,22 @@ def _properties(r: Any) -> dict[str, Any]:
         "fixed_passes_seen": r.passes_seen,
         "ais_vessels_nearby": r.SarDetection.ais_vessels_nearby,
         "ais_reports_nearby": r.SarDetection.ais_reports_nearby,
+        "wake": _wake(r.SarDetection),
         "review": review_of(r),
     }
+
+
+def _wake(d: SarDetection) -> WakeRead | None:
+    """Its wake, if one stood out clearly enough (the faint ones are kept for calibration only)."""
+    if d.wake_margin is None or d.wake_margin < CLEAR_MARGIN or d.wake_lon is None or d.wake_lat is None:
+        return None
+    return WakeRead(
+        course_deg=d.wake_course_deg or 0.0,
+        speed_kn=d.wake_speed_kn,
+        lon=d.wake_lon,
+        lat=d.wake_lat,
+        length_m=d.wake_length_m or 0.0,
+    )
 
 
 async def pending_detections(

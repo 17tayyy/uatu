@@ -216,6 +216,17 @@ class SarDetection(Base):
     )
     suspect_distance_m: Mapped[float | None] = mapped_column(REAL, comment="to that vessel's estimated position")
     suspect_silent_minutes: Mapped[float | None] = mapped_column(REAL, comment="since its nearest AIS report")
+    # The best wake found behind it (see uatu.sar.wake), however faint: wake_margin says how far it
+    # stands out of what the sea yields by chance. Null where none was looked for.
+    wake_margin: Mapped[float | None] = mapped_column(REAL, comment="from 2.5 on, wakes were right in validation")
+    wake_course_deg: Mapped[float | None] = mapped_column(REAL)
+    wake_speed_kn: Mapped[float | None] = mapped_column(
+        REAL, comment="through the water; null when the course runs along the satellite's track"
+    )
+    wake_lat: Mapped[float | None] = mapped_column(Double, comment="where the wake starts: the vessel, not its echo")
+    wake_lon: Mapped[float | None] = mapped_column(Double)
+    wake_length_m: Mapped[float | None] = mapped_column(REAL, comment="of the stretch of wake that stood out")
+    wake_contrast: Mapped[float | None] = mapped_column(REAL, comment="to the sea beside it: -0.3 is 30 % darker")
 
 
 class SarFixedObject(Base):

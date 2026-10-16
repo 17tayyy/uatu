@@ -30,7 +30,11 @@ export const RADAR_FRAMES = ["radar-0", "radar-1", "radar-2", "radar-3"]; // one
 
 export const LAYERS: Record<LayerKey, LayerDef> = {
   radar: { label: "Imagen de la pasada", on: true, ids: RADAR_FRAMES },
-  detections: { label: "Detecciones", on: true, ids: ["footprint", "pass-links", "detections"] },
+  detections: {
+    label: "Detecciones",
+    on: true,
+    ids: ["footprint", "pass-links", "pass-wakes", "pass-wake-shift", "pass-wake-ship", "detections"],
+  },
   passAis: { label: "AIS a la hora de la pasada", on: false, ids: ["pass-ais"] },
   unimaged: { label: "Rayar lo que no ve la pasada", on: true, ids: ["unimaged"] },
   recent: { label: "Radar reciente", hint: "7 días", on: true, ids: ["radar-recent"] },

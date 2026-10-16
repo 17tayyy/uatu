@@ -82,6 +82,30 @@ dropped from about 530 m uncorrected to about 50 m. On the map, the echo stays w
 drew it and a dashed line leads to its vessel's AIS position: in the Strait, where ships sail
 east-west across the radar's north-south track, half of them are 300 m or more apart.
 
+**Wakes: course and speed without AIS.** A ship under way leaves a wake, a line behind it a little
+darker or brighter than the sea. The wake is water, not a moving target, so the radar does not
+shift it: it starts where the ship really is, the echo sits away from that point along the track,
+and the wake points back along the course. The course comes from the wake's direction, and the
+speed from how far the echo sits from where the wake starts: the same −(R/V) × range rate, solved
+the other way. Uatu tries every course and every place along the track where the ship could be
+at up to 45 knots, and scores each line behind it against all the other lines of the sea around:
+wind rows, fronts and the Strait's internal waves make plenty. It throws out lines that run on
+ahead of the ship or into another vessel (the smear of a very bright echo, an older wake), and
+the sidelobes and edges of the image. Then it compares the best line with the best found where no
+ship could have been, because getting there would need a negative speed: that mirror search has
+the same size, so its best score is what this sea yields by chance.
+
+Tested blind on the AIS ships of six frames of the Strait and Alborán: 83 under way, 41 at anchor
+or moored. When the wake beat chance by the margin Uatu requires, it was right every time: 6
+wakes, course within 16°, speed within 2 knots. None was found behind a ship that was still. But
+that is one ship in 14. In a breeze most wakes do not show at all, and below that margin a "wake"
+is as often a line of the sea that happens to start near an echo. Near the coast or over shallow
+banks, seabed features and dredged channels show through the sea too. So the dashboard offers a
+wake as possible, drawn over the radar image for the eye to check. The speed is through the
+water: the wake drifts with the current. In the Strait, where the Atlantic flows in at the surface
+at around a metre per second, eastbound ships came out slower than their AIS said and westbound
+ones faster.
+
 ## 5. Pairing: the Hungarian method
 
 Several ships close together each have several possible echoes. Pairing each with its nearest

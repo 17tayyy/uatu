@@ -18,7 +18,7 @@ import type { PassDetail, ZoneInfo } from "../api/types";
 import { useRoute } from "../app/router";
 import { useUi } from "../app/store";
 import { ALL } from "../lib/constants";
-import type { LngLat } from "../lib/geo";
+import { type LngLat, offset } from "../lib/geo";
 import { EMPTY, getMap, setData } from "./instance";
 import { LAYERS, type LayerKey, RADAR_FRAMES } from "./layerConfig";
 import { recentRadarTiles } from "./MapView";
@@ -60,6 +60,32 @@ function passLinks(pass: PassDetail) {
         },
         properties: {},
       })),
+  };
+}
+
+/** Each clear wake: the line behind where the vessel really was, an arrow there, and a dashed line
+ * from its echo (shifted by the Doppler effect) to it. */
+function passWakes(pass: PassDetail) {
+  return {
+    type: "FeatureCollection",
+    features: pass.detections_geojson.features.flatMap((f) => {
+      const w = f.properties.wake;
+      if (!w) return [];
+      const ship: LngLat = [w.lon, w.lat];
+      return [
+        {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: [ship, offset(ship, w.course_deg + 180, w.length_m)] },
+          properties: { part: "wake" },
+        },
+        {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: [f.geometry.coordinates, ship] },
+          properties: { part: "shift" },
+        },
+        { type: "Feature", geometry: { type: "Point", coordinates: ship }, properties: { course: w.course_deg } },
+      ];
+    }),
   };
 }
 
@@ -186,6 +212,7 @@ export function MapSync() {
     setData("footprint", shown ? { type: "Feature", geometry: shown.footprint, properties: {} } : EMPTY);
     setData("detections", shown?.detections_geojson);
     setData("pass-links", shown ? passLinks(shown) : EMPTY);
+    setData("pass-wakes", shown ? passWakes(shown) : EMPTY);
     setData("pass-ais", shown?.ais_geojson);
     showRadarImages(shown, useUi.getState().layers.radar);
   }, [shown]);

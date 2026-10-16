@@ -39,3 +39,12 @@ export function boundsOf(coordinates: unknown): Bounds {
     [e, n],
   ];
 }
+
+/** The point `metres` away from `from` towards `bearing` (degrees clockwise from north). Flat
+ * earth: plenty for the few kilometres of a wake. */
+export function offset([lon, lat]: LngLat, bearing: number, metres: number): LngLat {
+  const b = (bearing * Math.PI) / 180;
+  const dLat = (metres * Math.cos(b)) / 111_320;
+  const dLon = (metres * Math.sin(b)) / (111_320 * Math.cos((lat * Math.PI) / 180));
+  return [lon + dLon, lat + dLat];
+}
