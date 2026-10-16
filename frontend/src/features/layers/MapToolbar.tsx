@@ -36,6 +36,12 @@ function Legend({ layer }: { layer: LayerKey }) {
             </Item>,
           );
       }
+      if (pass?.detections_geojson.features.some((f) => f.properties.wake))
+        items.push(
+          <Item key="wake" shape="line" color={C.blue}>
+            Posible estela y dónde estaba el barco
+          </Item>,
+        );
       break;
     }
     case "passAis":

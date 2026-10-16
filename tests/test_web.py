@@ -255,7 +255,10 @@ async def rows():
             "vv_db": 0.0,
             "vh_db": -9.87654,
             "background_db": -20.0,
-        }
+            **dict.fromkeys(["wake_margin", "wake_course_deg", "wake_speed_kn", "wake_lat", "wake_lon",
+                             "wake_length_m", "wake_contrast"]),
+        }  # fmt: skip
+        wake = {"wake_course_deg": 75.4, "wake_speed_kn": 11.96, "wake_length_m": 1000.0, "wake_contrast": 0.4}
         await conn.execute(
             insert(SarDetection),
             [
@@ -267,6 +270,10 @@ async def rows():
                     "mmsi": MMSI_A,
                     "distance_m": 87.6,
                     "length_m": 240.4,
+                    **wake,
+                    "wake_margin": 3.1,  # clear
+                    "wake_lat": 36.0021,
+                    "wake_lon": -5.4955,
                 },
                 detection
                 | {
@@ -288,6 +295,10 @@ async def rows():
                     "length_m": 120.0,
                     "suspected_mmsi": MMSI_SILENT,
                     "suspect_silent_minutes": 95.0,
+                    **wake,
+                    "wake_margin": 1.0,  # as likely a line of the sea
+                    "wake_lat": 36.1,
+                    "wake_lon": -5.41,
                 },
             ],
         )
@@ -384,6 +395,16 @@ async def test_passes(client, tmp_path):
     assert kinds["matched"]["vh_db"] == -9.9
     assert kinds["went_silent"]["suspect_name"] == "TEST SILENT"
     assert (kinds["no_coverage"]["ais_vessels_nearby"], kinds["no_coverage"]["ais_reports_nearby"]) == (2, 3)
+    # Only a clear wake is told; where the vessel really was, its course and speed through the water.
+    assert kinds["matched"]["wake"] == {
+        "course_deg": 75,
+        "speed_kn": 12.0,
+        "lon": -5.4955,
+        "lat": 36.0021,
+        "length_m": 1000,
+    }
+    assert kinds["went_silent"]["wake"] is None
+    assert kinds["no_coverage"]["wake"] is None
     assert detail["reception_rule"] == {
         "radius_m": 3000.0, "window_hours": 2.0, "min_vessels": 3, "min_reports_per_vessel": 3.0
     }  # fmt: skip

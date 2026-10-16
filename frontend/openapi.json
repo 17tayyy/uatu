@@ -3092,6 +3092,16 @@
             ],
             "title": "Ais Reports Nearby"
           },
+          "wake": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WakeRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "review": {
             "anyOf": [
               {
@@ -3123,6 +3133,7 @@
           "fixed_passes_seen",
           "ais_vessels_nearby",
           "ais_reports_nearby",
+          "wake",
           "review"
         ],
         "title": "DetectionProperties"
@@ -4771,6 +4782,16 @@
             ],
             "title": "Ais Reports Nearby"
           },
+          "wake": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WakeRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "review": {
             "anyOf": [
               {
@@ -4815,6 +4836,7 @@
           "fixed_passes_seen",
           "ais_vessels_nearby",
           "ais_reports_nearby",
+          "wake",
           "review",
           "pass_id",
           "zone",
@@ -5579,6 +5601,47 @@
           "last_seen_at"
         ],
         "title": "VesselSummary"
+      },
+      "WakeRead": {
+        "properties": {
+          "course_deg": {
+            "type": "number",
+            "title": "Course Deg"
+          },
+          "speed_kn": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Kn"
+          },
+          "lon": {
+            "type": "number",
+            "title": "Lon"
+          },
+          "lat": {
+            "type": "number",
+            "title": "Lat"
+          },
+          "length_m": {
+            "type": "number",
+            "title": "Length M"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_deg",
+          "speed_kn",
+          "lon",
+          "lat",
+          "length_m"
+        ],
+        "title": "WakeRead",
+        "description": "A wake behind the echo, clear enough to trust (see uatu.sar.wake). The wake is not shifted\nas the echo is: it starts where the vessel really was."
       },
       "Watch": {
         "properties": {

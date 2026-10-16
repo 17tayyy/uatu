@@ -1,6 +1,7 @@
 """Outputs of a processed scene: GeoJSON for GIS tools and a quicklook image."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -20,6 +21,7 @@ from uatu.sar.detect import Detection
 from uatu.sar.match import MatchResult
 from uatu.sar.pipeline import SceneOutput
 from uatu.sar.raster import Grid
+from uatu.sar.wake import Wake
 
 if TYPE_CHECKING:
     from uatu.sar.store import Candidate, SceneReport
@@ -27,8 +29,11 @@ if TYPE_CHECKING:
 WEB_MERCATOR = "EPSG:3857"
 
 
-def detections_geojson(detections: list[Detection], result: MatchResult | None, path: Path) -> None:
-    """One point per detection, with the AIS vessel it was paired with (if any)."""
+def detections_geojson(
+    detections: list[Detection], result: MatchResult | None, path: Path, wakes: Mapping[Detection, Wake] | None = None
+) -> None:
+    """One point per detection, with the AIS vessel it was paired with (if any) and its wake, if one
+    was looked for (wake_clear: whether it stands out enough to trust it, see uatu.sar.wake)."""
     paired = {id(m.detection): m for m in result.matches} if result else {}
     features = []
     for d in detections:
@@ -41,6 +46,9 @@ def detections_geojson(detections: list[Detection], result: MatchResult | None, 
             properties["status"] = "matched" if id(d) in paired else "dark" if d in result.dark else "no_coverage"
             if (c := result.ais_nearby.get(d)) is not None:
                 properties |= {"ais_vessels_nearby": c.vessels, "ais_reports_nearby": c.reports}
+        if wakes and (w := wakes.get(d)) is not None:
+            properties |= {f"wake_{k}": v for k, v in asdict(w).items() if k not in ("x", "y")}
+            properties["wake_clear"] = w.clear
         features.append(_point(d.lon, d.lat, properties))
     _write(path, features)
 

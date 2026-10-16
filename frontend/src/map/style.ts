@@ -94,6 +94,7 @@ export const GEOJSON_SOURCES = [
   "infra",
   "footprint",
   "pass-links",
+  "pass-wakes",
   "detections",
   "pass-ais",
   "events",
@@ -109,6 +110,7 @@ export function addLayers(map: MapLibre, recentRadarTiles: string): void {
     ["arrow", arrow(C.text2)],
     ["arrow-sanctioned", arrow(C.critical)],
     ["arrow-watch", arrow(C.serious)],
+    ["arrow-wake", arrow(C.blue)],
     ["hatch", hatch()],
     ["diamond-3", diamond(C.critical)],
     ["diamond-2", diamond(C.serious)],
@@ -232,6 +234,41 @@ export function addLayers(map: MapLibre, recentRadarTiles: string): void {
     source: "pass-links",
     minzoom: 9,
     paint: { "line-color": C.text2, "line-width": 1, "line-opacity": 0.7, "line-dasharray": [2, 2] },
+  });
+  // Wakes: the line the vessel left, and where it really was (the wake is not shifted as the echo is).
+  map.addLayer({
+    id: "pass-wakes",
+    type: "line",
+    source: "pass-wakes",
+    filter: ["==", ["get", "part"], "wake"],
+    layout: { "line-cap": "round" },
+    paint: {
+      "line-color": C.blue,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 12, 2.5],
+      "line-opacity": 0.85,
+    },
+  });
+  map.addLayer({
+    id: "pass-wake-shift",
+    type: "line",
+    source: "pass-wakes",
+    filter: ["==", ["get", "part"], "shift"],
+    minzoom: 9,
+    paint: { "line-color": C.blue, "line-width": 1, "line-opacity": 0.8, "line-dasharray": [2, 2] },
+  });
+  map.addLayer({
+    id: "pass-wake-ship",
+    type: "symbol",
+    source: "pass-wakes",
+    filter: ["==", ["geometry-type"], "Point"],
+    layout: {
+      "icon-image": "arrow-wake",
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 8, 0.7, 12, 1.2],
+      "icon-rotate": ["get", "course"],
+      "icon-rotation-alignment": "map",
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
   });
   map.addLayer({
     id: "pass-ais",

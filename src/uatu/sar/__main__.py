@@ -2,7 +2,9 @@
 
 uatu-sar search [--days 7]               passes over the area of interest
 uatu-sar download (--latest | DATATAKE)  download every frame of a pass
-uatu-sar detect SCENE.zip [--ais]        detect ships, optionally pairing them with recorded AIS
+uatu-sar detect SCENE.zip [--ais] [--wakes]
+                                         detect ships, optionally pairing them with recorded AIS and
+                                         looking for their wakes
 uatu-sar backfill ZONE [--days 90]       have the worker process a zone's passes before AIS recording began there
 uatu-sar candidates [--days 7]           dark vessel candidates of recent passes
 uatu-sar reprocess [--days 7]            have the worker process again the passes paired with AIS (after a
@@ -90,7 +92,7 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
     land = land_cache(grid, settings.sar_data_dir / "cache")
     engine = db.create_engine(settings.database_url) if args.ais else None
     try:
-        analysis = await analyse(scene, grid, land, CfarParams(), engine, settings.sar_bbox, pairing)
+        analysis = await analyse(scene, grid, land, CfarParams(), engine, settings.sar_bbox, pairing, wakes=args.wakes)
     finally:
         if engine is not None:
             await engine.dispose()
@@ -108,6 +110,11 @@ async def cmd_detect(settings: SarSettings, args: argparse.Namespace) -> int:
             not_imaged=len(result.not_imaged),
             median_distance_m=distances[len(distances) // 2] if distances else None,
         )
+    if args.wakes:
+        clear = [w for w in analysis.wakes.values() if w.clear]
+        log.info("wakes", searched=len(analysis.wakes), clear=len(clear))
+        for w in clear:
+            log.info("wake", lon=round(w.lon, 5), lat=round(w.lat, 5), course=w.course_deg, speed_kn=w.speed_kn)
     out_dir = settings.sar_data_dir / analysis.name
     write_outputs(analysis, out_dir)
     print(out_dir)
@@ -181,6 +188,7 @@ def main() -> None:
     detect_cmd = commands.add_parser("detect", help="detect ships in a downloaded scene")
     detect_cmd.add_argument("scene", help="zipped SAFE, as saved by `download`")
     detect_cmd.add_argument("--ais", action="store_true", help="pair detections with AIS from DATABASE_URL")
+    detect_cmd.add_argument("--wakes", action="store_true", help="look for each detection's wake (seconds each)")
     detect_cmd.add_argument("--resolution", type=float, default=10.0, help="grid pixel size in metres (default: 10)")
     detect_cmd.add_argument(
         "--max-distance",

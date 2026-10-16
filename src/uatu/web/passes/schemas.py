@@ -35,6 +35,17 @@ class PassSummary(OutputSchema):
     has_image: bool
 
 
+class WakeRead(OutputSchema):
+    """A wake behind the echo, clear enough to trust (see uatu.sar.wake). The wake is not shifted
+    as the echo is: it starts where the vessel really was."""
+
+    course_deg: Whole
+    speed_kn: OneDecimal | None  # through the water; None when the course runs along the satellite's track
+    lon: Degrees  # where the vessel really was
+    lat: Degrees
+    length_m: Whole  # of wake seen behind it
+
+
 class DetectionProperties(OutputSchema):
     id: int
     kind: DetectionKind
@@ -57,6 +68,7 @@ class DetectionProperties(OutputSchema):
     # For unpaired detections: AIS heard around them at the time (see ReceptionRule)
     ais_vessels_nearby: int | None
     ais_reports_nearby: int | None
+    wake: WakeRead | None
     review: ReviewRead | None  # your verdict, if given
 
 

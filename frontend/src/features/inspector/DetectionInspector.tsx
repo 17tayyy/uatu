@@ -4,7 +4,7 @@ import { usePass, useZones } from "../../api/queries";
 import { navigate } from "../../app/router";
 import { type Selection, useUi } from "../../app/store";
 import { type DetectionKind, KIND } from "../../lib/constants";
-import { duration, fmtTime, metres, plural, utc, when } from "../../lib/format";
+import { duration, fmtTime, knots, metres, plural, utc, when } from "../../lib/format";
 import { passMoment } from "../../map/passes";
 import { Button, Glyph, Loading, mono, Properties } from "../../ui";
 import { useReviewKeys, VerdictBox } from "../review/VerdictBox";
@@ -95,6 +95,16 @@ export function DetectionInspector({ selection }: { selection: DetectionSelectio
               </>
             )}
           </p>
+          {d.wake && (
+            <p className={s.text}>
+              Parece dejar estela
+              {d.wake.speed_kn != null
+                ? `: rumbo ${Math.round(d.wake.course_deg)}°, unos ${knots(d.wake.speed_kn)} respecto al agua.`
+                : ` hacia ${Math.round(d.wake.course_deg)}°; su velocidad no se mide yendo a lo largo de la traza del satélite.`}{" "}
+              La estela no se desplaza como el eco: empieza donde el barco estaba de verdad, en la flecha azul.
+              Compruébala en la imagen: cerca de la costa o con el fondo somero, otras líneas pasan por estelas.
+            </p>
+          )}
         </div>
         <div className={s.section}>
           <div className={s.sectionTitle}>Veredicto</div>
@@ -114,6 +124,8 @@ export function DetectionInspector({ selection }: { selection: DetectionSelectio
                 d.suspected_mmsi && d.suspect_silent_minutes != null ? duration(d.suspect_silent_minutes) : null,
               ],
               ["Visto en", d.fixed_passes_seen ? plural(d.fixed_passes_seen, "pasada", "pasadas") : null],
+              ["Rumbo (estela)", d.wake ? mono(`${Math.round(d.wake.course_deg)}°`) : null],
+              ["Velocidad (estela)", d.wake?.speed_kn != null ? mono(knots(d.wake.speed_kn)) : null],
             ]}
           />
         </div>

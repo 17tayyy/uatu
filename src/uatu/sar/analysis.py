@@ -1,4 +1,4 @@
-"""One scene from product to results: ships detected, AIS at acquisition time, pairing and coverage."""
+"""One scene from product to results: ships detected, AIS at acquisition time, pairing and coverage, wakes."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -16,6 +16,7 @@ from uatu.sar.detect import CfarParams, Detection
 from uatu.sar.match import MatchResult, expected_positions, match, split_by_coverage
 from uatu.sar.pipeline import SceneOutput, process
 from uatu.sar.raster import Grid
+from uatu.sar.wake import Wake, find_wakes
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,8 @@ class PairingParams:
     # Linking unpaired detections to vessels that had gone silent: beyond this uncertainty on where
     # the vessel would be, any link is a guess.
     max_suspect_tolerance_m: float = 8_000.0
+    # Paired vessels slower than this (AIS) leave no wake to look for.
+    wake_min_sog_kn: float = 1.0
 
 
 DEFAULT_PAIRING = PairingParams()
@@ -57,6 +60,7 @@ class Analysis:
     ais_vessels: int
     suspects: dict[Detection, Suspect] = field(default_factory=dict)
     image: Path | None = None  # the backscatter at 20 m on the scene's grid, when asked for
+    wakes: dict[Detection, Wake] = field(default_factory=dict)  # when asked for: the best one of each, however faint
 
     def seen_at(self, detections: list[Detection]) -> list[datetime]:
         """When the radar looked at each detection's spot."""
@@ -74,16 +78,20 @@ async def analyse(
     bbox: BBox,
     pairing: PairingParams = DEFAULT_PAIRING,
     image_path: Path | None = None,
+    wakes: bool = False,
 ) -> Analysis:
     """Detect ships in a scene and, given a database, pair them with the AIS recorded at the time.
 
     image_path: also keep the backscatter at 20 m there, for write_outputs to turn into map tiles.
+    wakes: also look for the wake of each detection (see uatu.sar.wake), but those of vessels AIS
+    says were still; a few seconds each.
     """
     output = await asyncio.to_thread(process, zip_path, grid, land_path, cfar, image_path=image_path)
     geometry = await asyncio.to_thread(read_geometry, zip_path)
     name = zip_path.name.removesuffix(".zip")
     if engine is None:
-        return Analysis(name, geometry, output, None, 0, image=image_path)
+        found = await asyncio.to_thread(find_wakes, zip_path, output.detections, geometry, grid) if wakes else {}
+        return Analysis(name, geometry, output, None, 0, image=image_path, wakes=found)
 
     vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, bbox)
     expected = expected_positions(
@@ -96,7 +104,17 @@ async def analyse(
     )
     result = split_by_coverage(result, nearby, pairing.min_ais_nearby, pairing.min_reports_per_vessel)
     suspects = await find_suspects(engine, result, output, geometry, grid, bbox, pairing)
-    return Analysis(name, geometry, output, result, len(vessels), suspects, image=image_path)
+    found = {}
+    if wakes:
+        still = {
+            m.detection
+            for m in result.matches
+            if m.expected.vessel.sog is not None and m.expected.vessel.sog < pairing.wake_min_sog_kn
+        }
+        found = await asyncio.to_thread(
+            find_wakes, zip_path, output.detections, geometry, grid, still, doppler_sign=pairing.doppler_sign
+        )
+    return Analysis(name, geometry, output, result, len(vessels), suspects, image=image_path, wakes=found)
 
 
 async def find_suspects(
@@ -130,7 +148,7 @@ def write_outputs(analysis: Analysis, out_dir: Path) -> None:
     backscatter.json) and, when the analysis kept the backscatter at 20 m, radar.tif for map tiles."""
     out_dir.mkdir(parents=True, exist_ok=True)
     detections = analysis.output.detections
-    report.detections_geojson(detections, analysis.result, out_dir / "detections.geojson")
+    report.detections_geojson(detections, analysis.result, out_dir / "detections.geojson", analysis.wakes)
     if analysis.result is not None:
         report.ais_geojson(analysis.result, out_dir / "ais.geojson")
     title = f"{analysis.name[:3]} {analysis.geometry.start:%Y-%m-%d %H:%M} UTC - {len(detections)} ship detections"

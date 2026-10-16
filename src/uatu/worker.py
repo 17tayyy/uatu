@@ -6,7 +6,7 @@ SAR
     sar.discover        every SAR_DISCOVER_MINUTES (10): Sentinel-1 frames over each zone acquired
                         since AIS recording began there; records the new ones and queues them.
     sar.process_scene   download, detect ships on the zone's grid, pair them with the AIS recorded
-                        at the time, store. A frame over two zones is downloaded once.
+                        at the time, look for their wakes, store. A frame over two zones is downloaded once.
     sar.backfill        on demand: queue a zone's passes of the N days before AIS recording began
                         there, on a low-priority lane, to learn it (fixed objects) from history.
 Operations
@@ -246,7 +246,10 @@ async def process_scene(scene_id: str, announce: bool = True) -> dict[str, int]:
     out_dir = settings.sar_data_dir / zs.zone / scene.name.removesuffix(".SAFE")
     out_dir.mkdir(parents=True, exist_ok=True)
     image = None if historical else out_dir / "radar_utm.tif"  # map tiles, for the passes shown
-    analysis = await analyse(path, geo.grid, geo.land, CfarParams(), engine, geo.zone.bbox, image_path=image)
+    # Wakes take seconds a detection: for the passes watched live, not for history.
+    analysis = await analyse(
+        path, geo.grid, geo.land, CfarParams(), engine, geo.zone.bbox, image_path=image, wakes=not historical
+    )
     await asyncio.to_thread(write_outputs, analysis, out_dir)
     summary = await store.save_results(state.engine, zs.id, analysis)
     if not settings.sar_keep_scenes and not await store.product_still_needed(state.engine, zs):

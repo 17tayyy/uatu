@@ -82,3 +82,8 @@ export function utc(iso: string): string {
 export function decimal(x: number, digits = 1): string {
   return x.toLocaleString("es-ES", { maximumFractionDigits: digits });
 }
+
+/** A speed in knots, as a wake tells it: "28,5 kn". */
+export function knots(kn: number): string {
+  return `${decimal(kn)} kn`;
+}

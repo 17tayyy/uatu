@@ -26,6 +26,7 @@ from uatu.db.models import (
 )
 from uatu.sar.analysis import Analysis
 from uatu.sar.catalog import Scene, frame_of
+from uatu.sar.wake import Wake
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ async def save_results(engine: AsyncEngine, scene_id: uuid.UUID, analysis: Analy
             "vh_db": _finite(d.vh_db),
             "background_db": _finite(d.background_db),
             **_suspect(analysis.suspects.get(d)),
+            **_wake(analysis.wakes.get(d)),
         }
         for d, seen_at in zip(detections, analysis.seen_at(detections), strict=True)
     ]
@@ -271,6 +273,31 @@ def _scene(row: Any) -> Scene:
         online=True,
         footprint=to_shape(row.footprint),
     )
+
+
+_WAKE_COLUMNS = (
+    "wake_margin",
+    "wake_course_deg",
+    "wake_speed_kn",
+    "wake_lat",
+    "wake_lon",
+    "wake_length_m",
+    "wake_contrast",
+)
+
+
+def _wake(wake: Wake | None) -> dict[str, Any]:
+    if wake is None:
+        return dict.fromkeys(_WAKE_COLUMNS)
+    return {
+        "wake_margin": wake.margin,
+        "wake_course_deg": wake.course_deg,
+        "wake_speed_kn": wake.speed_kn,
+        "wake_lat": wake.lat,
+        "wake_lon": wake.lon,
+        "wake_length_m": wake.length_m,
+        "wake_contrast": wake.contrast,
+    }
 
 
 def _suspect(suspect: Any) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 import type { Detection } from "../../api/types";
 import { useUi } from "../../app/store";
 import { type DetectionKind, KIND, VERDICT, type VerdictKey } from "../../lib/constants";
-import { fmtTime, metres } from "../../lib/format";
+import { fmtTime, knots, metres } from "../../lib/format";
 import type { LngLat } from "../../lib/geo";
 import { Glyph } from "../../ui";
 import p from "../panel.module.css";
@@ -30,6 +30,7 @@ export function DetectionRow({
     `${Math.round(d.length_m)} m`,
     d.kind === "matched" && d.distance_m != null ? `a ${metres(d.distance_m)}` : null,
     d.kind !== "matched" && d.suspected_mmsi ? kind.label.toLowerCase() : null,
+    d.wake ? `estela ${d.wake.speed_kn != null ? knots(d.wake.speed_kn) : `${Math.round(d.wake.course_deg)}°`}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
