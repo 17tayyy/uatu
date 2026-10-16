@@ -167,6 +167,10 @@
   font-weight: 600;
 }
 
+.fold {
+  color: var(--text-3);
+}
+
 .foot {
   display: grid;
   gap: 1px;
@@ -200,28 +204,21 @@
   box-shadow: 0 0 0 3px rgba(76, 183, 130, 0.16);
 }
 
-/* Narrow screens: icons only, the labels as tooltips. */
-@media (max-width: 1360px) and (min-width: 761px) {
-  .sidebar {
+/* Folded ([ or the button at the bottom): icons only, the labels as tooltips. */
+@media (min-width: 761px) {
+  .sidebar[data-collapsed] {
     align-items: center;
     padding: 8px 6px 10px;
   }
-  .switcherText,
-  .switcherChevron,
-  .label,
-  .count,
-  .searchKeys {
+  .sidebar[data-collapsed] :is(.switcherText, .switcherChevron, .label, .count, .searchKeys) {
     display: none;
   }
-  .switcher,
-  .search,
-  .item,
-  .status {
+  .sidebar[data-collapsed] :is(.switcher, .search, .item, .status) {
     justify-content: center;
     width: 36px;
     padding: 0;
   }
-  .alertDot {
+  .sidebar[data-collapsed] .alertDot {
     position: absolute;
     top: 6px;
     right: 6px;
@@ -240,7 +237,9 @@
   }
   .switcher,
   .search,
-  .foot > :not(:last-child),
+  .foot > .status,
+  .foot > a,
+  .fold,
   .label,
   .count {
     display: none;

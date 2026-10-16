@@ -1,4 +1,5 @@
 // The dashboard: the sidebar, the section's list, and the map with the inspector beside it.
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect } from "react";
 import { onUnauthorized } from "../api/client";
 import { useZones } from "../api/queries";
@@ -49,6 +50,8 @@ export function App() {
   const setPaletteOpen = useUi((u) => u.setPaletteOpen);
   const inspector = useUi((u) => u.selection != null);
   const time = useUi((u) => u.time != null);
+  const sidebarCollapsed = useUi((u) => u.sidebarCollapsed);
+  const listHidden = useUi((u) => u.listHidden);
 
   useEffect(() => onUnauthorized(() => setLoginOpen(true)), [setLoginOpen]);
   // ⌘K / Ctrl+K anywhere: the command palette.
@@ -59,23 +62,33 @@ export function App() {
         setPaletteOpen(!useUi.getState().paletteOpen);
         return;
       }
-      // J with nothing open starts on the list being reviewed (see useReviewKeys for the rest).
       const ui = useUi.getState();
       const typing = (e.target as HTMLElement | null)?.closest("input, textarea, select, dialog");
-      if (e.key === "j" && !typing && !ui.selection && ui.reviewList[0]) ui.openDetection(ui.reviewList[0]);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      // [ folds the sidebar, ] hides the list; J with nothing open starts the review (see useReviewKeys).
+      if (e.key === "[") ui.toggleSidebar();
+      else if (e.key === "]") ui.setListHidden(!ui.listHidden);
+      else if (e.key === "j" && !ui.selection && ui.reviewList[0]) ui.openDetection(ui.reviewList[0]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setPaletteOpen]);
 
   return (
-    <div className={s.app} data-inspector={inspector || undefined} data-time={time || undefined}>
+    <div
+      className={s.app}
+      data-inspector={inspector || undefined}
+      data-time={time || undefined}
+      data-sidebar={sidebarCollapsed ? "collapsed" : undefined}
+      data-list={listHidden ? "hidden" : undefined}
+    >
       <Sidebar section={sectionOf(route)} />
-      <main className={s.list} key={JSON.stringify(route)}>
-        {zones.data ? <Panel route={route} /> : null}
+      <main className={s.list} key={JSON.stringify(route)} aria-hidden={listHidden || undefined}>
+        {zones.data && !listHidden ? <Panel route={route} /> : null}
       </main>
       <div className={s.stage}>
         <MapView>
+          <ListToggle />
           <MapSync />
           <TimeSync />
           <MapContext />
@@ -89,6 +102,23 @@ export function App() {
       <CommandPalette />
       {!zones.data && <Splash failed={zones.isError} />}
     </div>
+  );
+}
+
+/** Over the map, top left: hide the list for a bigger map, or bring it back. */
+function ListToggle() {
+  const hidden = useUi((u) => u.listHidden);
+  const setListHidden = useUi((u) => u.setListHidden);
+  return (
+    <button
+      type="button"
+      className={s.listToggle}
+      onClick={() => setListHidden(!hidden)}
+      title={hidden ? "Mostrar la lista (])" : "Ocultar la lista (])"}
+      aria-label={hidden ? "Mostrar la lista" : "Ocultar la lista"}
+    >
+      {hidden ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+    </button>
   );
 }
 

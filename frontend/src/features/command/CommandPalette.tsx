@@ -63,7 +63,10 @@ export function CommandPalette() {
 
   const commands = useMemo<Command[]>(() => {
     const ui = useUi.getState();
-    const go = (path: string) => () => navigate(path);
+    const go = (path: string) => () => {
+      ui.setListHidden(false); // going somewhere: its list
+      navigate(path);
+    };
     const fixed: Command[] = [
       { id: "s-passes", group: "Ir a", label: "Pasadas", icon: <Satellite size={15} />, run: go("passes") },
       { id: "s-review", group: "Ir a", label: "Revisar", icon: <ClipboardCheck size={15} />, run: go("review") },

@@ -1,8 +1,43 @@
 .app {
+  --sb: var(--sidebar);
+  --ls: var(--list);
   display: grid;
-  grid-template-columns: var(--sidebar) var(--list) 1fr;
+  grid-template-columns: var(--sb) var(--ls) 1fr;
   height: 100dvh;
   background: var(--bg);
+}
+
+/* Folded: the sidebar to its icons, the list away; the map takes the room. */
+.app[data-sidebar="collapsed"] {
+  --sb: 52px;
+}
+
+.app[data-list="hidden"] {
+  --ls: 0px;
+}
+
+.app[data-list="hidden"] .list {
+  border: 0;
+  overflow: hidden;
+}
+
+.listToggle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-2);
+  background: var(--bg-3);
+  box-shadow: var(--pop);
+  color: var(--text-3);
+}
+
+.listToggle:hover {
+  color: var(--text);
 }
 
 .list {
@@ -54,12 +89,6 @@
   font-size: 12.5px;
 }
 
-@media (max-width: 1360px) {
-  .app {
-    grid-template-columns: 52px var(--list) 1fr;
-  }
-}
-
 /* Phone: the map on top, the list as a sheet below, the sections at the bottom. */
 @media (max-width: 760px) {
   .app {
@@ -82,7 +111,8 @@
   .app[data-inspector] .list {
     display: none;
   }
-  .app[data-inspector] {
+  .app[data-inspector],
+  .app[data-list="hidden"] {
     grid-template-rows: 1fr 0 auto;
   }
 }

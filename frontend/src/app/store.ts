@@ -46,6 +46,8 @@ interface Ui {
   lastVessel: { mmsi: number; name: string } | null;
   layersOpen: boolean;
   paletteOpen: boolean;
+  sidebarCollapsed: boolean; // icons only
+  listHidden: boolean; // the map takes its room
   reviewList: ReviewItem[];
 
   setZone(zone: string): void;
@@ -64,6 +66,8 @@ interface Ui {
   setLastVessel(v: Ui["lastVessel"]): void;
   setLayersOpen(open: boolean): void;
   setPaletteOpen(open: boolean): void;
+  toggleSidebar(): void;
+  setListHidden(hidden: boolean): void;
   setReviewList(list: ReviewItem[]): void;
   /** Open a detection: its pass on the map, the detection in the inspector, the map on it. */
   openDetection(item: ReviewItem): void;
@@ -88,6 +92,8 @@ export const useUi = create<Ui>((set, get) => ({
   lastVessel: null,
   layersOpen: false,
   paletteOpen: false,
+  sidebarCollapsed: load("uatu.sidebar.collapsed", window.innerWidth <= 1360),
+  listHidden: load("uatu.list.hidden", false),
   reviewList: [],
 
   setZone: (zone) => {
@@ -125,6 +131,16 @@ export const useUi = create<Ui>((set, get) => ({
   setLastVessel: (lastVessel) => set({ lastVessel }),
   setLayersOpen: (layersOpen) => set({ layersOpen }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  toggleSidebar: () => {
+    const sidebarCollapsed = !get().sidebarCollapsed;
+    save("uatu.sidebar.collapsed", sidebarCollapsed);
+    set({ sidebarCollapsed });
+  },
+  setListHidden: (listHidden) => {
+    if (listHidden === get().listHidden) return;
+    save("uatu.list.hidden", listHidden);
+    set({ listHidden });
+  },
   setReviewList: (reviewList) => set({ reviewList }),
   openDetection: (item) => {
     get().showPass(item.passId);
