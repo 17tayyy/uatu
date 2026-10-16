@@ -302,7 +302,8 @@ ORDER BY d.seen_at DESC;
 
 A map with a sidebar of sections and their list at `http://<host>:8000` (the `web` service), in
 Spanish, over the whole coast or one zone at a time (the switcher at the top of the sidebar). What is
-picked on the map or in a list opens in an inspector beside the map. `⌘K` (or `Ctrl+K`) finds any
+picked on the map or in a list opens in an inspector beside the map. `[` folds the sidebar to its icons
+and `]` hides the list, for a bigger map (the browser remembers). `⌘K` (or `Ctrl+K`) finds any
 vessel, goes to a pass or a section, switches a layer or the zone. The look follows Linear's: dense
 rows, hairlines, one accent; data in Geist Mono.
 

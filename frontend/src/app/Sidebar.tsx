@@ -8,6 +8,8 @@ import {
   FileText,
   LogIn,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Satellite,
   Search,
   Ship,
@@ -45,8 +47,15 @@ function NavItem({
   count?: number | null;
   alert?: boolean;
 }) {
+  const setListHidden = useUi((u) => u.setListHidden);
   return (
-    <a href={`#/${section}`} className={s.item} aria-current={current === section ? "page" : undefined} title={label}>
+    <a
+      href={`#/${section}`}
+      className={s.item}
+      aria-current={current === section ? "page" : undefined}
+      title={label}
+      onClick={() => setListHidden(false)}
+    >
       {icon}
       <span className={s.label}>{label}</span>
       {alert && <span className={s.alertDot} />}
@@ -146,8 +155,10 @@ export function Sidebar({ section }: { section: Section }) {
   const reports = useReports().data;
   const fresh = status?.last_ais_at != null && Date.now() - new Date(status.last_ais_at).getTime() < 10 * 60_000;
   const listening = Boolean(status?.recording && fresh);
+  const collapsed = useUi((u) => u.sidebarCollapsed);
+  const toggleSidebar = useUi((u) => u.toggleSidebar);
   return (
-    <nav className={s.sidebar} aria-label="Secciones">
+    <nav className={s.sidebar} data-collapsed={collapsed || undefined} aria-label="Secciones">
       <ZoneSwitcher />
       <button type="button" className={s.search} onClick={() => setPaletteOpen(true)} title="Buscar (⌘K)">
         <Search size={14} />
@@ -196,6 +207,17 @@ export function Sidebar({ section }: { section: Section }) {
           </a>
         )}
         <Account />
+        <button
+          type="button"
+          className={`${s.item} ${s.fold}`}
+          onClick={toggleSidebar}
+          title={collapsed ? "Desplegar la barra ([)" : "Plegar la barra ([)"}
+          aria-label={collapsed ? "Desplegar la barra" : "Plegar la barra"}
+        >
+          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+          <span className={s.label}>Plegar</span>
+          <span className={s.count}>[</span>
+        </button>
       </div>
     </nav>
   );
