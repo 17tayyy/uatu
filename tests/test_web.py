@@ -256,7 +256,7 @@ async def rows():
             "vh_db": -9.87654,
             "background_db": -20.0,
             **dict.fromkeys(["wake_margin", "wake_course_deg", "wake_speed_kn", "wake_lat", "wake_lon",
-                             "wake_length_m", "wake_contrast"]),
+                             "wake_length_m", "wake_contrast", "wake_depth_m"]),
         }  # fmt: skip
         wake = {"wake_course_deg": 75.4, "wake_speed_kn": 11.96, "wake_length_m": 1000.0, "wake_contrast": 0.4}
         await conn.execute(
@@ -286,6 +286,11 @@ async def rows():
                     "ais_reports_nearby": 3,
                     "suspected_mmsi": None,
                     "suspect_silent_minutes": None,
+                    **wake,
+                    "wake_margin": 3.5,  # clear, but over 4 m of water: the seabed, likely
+                    "wake_depth_m": 4.0,
+                    "wake_lat": 36.2,
+                    "wake_lon": -4.9,
                 },
                 detection
                 | {
@@ -404,7 +409,7 @@ async def test_passes(client, tmp_path):
         "length_m": 1000,
     }
     assert kinds["went_silent"]["wake"] is None
-    assert kinds["no_coverage"]["wake"] is None
+    assert kinds["no_coverage"]["wake"] is None  # clear, but over shallow water
     assert detail["reception_rule"] == {
         "radius_m": 3000.0, "window_hours": 2.0, "min_vessels": 3, "min_reports_per_vessel": 3.0
     }  # fmt: skip

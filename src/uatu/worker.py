@@ -247,8 +247,17 @@ async def process_scene(scene_id: str, announce: bool = True) -> dict[str, int]:
     out_dir.mkdir(parents=True, exist_ok=True)
     image = None if historical else out_dir / "radar_utm.tif"  # map tiles, for the passes shown
     # Wakes take seconds a detection: for the passes watched live, not for history.
+    depth_at = zone.bathymetry.depth_at if zone.bathymetry else None
     analysis = await analyse(
-        path, geo.grid, geo.land, CfarParams(), engine, geo.zone.bbox, image_path=image, wakes=not historical
+        path,
+        geo.grid,
+        geo.land,
+        CfarParams(),
+        engine,
+        geo.zone.bbox,
+        image_path=image,
+        wakes=not historical,
+        depth_at=depth_at,
     )
     await asyncio.to_thread(write_outputs, analysis, out_dir)
     summary = await store.save_results(state.engine, zs.id, analysis)

@@ -99,9 +99,10 @@ Tested blind on the AIS ships of six frames of the Strait and Alborán: 83 under
 or moored. When the wake beat chance by the margin Uatu requires, it was right every time: 6
 wakes, course within 16°, speed within 2 knots. None was found behind a ship that was still. But
 that is one ship in 14. In a breeze most wakes do not show at all, and below that margin a "wake"
-is as often a line of the sea that happens to start near an echo. Near the coast or over shallow
-banks, seabed features and dredged channels show through the sea too. So the dashboard offers a
-wake as possible, drawn over the radar image for the eye to check. The speed is through the
+is as often a line of the sea that happens to start near an echo. Over shallow water the seabed
+shows through the sea too: a dredged channel in the inner Bay of Cádiz passed for the wake of a
+dark vessel at 28 knots. Wakes over less than 20 m of water (EMODnet bathymetry) are not told, and
+the dashboard offers the rest as possible wakes, drawn over the radar image for the eye to check. The speed is through the
 water: the wake drifts with the current. In the Strait, where the Atlantic flows in at the surface
 at around a metre per second, eastbound ships came out slower than their AIS said and westbound
 ones faster.

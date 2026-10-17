@@ -283,6 +283,7 @@ _WAKE_COLUMNS = (
     "wake_lon",
     "wake_length_m",
     "wake_contrast",
+    "wake_depth_m",
 )
 
 
@@ -297,6 +298,7 @@ def _wake(wake: Wake | None) -> dict[str, Any]:
         "wake_lon": wake.lon,
         "wake_length_m": wake.length_m,
         "wake_contrast": wake.contrast,
+        "wake_depth_m": wake.depth_m,
     }
 
 

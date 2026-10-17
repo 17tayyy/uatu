@@ -102,7 +102,7 @@ export function DetectionInspector({ selection }: { selection: DetectionSelectio
                 ? `: rumbo ${Math.round(d.wake.course_deg)}°, unos ${knots(d.wake.speed_kn)} respecto al agua.`
                 : ` hacia ${Math.round(d.wake.course_deg)}°; su velocidad no se mide yendo a lo largo de la traza del satélite.`}{" "}
               La estela no se desplaza como el eco: empieza donde el barco estaba de verdad, en la flecha azul.
-              Compruébala en la imagen: cerca de la costa o con el fondo somero, otras líneas pasan por estelas.
+              Compruébala en la imagen: otras líneas del mar pueden pasar por estelas.
             </p>
           )}
         </div>
