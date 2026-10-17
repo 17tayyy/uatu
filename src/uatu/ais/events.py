@@ -58,10 +58,15 @@ class Params:
     gap_min_s: float = 3600  # silence that counts as a gap
     coverage_radius_m: float = 15_000  # ...if AIS from other vessels kept arriving around it
     coverage_min_vessels: int = 3
-    # A silence is notable only if reception was good both where the vessel went quiet and where
-    # it should have been an hour later: vessels heard within this radius, each several times.
-    # aisstream.io hears the strait's lanes well and its western and eastern ends poorly.
+    # A silence is notable only if reception was good where the vessel went quiet (vessels heard within
+    # this radius, each several times) and along most of the way it would have sailed while silent,
+    # up to ahead_s, checked every ahead_step_m. aisstream.io hears the strait's lanes well and its
+    # western and eastern ends poorly: a westbound ship off Tarifa is heard for another half hour,
+    # then sails into the Atlantic's silence.
     local_coverage_radius_m: float = 5_000
+    ahead_s: float = 3 * 3600
+    ahead_step_m: float = 5_000
+    max_unheard_share: float = 0.5
     min_reports_per_vessel: float = 3.0
     edge_margin_m: float = 10_000  # a vessel silent this close to the area's edge simply left it
     # Closer to the coast than this: a harbour or an anchorage by it. Vessels moored side by side and
@@ -168,6 +173,7 @@ def detect_gaps(
                 continue
             course = _dead_reckoning(tr, i, p.gap_min_s, proj)
             heard_ahead = None
+            unheard = None
             covered_ahead = True
             heading_to_port = False
             if course is not None:
@@ -175,10 +181,14 @@ def detect_gaps(
                 if ((cx < edge_x0[0]) | (cx > edge_x1[0]) | (cy < edge_y0[0]) | (cy > edge_y1[0])).any():
                     continue  # it sailed out of the area
                 heading_to_port = bool((coast(*proj.lonlat(cx, cy)) < p.in_port_m).any())
-                # Where it should be by now: was AIS well received there? If not, it sailed into a
-                # hole in aisstream's coverage (like the one west of Tarifa) rather than switching off.
-                heard_ahead, reports_ahead = _heard_around(*fixes, cx[-1], cy[-1], p.local_coverage_radius_m)
-                covered_ahead = _well_covered(heard_ahead, reports_ahead, p)
+                heard_ahead, _ = _heard_around(*fixes, cx[-1], cy[-1], p.local_coverage_radius_m)
+                # Where it would have sailed while silent (up to ahead_s): if it spent much of that where
+                # aisstream hears poorly (like the Atlantic west of Tarifa) or out of the area, that
+                # explains the silence as well as switching off would.
+                box = (edge_x0[0], edge_y0[0], edge_x1[0], edge_y1[0])
+                silent_s = min((resumed or now) - start, p.ahead_s)
+                unheard = _unheard_share(tr, i, silent_s, fixes, box, proj, p)
+                covered_ahead = unheard is None or unheard < p.max_unheard_share
             details: dict = {
                 "sog": _num(tr.sog[i]),
                 "cog": _num(tr.cog[i]),
@@ -201,6 +211,8 @@ def detect_gaps(
                 details["ais_heard_ahead"] = heard_ahead
             if not covered_here:
                 details["poor_reception_here"] = True
+            if unheard is not None:
+                details["unheard_share_ahead"] = round(unheard, 2)
             if not covered_ahead:
                 details["poor_reception_ahead"] = True
             under_way = tr.sog[i] >= p.moving_sog
@@ -229,6 +241,32 @@ def _heard_around(
 def _well_covered(vessels: int, reports: int, p: Params) -> bool:
     """Enough vessels heard, each several times: a receiver hears the place, not just glimpses of it."""
     return vessels >= p.coverage_min_vessels and reports >= p.min_reports_per_vessel * vessels
+
+
+def _unheard_share(
+    tr: Track,
+    i: int,
+    seconds: float,
+    fixes: tuple[np.ndarray, np.ndarray, np.ndarray, int],
+    box: tuple[float, float, float, float],
+    proj: LocalProjection,
+    p: Params,
+) -> float | None:
+    """Share of the way a vessel that went quiet at fix i would have sailed in `seconds`, at its speed
+    and course, where AIS was poorly received or outside the area; None without a speed and course."""
+    course = _dead_reckoning(tr, i, seconds, proj)
+    if course is None:
+        return None
+    x0, y0, x1, y1 = box
+    xs, ys = course
+    every = max(1, round(p.ahead_step_m / 1000))
+    points = range(every, len(xs), every) or range(len(xs) - 1, len(xs))  # past the start, judged apart
+    unheard = sum(
+        not (x0 <= xs[k] <= x1 and y0 <= ys[k] <= y1)
+        or not _well_covered(*_heard_around(*fixes, xs[k], ys[k], p.local_coverage_radius_m), p)
+        for k in points
+    )
+    return unheard / len(points)
 
 
 def _dead_reckoning(tr: Track, i: int, seconds: float, proj: LocalProjection) -> tuple[np.ndarray, np.ndarray] | None:
@@ -567,15 +605,32 @@ def detect_identity_changes(
                 continue  # it did not hold
             severity = IDENTITY_FIELDS[name]
             details = {"field": name, "before": before, "after": value}
-            if name == "name" and _corrected(str(before), str(value)):
+            if name == "name" and name_corrected(str(before), str(value)):
                 severity, details = 1, details | {"correction": True}
             lat, lon = where[mmsi]
             events.append(Event("identity_change", severity, mmsi, t, lat, lon, details, t))
     return sorted(events, key=lambda e: e.start)
 
 
-def _corrected(a: str, b: str) -> bool:
-    """Two names a letter or two apart: a spelling corrected, not a vessel renamed."""
+# What a yacht's or ship's name may be prefixed with, or not: sailing and motor yachts and vessels,
+# motor tankers, research vessels.
+NAME_PREFIXES = ("S/V", "S/Y", "M/Y", "M/V", "M/S", "M/T", "R/V", "SV", "SY", "MY", "MV", "MS", "MT", "RV")
+
+
+def _bare(name: str) -> str:
+    name = " ".join(name.upper().split())
+    for prefix in NAME_PREFIXES:
+        if name.startswith(prefix + " "):
+            return name[len(prefix) + 1 :]
+    return name
+
+
+def name_corrected(a: str, b: str) -> bool:
+    """Two names a letter or two apart, or but for a prefix (S/V ELIZA JANE, ELIZA JANE): a spelling
+    corrected, not a vessel renamed."""
+    a, b = _bare(a), _bare(b)
+    if a == b:
+        return True
     if min(len(a), len(b)) < 6:
         return False
     previous = list(range(len(b) + 1))

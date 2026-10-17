@@ -6,8 +6,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from uatu.config import ZONES
-from uatu.report.data import Candidate, Heard, Listed, Notable, Report
+from uatu.report.data import Candidate, Heard, Listed, Notable, Report, Reviewed, Unheard, WakesSeen
 from uatu.report.render import number, render
+from uatu.web.passes.schemas import PassSummary
 
 T0 = datetime(2026, 10, 14, 6, 26, tzinfo=UTC)
 
@@ -23,13 +24,26 @@ def made_up() -> Report:
     )  # fmt: skip
     gap = Notable("ais_gap", 2, T0 + timedelta(hours=1), None, 248001000, "MISJE VIOLA", 35.97, -5.55,
                   {"silent_minutes": 90, "coast_km": 5.2, "ais_heard_nearby": 51})  # fmt: skip
+    a_pass = PassSummary(
+        id="S1D-0098CF-cataluna", platform="S1D", zone="cataluna", acquired_at=T0 - timedelta(days=1),
+        orbit_direction="DESCENDING", coverage=0.54, frames=1, detections=48, matched=4, no_coverage=39, fixed=4,
+        candidates=0, pending=0, footprint={"type": "Polygon", "coordinates": []}, has_image=False,
+    )  # fmt: skip
+    waiting = [
+        Notable("loitering", 2, T0 + timedelta(hours=h), None, 477000001, "OOCL SEOUL", 36.32, -4.52,
+                {"hours": 6.1, "coast_km": 22.4})
+        for h in (2, 20)
+    ]  # fmt: skip
     return Report(
         start=T0 - timedelta(days=7), end=T0, zones=[ZONES["estrecho"]], recorded=[ZONES["estrecho"]],
         heard=[Heard("Estrecho de Gibraltar", 123_456, 1_234)], vessels_heard=1_234,
         outages=[(T0 - timedelta(days=1), T0 - timedelta(days=1) + timedelta(hours=2, minutes=45))],
-        passes=[], listed=[tanker], notable=[gap],
+        passes=[a_pass], listed=[tanker], notable=[gap, *waiting],
         candidates=[Candidate("S1C-013B0F-estrecho", T0, "unidentified", 40.0, -5.3, 36.1, None, None)],
         transits_by_day=[("2026-10-13", 79, 50)], stops_by_place=[], density=[],
+        unheard=[Unheard("Cataluña", 48, 39, ["Tarragona", "Barcelona"])],
+        reviewed=Reviewed(7, {"not_a_vessel": 1, "reception_gap": 2}),
+        wakes=WakesSeen(29, 11, 10, 9, 1.34), loitering_off=["Malaga"],
     )  # fmt: skip
 
 
@@ -44,6 +58,14 @@ def test_numbers_and_the_text_in_spanish():
     assert "AIS apagado: MISJE VIOLA" in text  # by name, not by MMSI
     assert "![Derrotas y paradas de los barcos sancionados y vigilados](barcos-vigilados.png)" in text
     assert "## Límites" in text
+    # Why so many are neither paired nor dark; what the verdicts said; the wakes, checked against AIS.
+    assert "Cataluña, 39 de 48 (sobre todo frente a Tarragona y Barcelona)" in text
+    assert "revisados 3: 2 huecos de recepción y 1 eco que no era un barco" in text
+    assert "**Estelas.** 29 ecos dejaron una estela clara" in text
+    assert "el rumbo coincidió (±20°) en 9 de 10; la velocidad se apartó de la del AIS 1,3 nudos" in text
+    # A ship waiting for a berth, told once in a paragraph, not once per day.
+    assert "**Merodeos**: 1 barco casi parado 3 horas o más mar adentro" in text
+    assert "frente a Malaga: *OOCL SEOUL*." in text and "Merodeo: OOCL SEOUL" not in text
 
 
 @pytest.mark.skipif("UATU_TEST_DATABASE_URL" not in os.environ, reason="needs UATU_TEST_DATABASE_URL")
@@ -89,6 +111,6 @@ def test_the_weekly_report_is_announced_with_a_link():
         Path("/data/reports/informe-2026-10-13"), made_up(), "http://192.168.1.41:8000/"
     )
     assert title == "Uatu: informe del 7 oct al 14 oct"
-    assert message == "1.234 barcos oídos, 0 pasadas de radar, 1 candidato sin AIS, 1 barco sancionado o vigilado."
+    assert message == "1.234 barcos oídos, 1 pasada de radar, 1 candidato sin AIS, 1 barco sancionado o vigilado."
     assert link == "http://192.168.1.41:8000/api/v1/reports/informe-2026-10-13/informe.html"
     assert announcement(Path("informe-2026-10-13"), made_up(), None)[2] is None

@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from uatu.ais.analysis import describe
 from uatu.ais.events import Event
-from uatu.report.data import MADRID, Listed, Report
+from uatu.report.data import COURSE_RIGHT_DEG, MADRID, Listed, Report
 
 MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
 STATUS = {
@@ -30,6 +30,12 @@ EVENTS = {
     "shared_mmsi": "MMSI compartidos",
     "odd_mmsi": "MMSI imposibles",
     "emergency_beacon": "Balizas de emergencia",
+}
+VERDICTS = {  # (one, many), after a number
+    "vessel_without_ais": ("barco sin AIS", "barcos sin AIS"),
+    "vessel_with_ais": ("barco con AIS que el emparejado no vio", "barcos con AIS que el emparejado no vio"),
+    "reception_gap": ("hueco de recepción", "huecos de recepción"),
+    "not_a_vessel": ("eco que no era un barco", "ecos que no eran barcos"),
 }
 COUNTRY = {"Spain": "España", "Morocco": "Marruecos", "Algeria": "Argelia", "France": "Francia", "Italy": "Italia"}
 MAX_EVENTS = 40
@@ -201,6 +207,7 @@ def _radar(r: Report) -> list[str]:
             f" {p.detections} | {p.matched} | {p.no_coverage} | {p.fixed} | {p.candidates} |"
         )
     lines.append("")
+    lines += _unheard(r)
     if r.candidates:
         lines += ["**Candidatos** (detecciones sin AIS donde aisstream oye bien a los barcos de alrededor):", ""]
         for c in r.candidates:
@@ -227,7 +234,68 @@ def _radar(r: Report) -> list[str]:
             "Ningún candidato: todo lo detectado tiene AIS, está donde aisstream oye poco o es un objeto fijo.",
             "",
         ]
-    return lines
+    return lines + _reviewed(r) + _wakes(r)
+
+
+def _unheard(r: Report) -> list[str]:
+    """Where aisstream does not hear: why so many detections can be called neither paired nor dark."""
+    parts = [
+        f"{u.zone}, {u.unheard} de {u.detections}" + (f" (sobre todo frente a {_and(u.places)})" if u.places else "")
+        for u in r.unheard
+        if u.unheard
+    ]
+    if not parts:
+        return []
+    return [
+        "**Dónde no se oye el AIS.** Detecciones en mar donde aisstream recibe demasiado poco para saber si los"
+        f" barcos emitían: {'; '.join(parts)}. Ahí el radar ve barcos que este informe no puede llamar oscuros.",
+        "",
+    ]
+
+
+def _reviewed(r: Report) -> list[str]:
+    if r.reviewed is None or not r.reviewed.to_review:
+        return []
+    told = [
+        plural(n, *VERDICTS[verdict])
+        for verdict, n in sorted(r.reviewed.verdicts.items(), key=lambda kv: -kv[1])
+        if verdict in VERDICTS
+    ]
+    done = sum(r.reviewed.verdicts.values())
+    result = f"revisados {done}: {_and(told)}" if done else "ninguno revisado aún"
+    return [
+        f"**Revisión.** De los {r.reviewed.to_review} ecos sin AIS donde sí se oye bien (candidatos y huecos de"
+        f" recepción), {result}.",
+        "",
+    ]
+
+
+def _wakes(r: Report) -> list[str]:
+    w = r.wakes
+    if w is None or not w.clear:
+        return []
+    with_ais = ""
+    if w.checked:
+        those = "el que llevaba" if w.checked == 1 else f"los {w.checked} que llevaban"
+        speed = (
+            f"; la velocidad se apartó de la del AIS {number(w.speed_diff_kn, 1)} nudos de mediana (la estela la"
+            " mide respecto al agua, y la corriente cuenta)"
+            if w.speed_diff_kn is not None
+            else ""
+        )
+        with_ais = (
+            f" Comprobadas con {those} AIS: el rumbo coincidió (±{COURSE_RIGHT_DEG}°) en {w.course_right}"
+            f" de {w.checked}{speed}."
+        )
+    return [
+        f"**Estelas.** {plural(w.clear, 'eco dejó', 'ecos dejaron')} una estela clara, que da el rumbo, la"
+        f" velocidad y la posición real del barco sin AIS.{with_ais} Las de ecos sin AIS no se dan una a una.",
+        "",
+    ]
+
+
+def _and(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} y {items[-1]}"
 
 
 def _events(r: Report) -> list[str]:
@@ -236,16 +304,39 @@ def _events(r: Report) -> list[str]:
     if not notable:
         return [*lines, "Ningún evento notable en el periodo.", ""]
     counts = Counter(e.kind for e in notable)
-    lines += ["| Evento | Notables o alertas |", "|---|---:|"]
-    lines += [f"| {EVENTS.get(kind, kind)} | {n} |" for kind, n in counts.most_common()]
+    vessels = {kind: len({e.mmsi for e in notable if e.kind == kind}) for kind in counts}
+    lines += ["| Evento | Notables o alertas | Barcos |", "|---|---:|---:|"]
+    lines += [f"| {EVENTS.get(kind, kind)} | {n} | {vessels[kind]} |" for kind, n in counts.most_common()]
     lines.append("")
-    shown = sorted(notable, key=lambda e: (-e.severity, e.start))[:MAX_EVENTS]
-    for e in sorted(shown, key=lambda e: e.start):
-        title, message, _ = describe(_event(e), {e.mmsi: e.name} if e.name else {})
-        mark = "**Alerta**" if e.severity >= 3 else "Notable"
-        lines.append(f"- {mark} · {when(e.start)} · {title}. {message}")
-    if len(notable) > MAX_EVENTS:
-        lines.append(f"- … y {len(notable) - MAX_EVENTS} más, en el dashboard.")
+    # Loitering is told in a paragraph: mostly ships waiting offshore for a berth or for orders.
+    loitering = [e for e in notable if e.kind == "loitering" and e.severity < 3]
+    if loitering:
+        names = list(dict.fromkeys(e.name or f"MMSI {e.mmsi}" for e in loitering))
+        off = f", sobre todo frente a {_and(r.loitering_off)}" if r.loitering_off else ""
+        who = plural(len(names), "barco casi parado", "barcos casi parados")
+        lines += [
+            f"**Merodeos**: {who} 3 horas o más mar adentro{off}:"
+            f" {', '.join(f'*{n}*' for n in names)}. Suelen ser mercantes esperando atraque u órdenes. Donde"
+            " muchos esperan, Uatu aprende que es una zona de espera y deja de contarlos.",
+            "",
+        ]
+    # The rest one line per vessel and kind: a vessel does the same again and again.
+    by_vessel: dict[tuple[str, int], list] = {}
+    for e in sorted(notable, key=lambda e: e.start):
+        if e.kind == "loitering" and e.severity < 3:
+            continue
+        by_vessel.setdefault((e.kind, e.mmsi), []).append(e)
+    groups = sorted(by_vessel.values(), key=lambda g: (-max(e.severity for e in g), g[0].start))[:MAX_EVENTS]
+    for group in sorted(groups, key=lambda g: g[0].start):
+        first = max(group, key=lambda e: e.severity) if len(group) > 1 else group[0]
+        title, message, _ = describe(_event(first), {first.mmsi: first.name} if first.name else {})
+        mark = "**Alerta**" if first.severity >= 3 else "Notable"
+        again = ""
+        if len(group) > 1:
+            again = f" {len(group)} veces en total, del {when(group[0].start)} al {when(group[-1].start)}."
+        lines.append(f"- {mark} · {when(first.start)} · {title}. {message}{again}")
+    if len(by_vessel) > MAX_EVENTS:
+        lines.append(f"- … y {len(by_vessel) - MAX_EVENTS} más, en el dashboard.")
     return [*lines, ""]
 
 

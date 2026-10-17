@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap, LogNorm
+from matplotlib.legend import Legend
 from matplotlib.lines import Line2D
 from matplotlib.patches import Polygon, Rectangle
 from matplotlib.ticker import FuncFormatter
@@ -58,19 +59,22 @@ def listed_map(r: Report, path: Path) -> list[str]:
         # The number where it was last heard: names would pile up in the Strait.
         badge = {"boxstyle": "circle,pad=0.25", "facecolor": colour, "edgecolor": "white", "lw": 0.6}
         ax.annotate(str(n), v.track[-1], fontsize=6.5, color="white", ha="center", va="center", zorder=6, bbox=badge)
-        legend.append(f"{n}  {v.name or v.mmsi}")
+        legend.append(f"{n:>2}  {v.name or v.mmsi}")
     stops = [s for v in shown for s in v.stops]
     if stops:
         ax.scatter([s["lon"] for s in stops], [s["lat"] for s in stops], s=34, marker="s", facecolor="white",
                    edgecolor=INK, lw=1, zorder=4, label="parada")  # fmt: skip
-    ax.text(1.01, 1, "\n".join(legend), transform=ax.transAxes, va="top", fontsize=7.5, color=INK,
-            family="monospace")  # fmt: skip
     kinds = [
         Line2D([], [], color=LISTED["sanctioned"], lw=1.6, label="sancionado o gestor sancionado"),
         Line2D([], [], color=LISTED["watchlisted"], lw=1.6, label="en listas de vigilancia"),
         Line2D([], [], color=INK, marker="s", markerfacecolor="white", ls="", label="parada (1 h o más)"),
     ]
-    ax.legend(handles=kinds, loc="lower left", bbox_to_anchor=(1.01, 0), frameon=False, fontsize=7.5)
+    key = ax.legend(handles=kinds, loc="lower left", bbox_to_anchor=(0, 1.01), ncol=3, frameon=False, fontsize=7.5)
+    ax.add_artist(key)
+    # Who each number is, under the map in columns: however many, they fit.
+    names = [Line2D([], [], ls="", label=label) for label in legend]
+    ax.legend(handles=names, loc="upper left", bbox_to_anchor=(0, -0.1), ncol=4, frameon=False, handlelength=0,
+              handletextpad=0, columnspacing=2.0, labelcolor=INK, prop={"family": "monospace", "size": 7})  # fmt: skip
     _zones(ax, r)
     _save(fig, path)
     return [v.name or str(v.mmsi) for v in r.listed if v not in shown]
@@ -146,5 +150,7 @@ def _day(iso: str) -> str:
 
 def _save(fig: plt.Figure, path: Path) -> None:
     fig.tight_layout()
-    fig.savefig(path, facecolor="white")
+    # Everything around the axes too: legends above and below a map.
+    legends = [a for ax in fig.axes for a in ax.get_children() if isinstance(a, Legend)]
+    fig.savefig(path, facecolor="white", bbox_inches="tight", pad_inches=0.15, bbox_extra_artists=legends)
     plt.close(fig)
