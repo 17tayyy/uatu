@@ -227,6 +227,9 @@ class SarDetection(Base):
     wake_lon: Mapped[float | None] = mapped_column(Double)
     wake_length_m: Mapped[float | None] = mapped_column(REAL, comment="of the stretch of wake that stood out")
     wake_contrast: Mapped[float | None] = mapped_column(REAL, comment="to the sea beside it: -0.3 is 30 % darker")
+    wake_depth_m: Mapped[float | None] = mapped_column(
+        REAL, comment="of the water under it (median): in shallow water the seabed passes for wakes"
+    )
 
 
 class SarFixedObject(Base):

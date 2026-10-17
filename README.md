@@ -263,7 +263,8 @@ coastal buffer see past tile edges): a frame takes ~15 s and ~0.75 GB of RAM.
     against the best line where no ship could be (it would need a negative speed). From a margin
     of 2.5 over that, wakes were right every time in a blind test on 83 AIS ships under way
     (course within 16°, speed within 2 kn) and never appeared behind the 41 still ones; the
-    dashboard shows those, as possible wakes. All are stored, faint ones too, to calibrate on
+    dashboard shows those, as possible wakes, unless over less than 20 m of water (EMODnet
+    bathymetry), where the seabed shows through the sea and passes for wakes. All are stored, faint ones too, to calibrate on
     as passes accumulate. See `uatu.sar.wake` and [docs/how-it-works.md](docs/how-it-works.md).
 
 Missing AIS does not mean a vessel is hiding: small craft often carry none, aisstream.io

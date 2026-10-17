@@ -38,7 +38,7 @@ from uatu.db.models import (
 )
 from uatu.sar.analysis import DEFAULT_PAIRING
 from uatu.sar.store import RECEPTION_GAP_MINUTES
-from uatu.sar.wake import CLEAR_MARGIN
+from uatu.sar.wake import is_clear
 from uatu.web.errors import NotFoundError
 from uatu.web.passes.schemas import (
     AisCheckProperties,
@@ -249,8 +249,9 @@ def _properties(r: Any) -> dict[str, Any]:
 
 
 def _wake(d: SarDetection) -> WakeRead | None:
-    """Its wake, if one stood out clearly enough (the faint ones are kept for calibration only)."""
-    if d.wake_margin is None or d.wake_margin < CLEAR_MARGIN or d.wake_lon is None or d.wake_lat is None:
+    """Its wake, if one stood out clearly enough, not over shallow water (the others are kept for calibration
+    only)."""
+    if d.wake_margin is None or not is_clear(d.wake_margin, d.wake_depth_m) or d.wake_lon is None or d.wake_lat is None:
         return None
     return WakeRead(
         course_deg=d.wake_course_deg or 0.0,

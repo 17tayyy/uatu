@@ -28,13 +28,14 @@ Tested blind on the AIS ships of six frames of the Strait and Alboran (83 under 
 anchor or moored): from CLEAR_MARGIN, 6 wakes, all right: the course within 16 degrees (4 within
 10), the speed within 2.1 kn of AIS; none for a ship that was not moving. But that is 1 ship in
 14: in a breeze most wakes do not show at all, and below that margin wakes are as often lines
-of the sea that happen to start near an echo.
+of the sea that happen to start near an echo. Over shallow water (MIN_DEPTH_M), the seabed shows
+through the sea and passes for wakes too.
 """
 
 import math
 import warnings
-from collections.abc import Collection
-from dataclasses import dataclass
+from collections.abc import Callable, Collection
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -86,6 +87,17 @@ class WakeParams:
 DEFAULT_PARAMS = WakeParams()
 # From this margin on, a wake was right every time in validation (see above).
 CLEAR_MARGIN = 2.5
+# In shallower water the seabed shows through the sea (banks, dredged channels): lines that pass for
+# wakes. One did, in the inner Bay of Cadiz.
+MIN_DEPTH_M = 20.0
+
+DepthAt = Callable[[np.ndarray, np.ndarray], np.ndarray]  # lons, lats -> metres of water (NaN unknown)
+
+
+def is_clear(margin: float, depth_m: float | None) -> bool:
+    """Whether a wake can be told: it stands out clearly, and not over shallow water (or the depth
+    is not known)."""
+    return margin >= CLEAR_MARGIN and (depth_m is None or depth_m >= MIN_DEPTH_M)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,10 +113,21 @@ class Wake:
     contrast: float  # relative to the sea beside it: -0.3 is 30 % darker
     score: float  # how much the wake stands out from other lines of the sea around, in spreads
     margin: float  # over the best line where no ship could have been; see CLEAR_MARGIN
+    depth_m: float | None = None  # of the water under it (median), when known
 
     @property
     def clear(self) -> bool:
-        return self.margin >= CLEAR_MARGIN
+        return is_clear(self.margin, self.depth_m)
+
+
+def depth_under(lon: float, lat: float, course_deg: float, length_m: float, depth_at: DepthAt) -> float | None:
+    """Median depth of the water under a wake starting at (lon, lat), behind a ship on `course_deg`."""
+    behind = math.radians(course_deg + 180)
+    along = np.linspace(0, length_m, 11)
+    lons = lon + along * math.sin(behind) / (111_320 * math.cos(math.radians(lat)))
+    lats = lat + along * math.cos(behind) / 111_320
+    depths = np.asarray(depth_at(lons, lats), dtype=float)
+    return round(float(np.nanmedian(depths)), 1) if np.isfinite(depths).any() else None
 
 
 def metres_per_knot(slant_range_m: float, satellite_speed: float, incidence_deg: float) -> float:
@@ -231,9 +254,10 @@ def find_wakes(
     skip: Collection[Detection] = (),
     params: WakeParams = DEFAULT_PARAMS,
     doppler_sign: float = 1.0,
+    depth_at: DepthAt | None = None,
 ) -> dict[Detection, Wake]:
     """The wake of each detection of a scene but those in `skip`, from the product at full resolution
-    (the grid's) around it. A few seconds each."""
+    (the grid's) around it, with the depth of the water under it if `depth_at` tells. A few seconds each."""
     todo = [d for d in detections if d not in skip]
     if not todo:
         return {}
@@ -257,6 +281,9 @@ def find_wakes(
                 doppler_sign,
             )
             if wake is not None:
+                if depth_at is not None:
+                    depth = depth_under(wake.lon, wake.lat, wake.course_deg, wake.length_m, depth_at)
+                    wake = replace(wake, depth_m=depth)
                 found[d] = wake
     return found
 

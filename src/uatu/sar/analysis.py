@@ -16,7 +16,7 @@ from uatu.sar.detect import CfarParams, Detection
 from uatu.sar.match import MatchResult, expected_positions, match, split_by_coverage
 from uatu.sar.pipeline import SceneOutput, process
 from uatu.sar.raster import Grid
-from uatu.sar.wake import Wake, find_wakes
+from uatu.sar.wake import DepthAt, Wake, find_wakes
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,18 +79,24 @@ async def analyse(
     pairing: PairingParams = DEFAULT_PAIRING,
     image_path: Path | None = None,
     wakes: bool = False,
+    depth_at: DepthAt | None = None,
 ) -> Analysis:
     """Detect ships in a scene and, given a database, pair them with the AIS recorded at the time.
 
     image_path: also keep the backscatter at 20 m there, for write_outputs to turn into map tiles.
     wakes: also look for the wake of each detection (see uatu.sar.wake), but those of vessels AIS
-    says were still; a few seconds each.
+    says were still; a few seconds each. depth_at: the depth of the water there, to tell wakes over
+    shallow water.
     """
     output = await asyncio.to_thread(process, zip_path, grid, land_path, cfar, image_path=image_path)
     geometry = await asyncio.to_thread(read_geometry, zip_path)
     name = zip_path.name.removesuffix(".zip")
     if engine is None:
-        found = await asyncio.to_thread(find_wakes, zip_path, output.detections, geometry, grid) if wakes else {}
+        found = (
+            await asyncio.to_thread(find_wakes, zip_path, output.detections, geometry, grid, depth_at=depth_at)
+            if wakes
+            else {}
+        )
         return Analysis(name, geometry, output, None, 0, image=image_path, wakes=found)
 
     vessels = await vessels_at_acquisition(engine, geometry, geometry.duration_s, bbox)
@@ -112,7 +118,14 @@ async def analyse(
             if m.expected.vessel.sog is not None and m.expected.vessel.sog < pairing.wake_min_sog_kn
         }
         found = await asyncio.to_thread(
-            find_wakes, zip_path, output.detections, geometry, grid, still, doppler_sign=pairing.doppler_sign
+            find_wakes,
+            zip_path,
+            output.detections,
+            geometry,
+            grid,
+            still,
+            doppler_sign=pairing.doppler_sign,
+            depth_at=depth_at,
         )
     return Analysis(name, geometry, output, result, len(vessels), suspects, image=image_path, wakes=found)
 
