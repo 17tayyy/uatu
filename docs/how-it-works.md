@@ -158,16 +158,21 @@ each zone this before its first live pass.
 Every 10 minutes, detectors run over the last 6 hours of AIS:
 
 - **AIS gaps**: a vessel under way, out at sea, that stops transmitting for over an hour while
-  others around it are still heard. Others must also be heard where it was heading, or it may
-  just have sailed out of coverage. And not where many go quiet: in its first three days Uatu
-  saw 65 westbound vessels fall silent off Tarifa, where aisstream's receivers stop hearing the
-  westbound lane. Where 5 or more other vessels went quiet within 5 km in the past week, a
-  silence is the receivers', not the vessel's.
+  others around it are still heard. Others must also be heard along most of the way it would
+  have sailed while silent (up to 3 hours, checked every 5 km), or it may just have sailed into
+  a hole in aisstream's coverage: checking only where it would be an hour later let through
+  westbound ships off Tarifa, still heard there, silent beyond. And not where many go quiet: in
+  its first three days Uatu saw 65 westbound vessels fall silent off Tarifa, where aisstream's
+  receivers stop hearing the westbound lane. Where 5 or more other vessels went quiet within 5
+  km in the past week, a silence is the receivers', not the vessel's.
 - **Encounters**: two vessels within 500 m, both under 2 knots, for over 2 hours, away from the
   coast. That is the signature of a ship-to-ship transfer. Within 2 km of the coast they are not
   kept: the first day of Catalonia brought 1,600 "encounters" of yachts moored side by side in
   Barcelona's marinas.
-- **Loitering**: nearly stopped for over 3 hours, away from the coast.
+- **Loitering**: nearly stopped for over 3 hours, away from the coast. Not where many vessels
+  wait: Uatu learns waiting areas from the vessels sitting or drifting (at most 2 knots) there
+  over the past week. Learning them from stopped vessels alone missed the ships waiting off
+  Málaga and Barcelona for a berth, which drift at 1 to 2 knots.
 - **Vessels over infrastructure**: under 3 knots for over 30 minutes within 1 km of a submarine
   cable or pipeline. It is an alert only where the water is at most 200 m deep (EMODnet
   bathymetry), because a ship can only harm a cable by dragging an anchor. A tanker over a cable

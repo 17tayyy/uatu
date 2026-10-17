@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -56,7 +57,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     """Track detectors zone by zone (they need its coast and seabed); the rest once, everywhere recorded."""
     start = now - WINDOW
     t0, t1 = start.timestamp(), now.timestamp()
-    stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days))
+    stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days), p.loiter_max_sog)
     quiet = await store.silences(engine, now - timedelta(days=p.crowd_history_days))
     events: list[Event] = []
     tracked = stopped_now = crossed = 0
@@ -126,6 +127,16 @@ async def listed_stops(engine: AsyncEngine, stops: list[Stop]) -> list[Event]:
     return events
 
 
+INFRASTRUCTURE = {"telecom_cable": "cable de telecomunicaciones", "power_cable": "cable eléctrico",
+                  "pipeline": "tubería"}  # fmt: skip
+IDENTITY_FIELD_NAMES = {"name": "nombre", "imo": "número IMO", "callsign": "indicativo", "ship_type": "tipo de barco"}
+
+
+def _decimal(value: Any) -> Any:
+    """A float the Spanish way (25,6); anything else as it is."""
+    return str(value).replace(".", ",") if isinstance(value, float) else value
+
+
 def stop_place(d: dict) -> str:
     """'fondeado frente a Ceuta', 'en puerto (Algeciras)', 'parado mar adentro, a 40 km de Almería'."""
     stop, place = d["stop"], d.get("place")
@@ -148,7 +159,7 @@ def worth_alerting(e: Event, now: datetime) -> bool:
 
 def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
     """(title, message, link) for a notification, in Spanish."""
-    d = e.details
+    d = {k: _decimal(v) for k, v in e.details.items()}  # 25,6 km, not 25.6
     named = names.get(e.mmsi) or d.get("name")
     name = named or f"MMSI {e.mmsi}"
     who = f"{named} (MMSI {e.mmsi})" if named else name  # not "MMSI 1 (MMSI 1)"
@@ -173,9 +184,10 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
             message = f"{name} lleva {d['hours']} h casi parado a {d['coast_km']} km de la costa ({where})."
         case "infrastructure_loitering":
             title = f"Barco sobre {d['infrastructure']}: {name}"
+            kind = INFRASTRUCTURE.get(d["infrastructure_kind"], d["infrastructure_kind"])
             message = (
                 f"{who} lleva {d['minutes']} min a menos de 3 nudos y a {d['min_distance_m']} m"
-                f" de {d['infrastructure']} ({d['infrastructure_kind']})"
+                f" de {d['infrastructure']} ({kind})"
                 + (f", en {d['depth_m']} m de agua" if d.get("depth_m") is not None else "")
                 + f". Posición {where}."
             )
@@ -201,9 +213,9 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
             status = {"sanctioned": "sancionado", "sanctioned_owner": "con gestor sancionado"}.get(
                 d["listed"], "vigilado"
             )
-            title = f"Barco {status} {stop_place(d)}: {name}"
+            title = f"Barco {status} {stop_place(e.details)}: {name}"
             ongoing = e.end is None or e.end > datetime.now(UTC) - timedelta(minutes=30)
-            message = f"{who} {'lleva' if ongoing else 'estuvo'} {d['hours']} h {stop_place(d)}."
+            message = f"{who} {'lleva' if ongoing else 'estuvo'} {d['hours']} h {stop_place(e.details)}."
             message += f" Posición {where}."
         case "watched_vessel":
             title = f"En tu lista de vigilancia: {name}"
@@ -239,7 +251,8 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
             message = f"Baliza {beacon} emitiendo {place}. Salvamento Marítimo la recibe también. Posición {where}."
         case "identity_change":
             title = f"Cambio de identidad: {name}"
-            message = f"MMSI {e.mmsi} ha cambiado su {d['field']}: {d['before']} → {d['after']}."
+            field = IDENTITY_FIELD_NAMES.get(d["field"], d["field"])
+            message = f"MMSI {e.mmsi} ha cambiado su {field}: {d['before']} → {d['after']}."
         case "shared_imo":
             title = f"IMO duplicado: {d['imo']}"
             message = f"{who} y {other} (MMSI {e.other_mmsi}) emiten el mismo IMO {d['imo']}."
@@ -258,10 +271,19 @@ def _silence(e: Event) -> str:
     """How long a gap lasted, or lasts, as far as Uatu knows."""
     minutes = e.details["silent_minutes"]
     if e.end is not None:
-        return f"estuvo {minutes} min sin emitir"
+        # From when it was heard again: the details stop being updated once the gap's start leaves the
+        # analysis' sight (WINDOW), at ~6 h, though the silence may go on for days.
+        return f"estuvo {_duration((e.end - e.start).total_seconds() / 60)} sin emitir"
     if datetime.now(UTC) - e.start > WINDOW:  # out of the analysis' sight: not heard again since
         return "dejó de oírse y no se le ha vuelto a oír"
     return f"lleva {minutes} min sin emitir"
+
+
+def _duration(minutes: float) -> str:
+    if minutes < 120:
+        return f"{round(minutes)} min"
+    hours = minutes / 60
+    return f"{round(hours)} h" if hours < 48 else f"{hours / 24:.1f} días".replace(".", ",")
 
 
 def digest(

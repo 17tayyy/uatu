@@ -195,8 +195,12 @@ uv run uatu-report --days 7 --until 2026-10-21 --zone estrecho
 
 It has six parts:
 1. **Sanctioned and watchlisted vessels heard:** why each is listed, when it was heard, its Strait crossings and stops, and a map of their tracks.
-2. **Radar passes:** a table of the passes, and the candidates.
-3. **Notable AIS behaviour.**
+2. **Radar passes:** a table of the passes; where, per zone, aisstream hears too little to call any
+   echo dark (off which ports); the candidates; what the verdicts given found them to be; and the
+   clear wakes, in aggregate, checked against AIS (course within 20°, speed): a weekly check of the method.
+3. **Notable AIS behaviour:** each vessel once per kind; loitering in one paragraph (mostly ships
+   waiting for a berth). Events are judged as Uatu would today, knowing the whole week: one found
+   before Uatu had learnt a waiting area, or a place where receivers stop hearing ships, is left out.
 4. **Traffic:** crossings per day, a density map, and where vessels stop.
 5. **What Uatu heard:** per zone, with its own outages.
 6. **The limits:** what the numbers can and cannot say.

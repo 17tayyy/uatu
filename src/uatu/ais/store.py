@@ -96,13 +96,15 @@ async def silences(engine: AsyncEngine, since: datetime) -> list[tuple[int, floa
 
 
 async def stopped_places(
-    engine: AsyncEngine, since: datetime, cell_deg: float = 0.01
+    engine: AsyncEngine, since: datetime, max_sog: float, cell_deg: float = 0.01
 ) -> list[tuple[int, float, float]]:
-    """(mmsi, lon, lat) of each ~1 km cell where a vessel sat stopped (< 1 kn, 3+ reports) since `since`."""
+    """(mmsi, lon, lat) of each ~1 km cell where a vessel sat stopped or drifted (at most max_sog, 3+
+    reports) since `since`. Ships waiting offshore for a berth or for orders drift at 1-2 kn: the same
+    slowness that makes them loiter must make the place theirs."""
     lon_cell, lat_cell = func.round(Position.lon / cell_deg), func.round(Position.lat / cell_deg)
     stmt = (
         select(Position.mmsi, lon_cell * cell_deg, lat_cell * cell_deg)
-        .where(Position.received_at >= since, Position.sog <= 1.0)
+        .where(Position.received_at >= since, Position.sog <= max_sog)
         .group_by(Position.mmsi, lon_cell, lat_cell)
         .having(func.count() >= 3)
     )

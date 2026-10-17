@@ -337,7 +337,7 @@ async def test_a_stop_seen_in_pieces_is_one_and_a_watchlisted_vessel_stopping_is
         assert (event.kind, event.severity, event.details["hours"]) == ("listed_stop", 2, 9.0)
         title, message, _ = analysis.describe(event, {})
         assert title == "Barco vigilado fondeado frente a TEST PORT: ANCHOR TEST"
-        assert message.startswith("ANCHOR TEST (MMSI 999000001) estuvo 9.0 h fondeado frente a TEST PORT.")
+        assert message.startswith("ANCHOR TEST (MMSI 999000001) estuvo 9,0 h fondeado frente a TEST PORT.")
         assert [r.name for r in await store.stops_since(engine, T0 - h, listed_only=True)] == ["ANCHOR TEST"] * 2
 
         crossing = Transit(MMSI_A, T0, "east", 35.95)

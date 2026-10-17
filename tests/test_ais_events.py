@@ -54,9 +54,17 @@ def neighbours(count: int, minutes, offset_deg: float = 0.02) -> list[Track]:
 # --- gaps ------------------------------------------------------------------------------------------
 
 
-def ahead(count: int, minutes) -> list[Track]:
-    """Vessels heard where a 10-knot eastbound vessel from LON0 is an hour later (~18.5 km east)."""
-    return [track(950 + k, minutes, LAT0 + 0.01, LON0 + 0.2 + 0.001 * k) for k in range(count)]
+AHEAD_LON = (0.05, 0.125, 0.2, 0.275, 0.35, 0.425, 0.5, 0.575, 0.65)  # every ~7 km
+
+
+def ahead(count: int, minutes, offsets=AHEAD_LON) -> list[Track]:
+    """Vessels heard all along where a 10-knot eastbound vessel from LON0 sails in three hours (~56 km
+    east), `count` every ~7 km, one group where it is an hour later (~18.5 km east, 0.2°)."""
+    return [
+        track(950 + 10 * j + k, minutes, LAT0 + 0.01, LON0 + d + 0.001 * k)
+        for j, d in enumerate(offsets)
+        for k in range(count)
+    ]
 
 
 def test_a_vessel_going_silent_where_others_are_heard_is_a_gap():
@@ -66,7 +74,9 @@ def test_a_vessel_going_silent_where_others_are_heard_is_a_gap():
     [gap] = detect_gaps([silent, *others], now, STRAIT_OF_GIBRALTAR, at_sea(10), PROJ)
     assert (gap.kind, gap.mmsi, gap.severity, gap.end) == ("ais_gap", 1, 2, None)
     assert gap.start.timestamp() == T0 + 60 * 60
-    assert gap.details["ais_heard_nearby"] == 4 and gap.details["ais_heard_ahead"] == 3
+    # Within 15 km: the 4 around it and the first 2 groups ahead; an hour on, the group there.
+    assert gap.details["ais_heard_nearby"] == 4 + 2 * 3 and gap.details["ais_heard_ahead"] == 3
+    assert "poor_reception_ahead" not in gap.details and gap.details["unheard_share_ahead"] == 0
     assert gap.details["silent_minutes"] == 120
 
 
@@ -91,6 +101,20 @@ def test_sailing_into_a_coverage_hole_is_not_going_dark():
     silent = track(1, range(0, 61))
     [gap] = gaps([silent, *neighbours(4, range(0, 181))], minutes_now=180)  # nobody heard ahead
     assert gap.severity == 1 and gap.details["ais_heard_ahead"] == 0
+
+
+def test_a_silence_spent_mostly_where_aisstream_hears_little_is_not_going_dark_either():
+    """Westbound ships off Tarifa, 13 October: heard where they would be an hour on, but along most of
+    their way the Atlantic's silence."""
+    silent = track(1, range(0, 61))
+    others = [*neighbours(4, range(0, 181)), *ahead(3, range(0, 181), offsets=(0.2,))]
+    [gap] = gaps([silent, *others], minutes_now=180)
+    assert gap.details["ais_heard_ahead"] == 3  # an hour on: heard (enough, for a single point)
+    assert gap.severity == 1 and gap.details["poor_reception_ahead"]
+    assert gap.details["unheard_share_ahead"] > 0.5  # of the ~37 km it would have sailed in 2 h
+    # Heard along most of the way: a silence that says something.
+    [gap] = gaps([silent, *neighbours(4, range(0, 181)), *ahead(3, range(0, 181))], minutes_now=180)
+    assert gap.severity == 2 and gap.details["unheard_share_ahead"] < 0.5
 
 
 def test_no_gap_without_coverage_near_the_edge_or_in_port():
@@ -211,10 +235,12 @@ def test_names_that_flip_or_garble_or_get_corrected_are_not_renames():
         name(3, 30, "SVITZER OUED ALIANE"),
         name(3, 120, "SVITZER OUED ALIANE"),
     ]
-    reports = sorted([*flipping, *garbled, *corrected], key=lambda r: r.t)
-    where = dict.fromkeys((1, 2, 3), (LAT0, LON0))
-    [e] = detect_identity_changes(reports, since=t, where=where, now=t + timedelta(hours=5))
-    assert (e.mmsi, e.severity, e.details["correction"]) == (3, 1, True)
+    # 17 October: a yacht's prefix dropped.
+    prefixed = [name(4, 0, "SY HEDDA"), name(4, 30, "HEDDA"), name(4, 120, "HEDDA")]
+    reports = sorted([*flipping, *garbled, *corrected, *prefixed], key=lambda r: r.t)
+    where = dict.fromkeys((1, 2, 3, 4), (LAT0, LON0))
+    events = detect_identity_changes(reports, since=t, where=where, now=t + timedelta(hours=5))
+    assert [(e.mmsi, e.severity, e.details["correction"]) for e in events] == [(3, 1, True), (4, 1, True)]
 
 
 def test_vessels_sailing_out_or_into_port_are_not_hiding():
@@ -317,6 +343,9 @@ def test_a_gap_is_told_as_far_as_uatu_knows():
 
     assert told(now - timedelta(minutes=90)).startswith("MMSI 248001000 lleva 90 min sin emitir")
     assert "estuvo 90 min sin emitir" in told(now - timedelta(hours=3), now - timedelta(hours=1, minutes=30))
+    # Closed long after the analysis lost sight of its start (its details stop at ~6 h): from the times.
+    assert "estuvo 18 h sin emitir" in told(now - timedelta(hours=20), now - timedelta(hours=2))
+    assert "estuvo 2,4 días sin emitir" in told(now - timedelta(hours=60), now - timedelta(hours=2))
     gone = told(now - timedelta(days=2), names={248001000: "XT HOPE"})
     assert gone.startswith("XT HOPE (MMSI 248001000) dejó de oírse y no se le ha vuelto a oír")
 
