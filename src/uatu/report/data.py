@@ -25,10 +25,13 @@ from uatu.ais.sanctions import explain
 from uatu.config import BBox, Zone
 from uatu.db.models import (
     AisEvent,
+    MaritimeArea,
     Port,
     Position,
     RecordedZone,
     SanctionedVessel,
+    SarDetection,
+    SarFixedObject,
     StraitTransit,
     Vessel,
     VesselRisk,
@@ -88,6 +91,32 @@ class WakesSeen:
     checked: int = 0  # of those, with an AIS course near the time
     course_right: int = 0  # within COURSE_RIGHT_DEG of it
     speed_diff_kn: float | None = None  # median |wake - AIS| speed
+
+
+@dataclass(frozen=True)
+class StateStays:
+    """A foreign state vessel's stays in one of Spain's waters, the period's together."""
+
+    mmsi: int
+    name: str | None
+    flag: str
+    kind: str  # military | law_enforcement
+    waters: str
+    disputed: bool  # waters Spain and another state both claim
+    stays: int
+    hours: float
+    slow_hours: float  # nearly stopped
+    routine: bool  # there on other days of the week too, day after day
+    notable: bool  # any stay notable as judged when found
+
+
+@dataclass(frozen=True)
+class UnpairedIn:
+    """Radar echoes with no AIS to explain them in waters Spain and another state both claim."""
+
+    waters: str
+    echoes: int
+    longest_m: float
 
 
 @dataclass(frozen=True)
@@ -152,6 +181,8 @@ class Report:
     reviewed: Reviewed | None = None
     wakes: WakesSeen | None = None
     loitering_off: list[str] = field(default_factory=list)  # the ports vessels loitered off, most first
+    state_stays: list[StateStays] = field(default_factory=list)
+    unpaired_in_claimed: list[UnpairedIn] = field(default_factory=list)
 
     @property
     def recording_start(self) -> datetime:
@@ -210,6 +241,8 @@ async def gather(
 
     passes, candidates, unheard, reviewed, wakes = await _radar(engine, start, end, zones, data_dir)
     listed = await _listed(engine, start, end, coast)
+    state_stays = await _state_stays(engine, start, end)
+    unpaired_in_claimed = await _unpaired_in_claimed(engine, start, end)
     async with engine.connect() as conn:
         notable = await _notable(conn, start, end)
     notable = await _judged_again(engine, notable, end, coast)
@@ -221,7 +254,7 @@ async def gather(
         density = await _density(conn, start, end, coast)
     return Report(
         start, end, zones, recorded, heard, vessels_heard or 0, outages, passes, candidates, listed, notable,
-        transits, stops, density, since, unheard, reviewed, wakes, loitering_off,
+        transits, stops, density, since, unheard, reviewed, wakes, loitering_off, state_stays, unpaired_in_claimed,
     )  # fmt: skip
 
 
@@ -468,6 +501,59 @@ def _no_identity_change(n: Notable, filler: dict[str, set]) -> bool:
     if d.get("before") in field_filler or d.get("after") in field_filler:
         return True
     return d.get("field") == "name" and name_corrected(str(d["before"]), str(d["after"]))
+
+
+async def _state_stays(engine: AsyncEngine, start: datetime, end: datetime) -> list[StateStays]:
+    """The period's stays of foreign state vessels in Spain's waters, per vessel and waters."""
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            select(AisEvent.mmsi, AisEvent.start_at, AisEvent.end_at, AisEvent.severity, AisEvent.details).where(
+                AisEvent.kind == "state_vessel",
+                AisEvent.start_at < end,
+                or_(AisEvent.end_at.is_(None), AisEvent.end_at >= start),
+            )
+        )
+        stays: dict[tuple[int, str], list[Any]] = defaultdict(list)
+        for r in rows:
+            stays[r.mmsi, r.details["waters"]].append(r)
+    told = []
+    for (mmsi, waters), group in stays.items():
+        d = group[-1].details
+        told.append(
+            StateStays(
+                mmsi=mmsi,
+                name=d.get("name"),
+                flag=d["flag"],
+                kind=d["vessel_kind"],
+                waters=waters,
+                disputed=d["waters_kind"] == "disputed",
+                stays=len(group),
+                hours=sum(g.details["minutes"] for g in group) / 60,
+                slow_hours=sum(g.details.get("slow_minutes") or 0 for g in group) / 60,
+                routine=any(g.details.get("routine_days") for g in group),
+                notable=any(g.severity >= 2 for g in group),
+            )
+        )
+    return sorted(told, key=lambda s: (not s.notable, not s.disputed, -s.hours))
+
+
+async def _unpaired_in_claimed(engine: AsyncEngine, start: datetime, end: datetime) -> list[UnpairedIn]:
+    """Radar echoes, not fixed objects, that no AIS explained, in each of the waters Spain and another state claim."""
+    fixed = select(SarFixedObject.id).where(SarFixedObject.fixed)
+    stmt = (
+        select(MaritimeArea.name, func.count(distinct(SarDetection.id)), func.max(SarDetection.length_m))
+        .join(MaritimeArea, func.ST_Intersects(MaritimeArea.geom, SarDetection.geom))
+        .where(
+            MaritimeArea.kind == "disputed",
+            SarDetection.seen_at.between(start, end),
+            SarDetection.status != "matched",
+            or_(SarDetection.fixed_object_id.is_(None), SarDetection.fixed_object_id.not_in(fixed)),
+        )
+        .group_by(MaritimeArea.name)
+        .order_by(func.count(distinct(SarDetection.id)).desc())
+    )
+    async with engine.connect() as conn:
+        return [UnpairedIn(name, echoes, float(longest)) for name, echoes, longest in await conn.execute(stmt)]
 
 
 async def _transits_by_day(conn: Any, start: datetime, end: datetime) -> list[tuple[str, int, int]]:

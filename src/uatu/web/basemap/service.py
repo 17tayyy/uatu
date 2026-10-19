@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from uatu.config import BBox, bbox_polygon
-from uatu.db.models import Infrastructure
+from uatu.db.models import Infrastructure, MaritimeArea
 from uatu.sar.raster import Grid
 from uatu.web.basemap.schemas import (
     InfrastructureProperties,
@@ -29,6 +29,7 @@ from uatu.web.basemap.schemas import (
     MapArea,
     SatelliteLayer,
     UnimagedProperties,
+    WatersProperties,
 )
 from uatu.web.passes.service import pass_footprint
 from uatu.web.schemas import Feature, FeatureCollection, Geometry
@@ -125,6 +126,30 @@ async def infrastructure(db: AsyncSession, bbox: BBox) -> FeatureCollection[Infr
             Feature(
                 geometry=Geometry.model_validate_json(r.geojson),
                 properties=InfrastructureProperties(kind=r.kind, name=r.name, status=r.status),
+            )
+            for r in rows
+        ]
+    )
+
+
+async def waters(db: AsyncSession, bbox: BBox) -> FeatureCollection[WatersProperties]:
+    """Spain's territorial sea and the waters it and another state claim, in the area, cut to it."""
+    area = func.ST_GeogFromText(f"SRID=4326;{bbox_polygon(bbox).wkt}")
+    rows = await db.execute(
+        select(
+            MaritimeArea.name,
+            MaritimeArea.kind,
+            MaritimeArea.claimants,
+            func.ST_AsGeoJSON(func.ST_Intersection(MaritimeArea.geom, area), 5).label("geojson"),
+        )
+        .where(func.ST_Intersects(MaritimeArea.geom, area))
+        .order_by(MaritimeArea.kind.desc(), MaritimeArea.id)  # the territorial sea under the claims
+    )
+    return FeatureCollection(
+        features=[
+            Feature(
+                geometry=Geometry.model_validate_json(r.geojson),
+                properties=WatersProperties(name=r.name, kind=r.kind, claimants=r.claimants),
             )
             for r in rows
         ]

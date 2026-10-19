@@ -2,25 +2,27 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import numpy as np
 from geoalchemy2.shape import to_shape
 from shapely import Geometry
 from shapely.ops import transform as shapely_transform
-from sqlalchemy import Text, and_, case, cast, delete, func, literal_column, or_, select, text, true, update
+from sqlalchemy import Integer, Text, and_, case, cast, delete, func, literal_column, or_, select, text, true, update
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from uatu.ais.events import KNOT, Event, LocalProjection, StaticReport, Track, ais_day
+from uatu.ais.sovereignty import Waters, stays_by_day
 from uatu.ais.stops import DEFAULT_STOPS, Ports, Stop, StopParams, Transit
 from uatu.ais.stops import Port as NamedPort
 from uatu.config import BBox
 from uatu.db.models import (
     AisEvent,
     Infrastructure,
+    MaritimeArea,
     Port,
     Position,
     SanctionedVessel,
@@ -40,11 +42,13 @@ LISTED = {"sanctioned_vessel", "sanctioned_owner", "watchlisted_vessel", "watche
 # What AIS can't make true: told once per visit too.
 FALSE_AIS = {"position_on_land", "shared_mmsi", "odd_mmsi", "emergency_beacon"}
 # listed_stop is not one: each stop is its own event, keyed by the stop's first report.
-SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", *LISTED, *FALSE_AIS}
+SPANNING = {"ais_gap", "encounter", "loitering", "infrastructure_loitering", "state_vessel", *LISTED, *FALSE_AIS}
 MERGE_GAP = timedelta(minutes=30)
 # A listed vessel's visit lasts until it has been gone this long: one alert per visit, even
-# across midnight or a stretch with no reception.
-MERGE_GAPS = dict.fromkeys(LISTED | FALSE_AIS, timedelta(hours=12))
+# across midnight or a stretch with no reception. A state vessel's stay, as long as its detector's.
+MERGE_GAPS = dict.fromkeys(LISTED | FALSE_AIS, timedelta(hours=12)) | {"state_vessel": timedelta(hours=1)}
+# Events of one vessel that are one only if this detail matches too: a state vessel's stays in two waters.
+MERGE_ON = {"state_vessel": "waters_id"}
 
 
 async def tracks(engine: AsyncEngine, start: datetime, end: datetime, bbox: BBox) -> list[Track]:
@@ -369,6 +373,11 @@ async def save(engine: AsyncEngine, events: list[Event]) -> list[Event]:
                             AisEvent.kind == e.kind,
                             AisEvent.mmsi == e.mmsi,
                             AisEvent.other_mmsi.is_not_distinct_from(e.other_mmsi),
+                            *(
+                                [AisEvent.details[MERGE_ON[e.kind]].astext == str(e.details[MERGE_ON[e.kind]])]
+                                if e.kind in MERGE_ON
+                                else []
+                            ),
                             AisEvent.start_at <= (e.end or e.start) + gap,
                             or_(AisEvent.end_at.is_(None), AisEvent.end_at >= e.start - gap),
                         )
@@ -427,6 +436,36 @@ def _extended(e: Event, start: datetime) -> dict:
     if "minutes" in details:
         details["minutes"] = round(span / 60)
     return details
+
+
+async def maritime_waters(engine: AsyncEngine) -> list[Waters]:
+    """Spain's waters, as the state vessel detector needs them (lon/lat)."""
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            select(MaritimeArea.id, MaritimeArea.name, MaritimeArea.kind, MaritimeArea.claimants, MaritimeArea.geom)
+        )
+        return [Waters(r.id, r.name, r.kind, tuple(r.claimants), to_shape(r.geom)) for r in rows]
+
+
+async def vessel_identities(engine: AsyncEngine) -> list[tuple[int, str | None, int | None]]:
+    """(mmsi, name, ship type) of every vessel heard: to tell the state vessels among them."""
+    async with engine.connect() as conn:
+        return [
+            (r.mmsi, r.name, r.ship_type)
+            for r in await conn.execute(select(Vessel.mmsi, Vessel.name, Vessel.ship_type))
+        ]
+
+
+async def state_vessel_days(engine: AsyncEngine, since: datetime) -> dict[tuple[int, int], set[date]]:
+    """(mmsi, waters id) -> the days since `since` a stay of that state vessel there was found."""
+    day = func.date(func.timezone("UTC", AisEvent.start_at))
+    stmt = (
+        select(AisEvent.mmsi, AisEvent.details["waters_id"].astext.cast(Integer), day)
+        .where(AisEvent.kind == "state_vessel", AisEvent.start_at >= since)
+        .distinct()
+    )
+    async with engine.connect() as conn:
+        return stays_by_day((m, w, d) for m, w, d in await conn.execute(stmt))
 
 
 async def vessel_names(engine: AsyncEngine, mmsis: set[int]) -> dict[int, str]:

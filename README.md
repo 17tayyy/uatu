@@ -21,6 +21,10 @@ into the analysis one at a time.
   enough for silence to mean something), ship-to-ship meetings, loitering, idling over cables
   in water shallow enough to drop an anchor on them, identity changes, impossible jumps, and
   vessels whose IMO number is on a sanctions list.
+- **Watches Spain's waters**: foreign state vessels (navies, coast guards, police) staying in
+  Spain's territorial sea or in the waters Spain and another state both claim, around Gibraltar,
+  Ceuta, Melilla and the islands off Morocco: how long, how much of it nearly stopped, what is
+  routine and what is new.
 - **Knows who is behind a vessel**: its owners and managers, from sanctions lists, Ukraine's
   military intelligence (GUR) and port state control records, so a vessel off the lists but run
   by a sanctioned company, or by one whose fleet mostly is, is flagged too.
@@ -139,6 +143,7 @@ over the last 6 hours of AIS and stores what they find in `ais_events`:
 | `odd_mmsi` | a vessel transmitting with an MMSI that cannot be a ship's: a flag no country was allocated, a placeholder (123456789), a coast station's or a group's | under way, over 2 km from the coast |
 | `emergency_beacon` | an AIS-SART, man-overboard or EPIRB-AIS beacon | over 2 km from the coast; in port, most likely a test |
 | `watched_vessel` | a vessel on your own watch list (dashboard, or `uatu-ais watch`), by IMO, MMSI or name | always (alert), once per visit; never in the reports |
+| `state_vessel` | a foreign state vessel (AIS type military or law enforcement, or named as one: NAVY, HMS, COAST GUARD, GENDARMERIE...) staying 10 min+ in Spain's territorial sea or in waters Spain and another state both claim (Gibraltar, Ceuta, Perejil, Melilla, the Chafarinas, Alhucemas, Vélez de la Gomera), at sea (not berthed) | in claimed waters, or nearly stopped 30 min+ in Spain's own; passing through is a right (innocent and transit passage), informative; and so is what a vessel does there on 3+ other days of the week (patrols) |
 
 Gaps and encounters within 2 km of the coast are not kept at all: in a harbour, vessels lie side
 by side for days and go quiet at their berth (Barcelona's marinas alone made ~2,000 "encounters" a
@@ -162,6 +167,10 @@ Reference data, refreshed by the worker:
   [TeleGeography](https://www.submarinecablemap.com)'s submarine cable map (CC BY-NC-SA), weekly.
 - **Ports**: the [World Port Index](https://msi.nga.mil/Publications/WPI) (NGA Pub. 150, public
   domain), 3,800 ports worldwide, weekly: to name where vessels stop.
+- **Spain's waters**: its territorial sea and the waters it and another state both claim, from
+  [Marine Regions](https://www.marineregions.org)' Maritime Boundaries Geodatabase (Flanders Marine
+  Institute, CC BY 4.0), weekly. Warships need not broadcast AIS, and Morocco's navy and
+  gendarmerie were never heard in the first week: what `state_vessel` tells is only what broadcasts.
 
 **Where vessels stop, and when they cross the Strait.** Each analysis also finds the vessels that
 stay put for an hour or more, at a berth, at anchor or lying still at sea, drifting with the
@@ -193,17 +202,20 @@ uv run uatu-report --days 7                    # data/reports/informe-<last day>
 uv run uatu-report --days 7 --until 2026-10-21 --zone estrecho
 ```
 
-It has six parts:
+It has seven parts:
 1. **Sanctioned and watchlisted vessels heard:** why each is listed, when it was heard, its Strait crossings and stops, and a map of their tracks.
-2. **Radar passes:** a table of the passes; where, per zone, aisstream hears too little to call any
+2. **Foreign state vessels in Spain's waters:** per vessel and waters, stays, hours and how much
+   of them nearly stopped, routine patrols marked; and the radar's echoes with no AIS to explain
+   them in the claimed waters.
+3. **Radar passes:** a table of the passes; where, per zone, aisstream hears too little to call any
    echo dark (off which ports); the candidates; what the verdicts given found them to be; and the
    clear wakes, in aggregate, checked against AIS (course within 20°, speed): a weekly check of the method.
-3. **Notable AIS behaviour:** each vessel once per kind; loitering in one paragraph (mostly ships
+4. **Notable AIS behaviour:** each vessel once per kind; loitering in one paragraph (mostly ships
    waiting for a berth). Events are judged as Uatu would today, knowing the whole week: one found
    before Uatu had learnt a waiting area, or a place where receivers stop hearing ships, is left out.
-4. **Traffic:** crossings per day, a density map, and where vessels stop.
-5. **What Uatu heard:** per zone, with its own outages.
-6. **The limits:** what the numbers can and cannot say.
+5. **Traffic:** crossings per day, a density map, and where vessels stop.
+6. **What Uatu heard:** per zone, with its own outages.
+7. **The limits:** what the numbers can and cannot say.
 
 The hours of the period that Uatu was recording count from when it began, less its outages.
 Unidentified radar detections, which may be small boats, are given to ~10 km only.

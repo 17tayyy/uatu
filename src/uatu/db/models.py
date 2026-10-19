@@ -22,7 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -427,6 +427,22 @@ class Infrastructure(Base):
     source: Mapped[str] = mapped_column(comment="where it comes from, e.g. emodnet:cicacables, telegeography")
     geom: Mapped[WKBElement] = mapped_column(Geography("GEOMETRY", srid=4326, spatial_index=False))
     properties: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class MaritimeArea(Base):
+    """Spain's waters as Marine Regions draws them (Flanders Marine Institute, CC BY 4.0): its territorial
+    sea, and the waters it and another state both claim (Gibraltar, Ceuta, Melilla and the islands off
+    Morocco). Where both, the claim."""
+
+    __tablename__ = "maritime_areas"
+    __table_args__ = (Index("ix_maritime_areas_geom", "geom", postgresql_using="gist"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False, comment="Marine Regions MRGID")
+    name: Mapped[str] = mapped_column(comment="in Spanish, for people")
+    kind: Mapped[str] = mapped_column(comment="territorial_sea | disputed")
+    claimants: Mapped[list[str]] = mapped_column(ARRAY(String), comment="states claiming it, Marine Regions' names")
+    source_name: Mapped[str] = mapped_column(comment="as Marine Regions names it")
+    geom: Mapped[WKBElement] = mapped_column(Geography("MULTIPOLYGON", srid=4326, spatial_index=False))
 
 
 class Port(Base):

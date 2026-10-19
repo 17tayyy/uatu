@@ -783,6 +783,27 @@ async def test_the_sea_a_pass_did_not_image(client):
     assert (await client.get("/api/v1/map/unimaged?pass=../etc")).status_code == 422
 
 
+@needs_db
+async def test_spains_waters_and_the_claimed_ones(client):
+    from uatu.db.models import MaritimeArea
+
+    engine = db.create_engine(os.environ["UATU_TEST_DATABASE_URL"])
+    square = "SRID=4326;MULTIPOLYGON(((-5.39 35.82,-5.28 35.82,-5.28 35.92,-5.39 35.92,-5.39 35.82)))"
+    area = {"id": 999_001, "name": "Aguas de prueba", "kind": "disputed", "claimants": ["Spain", "Morocco"],
+            "source_name": "test", "geom": square}  # fmt: skip
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(insert(MaritimeArea).values(**area))
+        waters = await ok(client, "/api/v1/map/waters?zone=estrecho")
+        [ours] = [f for f in waters["features"] if f["properties"]["name"] == "Aguas de prueba"]
+        assert ours["properties"] == {"name": "Aguas de prueba", "kind": "disputed", "claimants": ["Spain", "Morocco"]}
+        assert ours["geometry"]["type"] in ("Polygon", "MultiPolygon")
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(MaritimeArea).where(MaritimeArea.id == 999_001))
+        await engine.dispose()
+
+
 def test_the_dashboard_types_follow_the_api():
     """frontend/openapi.json is what the dashboard's TypeScript types are generated from: after a change to the
     API, `uv run uatu-web openapi > frontend/openapi.json` (and `npm run api` in frontend/)."""

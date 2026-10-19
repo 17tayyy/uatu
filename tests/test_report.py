@@ -6,7 +6,18 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from uatu.config import ZONES
-from uatu.report.data import Candidate, Heard, Listed, Notable, Report, Reviewed, Unheard, WakesSeen
+from uatu.report.data import (
+    Candidate,
+    Heard,
+    Listed,
+    Notable,
+    Report,
+    Reviewed,
+    StateStays,
+    Unheard,
+    UnpairedIn,
+    WakesSeen,
+)
 from uatu.report.render import number, render
 from uatu.web.passes.schemas import PassSummary
 
@@ -44,6 +55,13 @@ def made_up() -> Report:
         unheard=[Unheard("Cataluña", 48, 39, ["Tarragona", "Barcelona"])],
         reviewed=Reviewed(7, {"not_a_vessel": 1, "reception_gap": 2}),
         wakes=WakesSeen(29, 11, 10, 9, 1.34), loitering_off=["Malaga"],
+        state_stays=[
+            StateStays(232035463, "HMS CUTLASS", "Reino Unido", "military", "Aguas de Gibraltar", True, 12, 30.5, 8.0,
+                       True, True),
+            StateStays(242000001, None, "Marruecos", "law_enforcement", "Mar territorial español", False, 1, 0.4, 0,
+                       False, False),
+        ],
+        unpaired_in_claimed=[UnpairedIn("Aguas de Ceuta", 3, 41.0)],
     )  # fmt: skip
 
 
@@ -63,6 +81,14 @@ def test_numbers_and_the_text_in_spanish():
     assert "revisados 3: 2 huecos de recepción y 1 eco que no era un barco" in text
     assert "**Estelas.** 29 ecos dejaron una estela clara" in text
     assert "el rumbo coincidió (±20°) en 9 de 10; la velocidad se apartó de la del AIS 1,3 nudos" in text
+    # Foreign state vessels: where, how long, how much nearly still; routine marked; the radar's hints.
+    assert "## 2. Buques de Estado extranjeros en aguas españolas" in text
+    assert (
+        "| HMS CUTLASS · habitual | Reino Unido | militar | Aguas de Gibraltar (en disputa) | 12 | 30,5 | 8,0 h |"
+        in text
+    )
+    assert "| MMSI 242000001 | Marruecos | patrullero | Mar territorial español | 1 | 0,4 | 0,0 h |" in text
+    assert "aguas de Ceuta, 3 (el mayor, ~41 m)" in text
     # A ship waiting for a berth, told once in a paragraph, not once per day.
     assert "**Merodeos**: 1 barco casi parado 3 horas o más mar adentro" in text
     assert "frente a Malaga: *OOCL SEOUL*." in text and "Merodeo: OOCL SEOUL" not in text
@@ -92,7 +118,7 @@ async def test_a_whole_report_with_its_figures(tmp_path):
     figures.transits_chart(report, tmp_path / "transits.png")
     figures.density_map(report, tmp_path / "density.png")
     assert all((tmp_path / f).stat().st_size > 5_000 for f in ("listed.png", "transits.png", "density.png"))
-    assert "## 5. Lo que Uatu oyó" in render(report, {})
+    assert "## 6. Lo que Uatu oyó" in render(report, {})
 
     from uatu.report.html import to_html
 

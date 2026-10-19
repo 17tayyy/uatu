@@ -11,7 +11,8 @@ export type LayerKey =
   | "density"
   | "coverage"
   | "satellite"
-  | "infrastructure";
+  | "infrastructure"
+  | "waters";
 
 export interface LayerDef {
   label: string;
@@ -23,7 +24,7 @@ export interface LayerDef {
 export const LAYER_GROUPS: { title: string; layers: LayerKey[] }[] = [
   { title: "Radar", layers: ["radar", "detections", "passAis", "unimaged", "recent"] },
   { title: "AIS", layers: ["vessels", "events", "density", "coverage"] },
-  { title: "Contexto", layers: ["satellite", "infrastructure"] },
+  { title: "Contexto", layers: ["satellite", "infrastructure", "waters"] },
 ];
 
 export const RADAR_FRAMES = ["radar-0", "radar-1", "radar-2", "radar-3"]; // one per frame of a pass
@@ -44,4 +45,9 @@ export const LAYERS: Record<LayerKey, LayerDef> = {
   coverage: { label: "Cobertura AIS", hint: "7 días", on: false, ids: ["coverage"] },
   satellite: { label: "Satélite óptico", hint: "tierra", on: true, ids: ["satellite"] },
   infrastructure: { label: "Cables y tuberías", on: false, ids: ["infra-cables", "infra-pipes", "infra-points"] },
+  waters: {
+    label: "Aguas españolas y en disputa",
+    on: false,
+    ids: ["waters-territorial", "waters-territorial-line", "waters-claimed", "waters-claimed-line"],
+  },
 };

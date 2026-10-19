@@ -25,6 +25,7 @@ from uatu.ais.events import (
     downgrade_where_usually_silent,
 )
 from uatu.ais.sanctions import explain
+from uatu.ais.sovereignty import detect_state_vessels, downgrade_routine, foreign_state_vessels
 from uatu.ais.spoofing import detect_odd_mmsi, detect_on_land, detect_shared_mmsi
 from uatu.ais.stops import Stop, detect_stops, detect_transits
 from uatu.config import BBox
@@ -59,6 +60,8 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     t0, t1 = start.timestamp(), now.timestamp()
     stopped = await store.stopped_places(engine, now - timedelta(days=p.crowd_history_days), p.loiter_max_sog)
     quiet = await store.silences(engine, now - timedelta(days=p.crowd_history_days))
+    waters = await store.maritime_waters(engine)
+    state = foreign_state_vessels(await store.vessel_identities(engine)) if waters else {}
     events: list[Event] = []
     tracked = stopped_now = crossed = 0
     ports = await store.ports(engine)
@@ -79,6 +82,7 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
             *shared,
             *detect_on_land(tracks, area.coast.inland_at),
             *detect_odd_mmsi(tracks, area.coast.at),
+            *detect_state_vessels(tracks, state, waters, area.coast.at),
         ]
         events += downgrade_where_usually_silent(downgrade_in_crowds(found, stopped, proj, p), quiet, proj, p)
         tracked += len(tracks)
@@ -92,6 +96,9 @@ async def analyse(engine: AsyncEngine, now: datetime, areas: list[Area], p: Para
     events += await store.network_present(engine, start, now)
     events += await store.watched_present(engine, start, now)
     events += await store.shared_imos(engine, start, now)
+
+    # What a state vessel does day after day in the same waters is routine.
+    events = downgrade_routine(events, await store.state_vessel_days(engine, now - timedelta(days=7)))
 
     # Uatu deaf for 5 minutes or more (its connection, the recorder): no silence then says anything.
     blind = await store.recording_gaps(engine, start - timedelta(seconds=p.gap_min_s), timedelta(minutes=5))
@@ -127,6 +134,20 @@ async def listed_stops(engine: AsyncEngine, stops: list[Stop]) -> list[Event]:
     return events
 
 
+STATE_VESSEL = {"military": "buque militar", "law_enforcement": "patrullero"}
+
+
+def of_flag(flag: str) -> str:
+    """'del Reino Unido', 'de Marruecos'."""
+    return {"Reino Unido": "del Reino Unido", "Países Bajos": "de los Países Bajos"}.get(flag, f"de {flag}")
+
+
+def in_waters(name: str) -> str:
+    """'el mar territorial español', 'aguas de Ceuta': as they read after 'en'."""
+    return f"el {name[0].lower()}{name[1:]}" if name.startswith("Mar ") else f"{name[0].lower()}{name[1:]}"
+
+
+CLAIMANTS = {"Spain": "España", "Morocco": "Marruecos", "United Kingdom": "el Reino Unido"}
 INFRASTRUCTURE = {"telecom_cable": "cable de telecomunicaciones", "power_cable": "cable eléctrico",
                   "pipeline": "tubería"}  # fmt: skip
 IDENTITY_FIELD_NAMES = {"name": "nombre", "imo": "número IMO", "callsign": "indicativo", "ship_type": "tipo de barco"}
@@ -249,6 +270,31 @@ def describe(e: Event, names: dict[int, str]) -> tuple[str, str, str]:
             title = f"Baliza de emergencia AIS ({beacon}): MMSI {e.mmsi}"
             place = "en el mar" if d["at_sea"] else "junto a la costa o en puerto, probablemente una prueba"
             message = f"Baliza {beacon} emitiendo {place}. Salvamento Marítimo la recibe también. Posición {where}."
+        case "state_vessel":
+            what = STATE_VESSEL.get(d["vessel_kind"], "buque de Estado")
+            of, waters = of_flag(d["flag"]), in_waters(d["waters"])
+            title = f"{what[0].upper()}{what[1:]} {of} en {waters}: {name}"
+            claimed = (
+                f", que reclaman {' y '.join(CLAIMANTS.get(c, c) for c in d['claimants'])}"
+                if d["waters_kind"] == "disputed"
+                else ""
+            )
+            how = (
+                f"casi parado {d['slow_minutes']} min"
+                if d["slow_minutes"]
+                else f"de paso, a {d['mean_sog']} nudos de media"
+                if d.get("mean_sog") is not None
+                else "de paso"
+            )
+            routine = (
+                f" Habitual: también estuvo ahí {d['routine_days']} días de la última semana."
+                if d.get("routine_days")
+                else ""
+            )
+            verb = "estuvo" if e.end is not None and datetime.now(UTC) - e.end > timedelta(minutes=30) else "lleva"
+            message = (
+                f"{who}, {what} {of}, {verb} {d['minutes']} min en {waters}{claimed}: {how}.{routine} Posición {where}."
+            )
         case "identity_change":
             title = f"Cambio de identidad: {name}"
             field = IDENTITY_FIELD_NAMES.get(d["field"], d["field"])

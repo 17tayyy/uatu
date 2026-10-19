@@ -91,6 +91,7 @@ export const GEOJSON_SOURCES = [
   "unimaged",
   "coverage",
   "density",
+  "waters",
   "infra",
   "footprint",
   "pass-links",
@@ -182,6 +183,35 @@ export function addLayers(map: MapLibre, recentRadarTiles: string): void {
     },
   });
   map.addLayer({ id: "coast", type: "line", source: "land", paint: { "line-color": C.coast, "line-width": 0.8 } });
+  // Spain's territorial sea, and the waters it and another state claim (Gibraltar, Ceuta, Melilla...).
+  map.addLayer({
+    id: "waters-territorial",
+    type: "fill",
+    source: "waters",
+    filter: ["==", ["get", "kind"], "territorial_sea"],
+    paint: { "fill-color": C.blue, "fill-opacity": 0.05 },
+  });
+  map.addLayer({
+    id: "waters-territorial-line",
+    type: "line",
+    source: "waters",
+    filter: ["==", ["get", "kind"], "territorial_sea"],
+    paint: { "line-color": C.blue, "line-width": 0.8, "line-opacity": 0.5, "line-dasharray": [3, 2] },
+  });
+  map.addLayer({
+    id: "waters-claimed",
+    type: "fill",
+    source: "waters",
+    filter: ["==", ["get", "kind"], "disputed"],
+    paint: { "fill-color": C.serious, "fill-opacity": 0.14 },
+  });
+  map.addLayer({
+    id: "waters-claimed-line",
+    type: "line",
+    source: "waters",
+    filter: ["==", ["get", "kind"], "disputed"],
+    paint: { "line-color": C.serious, "line-width": 1.2, "line-opacity": 0.8 },
+  });
   map.addLayer({
     id: "infra-cables",
     type: "line",
