@@ -101,6 +101,7 @@ def render(r: Report, figures: dict[str, str]) -> str:
     ]
     out += _summary(r)
     out += _listed(r, figures)
+    out += _state(r)
     out += _radar(r)
     out += _events(r)
     out += _traffic(r, figures)
@@ -112,7 +113,7 @@ def render(r: Report, figures: dict[str, str]) -> str:
 def _summary(r: Report) -> list[str]:
     possible = (r.end - r.recording_start).total_seconds() / 3600
     reports = sum(h.reports for h in r.heard)
-    lost = f"; {plural(len(r.outages), 'corte', 'cortes')} de Uatu, ver §5" if r.outages else ""
+    lost = f"; {plural(len(r.outages), 'corte', 'cortes')} de Uatu, ver §6" if r.outages else ""
     began = f" desde que empezó, el {when(r.recording_start)}," if r.recording_start > r.start else ""
     lines = [
         "## Resumen",
@@ -146,7 +147,7 @@ def _summary(r: Report) -> list[str]:
             f"- {number(east + west)} cruces del Estrecho: {east} hacia el Mediterráneo, {west} hacia el Atlántico."
         )
     behaviour = [e for e in r.notable if e.kind not in LISTED_KINDS]
-    lines += [f"- {plural(len(behaviour), 'evento notable', 'eventos notables')} en el AIS (§3).", ""]
+    lines += [f"- {plural(len(behaviour), 'evento notable', 'eventos notables')} en el AIS (§4).", ""]
     return lines
 
 
@@ -193,8 +194,58 @@ def _vessel(v: Listed, r: Report) -> list[str]:
     return [*lines, ""]
 
 
+STATE_KIND = {"military": "militar", "law_enforcement": "patrullero"}
+
+
+def _state(r: Report) -> list[str]:
+    """Foreign state vessels in Spain's waters and in those it and another state claim; the radar's
+    unexplained echoes in the latter."""
+    lines = [
+        "## 2. Buques de Estado extranjeros en aguas españolas",
+        "",
+        "Buques militares y patrulleros de otras banderas que emiten AIS, en el mar territorial español o en"
+        " aguas que España y otro Estado reclaman (Gibraltar, Ceuta, Melilla, Perejil, las Chafarinas,"
+        " Alhucemas y Vélez de la Gomera; límites de Marine Regions). Pasar es un derecho: el paso inocente"
+        " por el mar territorial y, por el Estrecho, el paso en tránsito. Lo que cuenta es cuánto se quedan y"
+        " cuánto casi parados. Los buques de guerra no tienen por qué emitir AIS, y muchos no lo hacen.",
+        "",
+    ]
+    if r.state_stays:
+        lines += [
+            "| Buque | Bandera | Tipo | Aguas | Estancias | Horas | Casi parado |",
+            "|---|---|---|---|---:|---:|---:|",
+        ]
+        for s in r.state_stays:
+            name = s.name or f"MMSI {s.mmsi}"
+            waters = f"{s.waters} (en disputa)" if s.disputed else s.waters
+            habit = " · habitual" if s.routine else ""
+            lines.append(
+                f"| {name}{habit} | {s.flag} | {STATE_KIND.get(s.kind, s.kind)} | {waters} | {s.stays} |"
+                f" {number(s.hours, 1)} | {number(s.slow_hours, 1)} h |"
+            )
+        lines += [
+            "",
+            "*Habitual*: en las mismas aguas también otros días de la semana, día tras día, como patrullas.",
+            "",
+        ]
+    else:
+        lines += ["Ninguno con AIS en el periodo.", ""]
+    if r.unpaired_in_claimed:
+        parts = [
+            f"{u.waters.lower()[0]}{u.waters[1:]}, {u.echoes} (el mayor, ~{number(u.longest_m)} m)"
+            for u in r.unpaired_in_claimed
+        ]
+        lines += [
+            f"**El radar en aguas en disputa.** Ecos sin un AIS que los explique (no emitía, o aisstream oye poco"
+            f" ahí): {'; '.join(parts)}. El radar no dice de qué país es un barco ni qué es: son pistas para"
+            " mirar, no incursiones.",
+            "",
+        ]
+    return lines
+
+
 def _radar(r: Report) -> list[str]:
-    lines = ["## 2. Radar (Sentinel-1)", ""]
+    lines = ["## 3. Radar (Sentinel-1)", ""]
     if not r.passes:
         return [*lines, "Ninguna pasada analizada en el periodo.", ""]
     columns = ["Pasada", "Zona", "Zona cubierta", "Detecciones", "Con AIS", "Sin AIS, mala recepción",
@@ -299,7 +350,7 @@ def _and(items: list[str]) -> str:
 
 
 def _events(r: Report) -> list[str]:
-    lines = ["## 3. Comportamiento en el AIS", ""]
+    lines = ["## 4. Comportamiento en el AIS", ""]
     notable = [e for e in r.notable if e.kind not in LISTED_KINDS]  # the listed vessels: §1
     if not notable:
         return [*lines, "Ningún evento notable en el periodo.", ""]
@@ -341,7 +392,7 @@ def _events(r: Report) -> list[str]:
 
 
 def _traffic(r: Report, figures: dict[str, str]) -> list[str]:
-    lines = ["## 4. Tráfico", ""]
+    lines = ["## 5. Tráfico", ""]
     if r.transits_by_day:
         lines += [
             "**Cruces del Estrecho** (de Tarifa, 5°36' O, a 5°27' O o al revés). Los que van hacia el Atlántico"
@@ -374,7 +425,7 @@ def _traffic(r: Report, figures: dict[str, str]) -> list[str]:
 
 def _heard(r: Report) -> list[str]:
     lines = [
-        "## 5. Lo que Uatu oyó",
+        "## 6. Lo que Uatu oyó",
         "",
         "AIS recibido por los voluntarios de aisstream.io, que solo da el presente: lo que Uatu no grabó se perdió.",
         "",

@@ -2241,6 +2241,73 @@
         }
       }
     },
+    "/api/v1/map/waters": {
+      "get": {
+        "tags": [
+          "map"
+        ],
+        "summary": "Waters",
+        "description": "Spain's territorial sea and the waters it and another state both claim (Marine Regions, CC BY 4.0).",
+        "operationId": "map-waters",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z]{3,16}$",
+              "description": "a zone's key, or todas",
+              "default": "todas",
+              "title": "Zone"
+            },
+            "description": "a zone's key, or todas"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_FeatureCollection_WatersProperties__"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/map/unimaged": {
       "get": {
         "tags": [
@@ -2684,6 +2751,18 @@
           "data"
         ],
         "title": "DataResponse[FeatureCollection[UnimagedProperties]]"
+      },
+      "DataResponse_FeatureCollection_WatersProperties__": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureCollection_WatersProperties_"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[FeatureCollection[WatersProperties]]"
       },
       "DataResponse_HistoryChunk_": {
         "properties": {
@@ -3498,6 +3577,28 @@
         ],
         "title": "FeatureCollection[UnimagedProperties]"
       },
+      "FeatureCollection_WatersProperties_": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "FeatureCollection",
+            "title": "Type",
+            "default": "FeatureCollection"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/Feature_WatersProperties_"
+            },
+            "type": "array",
+            "title": "Features"
+          }
+        },
+        "type": "object",
+        "required": [
+          "features"
+        ],
+        "title": "FeatureCollection[WatersProperties]"
+      },
       "Feature_AisCheckProperties_": {
         "properties": {
           "type": {
@@ -3717,6 +3818,28 @@
           "properties"
         ],
         "title": "Feature[UnimagedProperties]"
+      },
+      "Feature_WatersProperties_": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "Feature",
+            "title": "Type",
+            "default": "Feature"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/Geometry"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/WatersProperties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "geometry",
+          "properties"
+        ],
+        "title": "Feature[WatersProperties]"
       },
       "FleetVessel": {
         "properties": {
@@ -5815,6 +5938,32 @@
           "note"
         ],
         "title": "Watchlisting"
+      },
+      "WatersProperties": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "claimants": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Claimants"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "claimants"
+        ],
+        "title": "WatersProperties"
       },
       "ZoneInfo": {
         "properties": {

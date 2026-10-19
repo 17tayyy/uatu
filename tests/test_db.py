@@ -378,6 +378,35 @@ async def test_a_sanctioned_vessels_visit_is_one_event_and_severity_follows_the_
             await conn.execute(delete(AisEvent).where(AisEvent.mmsi == MMSI_A))
 
 
+async def test_a_state_vessels_stays_in_two_waters_are_two_and_its_days_are_known(engine):
+    from uatu.ais import store
+    from uatu.ais.events import Event
+    from uatu.db.models import AisEvent, MaritimeArea
+
+    def stay(waters_id: int, start_h: float, end_h: float) -> Event:
+        details = {"waters_id": waters_id, "waters": f"test {waters_id}", "minutes": 0}
+        return Event("state_vessel", 2, MMSI_A, T0 + timedelta(hours=start_h), 35.86, -5.34, details,
+                     T0 + timedelta(hours=end_h))  # fmt: skip
+
+    square = "SRID=4326;MULTIPOLYGON(((-5.39 35.82,-5.28 35.82,-5.28 35.92,-5.39 35.92,-5.39 35.82)))"
+    try:
+        async with engine.begin() as conn:
+            area = {"id": 999_002, "name": "Aguas de prueba", "kind": "disputed", "claimants": ["Spain", "Morocco"]}
+            await conn.execute(insert(MaritimeArea).values(**area, source_name="t", geom=square))
+        [waters] = [w for w in await store.maritime_waters(engine) if w.id == 999_002]
+        assert (waters.kind, waters.claimants) == ("disputed", ("Spain", "Morocco"))
+        assert waters.geometry.contains(waters.geometry.centroid)
+        # Off Ceuta, then straight on into Spain's territorial sea: two stays; the first seen again, one.
+        assert len(await store.save(engine, [stay(999_002, 0, 1), stay(49033, 1, 2)])) == 2
+        assert await store.save(engine, [stay(999_002, 0, 1.5)]) == []
+        days = await store.state_vessel_days(engine, T0 - timedelta(days=1))
+        assert days[MMSI_A, 999_002] == {T0.date()} and days[MMSI_A, 49033] == {T0.date()}
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(delete(AisEvent).where(AisEvent.mmsi == MMSI_A))
+            await conn.execute(delete(MaritimeArea).where(MaritimeArea.id == 999_002))
+
+
 async def test_fixed_objects_and_the_scene_report(engine):
     from shapely import box
 

@@ -15,6 +15,12 @@ class InfrastructureProperties(OutputSchema):
     status: str | None
 
 
+class WatersProperties(OutputSchema):
+    name: str
+    kind: str  # territorial_sea | disputed
+    claimants: list[str]  # Marine Regions' names: Spain, Morocco, United Kingdom
+
+
 class SatelliteLayer(OutputSchema):
     """Optical imagery for the map's background, as raster tiles."""
 

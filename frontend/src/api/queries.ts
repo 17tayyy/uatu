@@ -26,6 +26,14 @@ export const useInfrastructure = (zone: string, enabled: boolean) =>
     staleTime: 3_600_000,
   });
 
+export const useWaters = (zone: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ["waters", zone],
+    queryFn: () => unwrap(client.GET("/api/v1/map/waters", { params: { query: { zone } } })),
+    enabled,
+    staleTime: 3_600_000,
+  });
+
 export const useCoverage = (zone: string, enabled: boolean) =>
   useQuery({
     queryKey: ["coverage", zone],

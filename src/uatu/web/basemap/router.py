@@ -3,7 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from uatu.web.basemap import service as basemap_service
-from uatu.web.basemap.schemas import InfrastructureProperties, LandProperties, SatelliteLayer, UnimagedProperties
+from uatu.web.basemap.schemas import (
+    InfrastructureProperties,
+    LandProperties,
+    SatelliteLayer,
+    UnimagedProperties,
+    WatersProperties,
+)
 from uatu.web.dependencies import DbSession, LandOutlines, Settings, ZoneScope
 from uatu.web.schemas import DataResponse, FeatureCollection
 
@@ -26,6 +32,12 @@ async def satellite(settings: Settings) -> DataResponse[SatelliteLayer]:
 @router.get("/infrastructure")
 async def infrastructure(db: DbSession, scope: ZoneScope) -> DataResponse[FeatureCollection[InfrastructureProperties]]:
     return DataResponse(data=await basemap_service.infrastructure(db, scope.bbox))
+
+
+@router.get("/waters")
+async def waters(db: DbSession, scope: ZoneScope) -> DataResponse[FeatureCollection[WatersProperties]]:
+    """Spain's territorial sea and the waters it and another state both claim (Marine Regions, CC BY 4.0)."""
+    return DataResponse(data=await basemap_service.waters(db, scope.bbox))
 
 
 @router.get("/unimaged")

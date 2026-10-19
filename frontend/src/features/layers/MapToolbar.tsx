@@ -102,6 +102,16 @@ function Legend({ layer }: { layer: LayerKey }) {
         );
       }
       break;
+    case "waters":
+      items.push(
+        <Item key="t" shape="dash" color={C.blue}>
+          Mar territorial español (12 millas)
+        </Item>,
+        <Item key="d" shape="square" color={C.serious}>
+          Aguas que España y otro Estado reclaman
+        </Item>,
+      );
+      break;
     case "infrastructure":
       items.push(
         <Item key="c" shape="dash" color={C.infra}>

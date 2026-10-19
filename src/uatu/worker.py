@@ -15,13 +15,15 @@ Operations
                         changes through ntfy, and pings a dead man's switch if configured.
 AIS
     ais.analyse         every 10 minutes: AIS gaps, encounters, loitering, vessels over cables, sanctioned
-                        vessels and vessels of sanctioned companies, identity changes... into ais_events;
+                        vessels and vessels of sanctioned companies, identity changes, foreign state
+                        vessels in Spain's and disputed waters... into ais_events;
                         pushes the serious ones at once. Also where vessels stop (berths, anchorages)
                         and their crossings of the Strait.
     ais.digest          08:00 and 20:00 UTC: a summary notification of the notable events of 12 h.
     ref.sanctions       daily: from OpenSanctions, sanctioned vessels, who owns and manages vessels
                         (sanctions lists, Ukraine's GUR, port state control) and other watchlists.
-    ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports; the World Port Index.
+    ref.infrastructure  weekly: Spanish submarine cables, pipelines, platforms and ports; the World Port Index;
+                        Spain's territorial sea and the waters it and another state both claim (Marine Regions).
 Reports
     report.weekly       Mondays at 05:00 UTC: the report of the week before (uatu-report), in REPORTS_DIR,
                         announced through ntfy with a link to the dashboard's copy if DASHBOARD_URL is set.
@@ -146,7 +148,7 @@ async def _bathymetry(http: httpx.AsyncClient, bbox: BBox, cache: Path) -> Bathy
 
 
 async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
-    """First start: don't wait for the scheduled refresh to have sanctions, infrastructure and ports."""
+    """First start: don't wait for the scheduled refresh to have sanctions, infrastructure, ports and Spain's waters."""
     listed, infrastructure, ports = await ais_store.reference_loaded(engine)
     try:
         if not listed:
@@ -155,6 +157,8 @@ async def _load_reference_if_missing(engine, http: httpx.AsyncClient) -> None:
             await reference.refresh_infrastructure(engine, http)
         if not ports:
             await reference.refresh_ports(engine, http)
+        if not await ais_store.maritime_waters(engine):
+            await reference.refresh_maritime_areas(engine, http)
     except Exception:  # never keep the worker from starting: the scheduled refresh will try again
         log.exception("reference_load_failed")
 
@@ -355,6 +359,7 @@ async def refresh_sanctions() -> int:
 @app.cron("30 4 * * 1", name="ref.infrastructure", max_retries=2, backoff_ms=30 * 60_000, timeout=900)
 async def refresh_infrastructure() -> int:
     await reference.refresh_ports(app.state.engine, app.state.http)
+    await reference.refresh_maritime_areas(app.state.engine, app.state.http)
     return await reference.refresh_infrastructure(app.state.engine, app.state.http)
 
 

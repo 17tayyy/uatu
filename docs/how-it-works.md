@@ -165,6 +165,17 @@ Every 10 minutes, detectors run over the last 6 hours of AIS:
   its first three days Uatu saw 65 westbound vessels fall silent off Tarifa, where aisstream's
   receivers stop hearing the westbound lane. Where 5 or more other vessels went quiet within 5
   km in the past week, a silence is the receivers', not the vessel's.
+- **Foreign state vessels in Spain's waters**: navies, coast guards and police of other flags
+  (by AIS type, or by name) staying in Spain's territorial sea or in the waters Spain and another
+  state both claim, which Marine Regions draws apart: around Gibraltar (with the United Kingdom),
+  Ceuta, Perejil, Melilla, the Chafarinas, Alhucemas and Vélez de la Gomera (with Morocco).
+  Passing is a right, innocent passage through a territorial sea and transit passage through the
+  Strait, so what counts is the stay: in claimed waters, or nearly stopped for half an hour in
+  Spain's own. Berthed at its base (Gibraltar's police in its harbour) is no stay. What a vessel
+  does there on three or more other days of the week is routine, and only informative: what
+  stands out is what is new. The limit is plain: warships need not broadcast AIS, and Morocco's
+  navy and gendarmerie were never heard in the first week. The radar may see them as echoes with
+  no AIS, which the report counts in the claimed waters, but it cannot tell a flag.
 - **Encounters**: two vessels within 500 m, both under 2 knots, for over 2 hours, away from the
   coast. That is the signature of a ship-to-ship transfer. Within 2 km of the coast they are not
   kept: the first day of Catalonia brought 1,600 "encounters" of yachts moored side by side in

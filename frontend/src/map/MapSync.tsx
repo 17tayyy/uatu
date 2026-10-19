@@ -12,6 +12,7 @@ import {
   useStatus,
   useUnimaged,
   useVessel,
+  useWaters,
   useZones,
 } from "../api/queries";
 import type { PassDetail, ZoneInfo } from "../api/types";
@@ -148,6 +149,7 @@ export function MapSync() {
   const livePositions = useLive(zone);
   const events = useEvents(zone, filter.hours, filter.minSeverity);
   const infra = useInfrastructure(zone, layers.infrastructure);
+  const waters = useWaters(zone, layers.waters);
   const coverage = useCoverage(zone, layers.coverage);
   const density = useDensity(zone, layers.density);
   const unimaged = useUnimaged(zone, passId);
@@ -230,6 +232,7 @@ export function MapSync() {
   }, [events.data, time]);
 
   useEffect(() => setData("infra", infra.data), [infra.data]);
+  useEffect(() => setData("waters", waters.data), [waters.data]);
   useEffect(() => setData("coverage", coverage.data), [coverage.data]);
   useEffect(() => setData("density", density.data), [density.data]);
 
