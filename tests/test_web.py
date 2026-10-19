@@ -83,7 +83,7 @@ def test_the_whole_coast_is_everything_recorded_even_with_few_zones_analysed():
     strait = [ZONES["estrecho"]]
     whole = scope("todas", strait)
     assert whole is not None and whole.keys == ["estrecho"]  # passes and events: the analysed zones
-    assert whole.bbox == (35.2, -6.5, 42.5, 4.4)  # vessels: wherever the recorder listens
+    assert whole.bbox == (27.4, -18.4, 42.5, 4.4)  # vessels: wherever the recorder listens, the Canaries too
     assert scope("cataluna", strait) is None  # recorded, but not analysed yet
 
 
@@ -714,8 +714,9 @@ async def test_page_and_health(client):
     strait = zones["zones"][0]
     assert (strait["key"], strait["name"], strait["north"]) == ("estrecho", "Estrecho de Gibraltar", 36.7)
     assert strait["recording_since"] is not None
-    assert [z["key"] for z in zones["zones"]] == ["estrecho", "alboran", "murcia", "valencia", "cataluna", "baleares"]
-    assert zones["whole_coast"] == {"west": -6.5, "south": 35.2, "east": 4.4, "north": 42.5}
+    keys = ["estrecho", "alboran", "murcia", "valencia", "cataluna", "baleares", "canarias"]
+    assert [z["key"] for z in zones["zones"]] == keys
+    assert zones["whole_coast"] == {"west": -18.4, "south": 27.4, "east": 4.4, "north": 42.5}  # all analysed here
     land = await ok(client, "/api/v1/map/land")  # no land mask here: Natural Earth everywhere
     assert land["features"]
     assert all(f["geometry"]["type"] in ("Polygon", "MultiPolygon") for f in land["features"])
