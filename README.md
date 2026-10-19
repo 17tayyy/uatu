@@ -10,13 +10,13 @@ meetings, vessels idling over submarine cables).
 ![The dashboard on the Strait of Gibraltar: a Sentinel-1 pass, each radar detection coloured by what AIS says about it, one of them open in the inspector](docs/dashboard.png)
 
 Running 24/7 on a homelab since 13 October 2026: the Strait of Gibraltar first, then the whole
-coast from Gibraltar to Cap de Creus and the Balearic Islands, in six zones brought into the
-analysis one at a time.
+coast from Gibraltar to Cap de Creus, the Balearic and the Canary Islands, in seven zones brought
+into the analysis one at a time.
 
 ## What it does
 
 - **Records AIS** for the whole coast, around the clock: free live feeds keep no history, so
-  every day not recorded is lost. About 1,300 vessels an hour across the six zones.
+  every day not recorded is lost. About 1,300 vessels an hour across the zones.
 - **Watches AIS for behaviour**: vessels going silent at sea (only where reception is good
   enough for silence to mean something), ship-to-ship meetings, loitering, idling over cables
   in water shallow enough to drop an anchor on them, identity changes, impossible jumps, and
@@ -484,8 +484,8 @@ Environment variables (or `.env`):
 | -------------------- | ------------------------------------- | ------------------------------------------ |
 | `AISSTREAM_API_KEY`  | required                              |                                            |
 | `DATABASE_URL`       | `postgresql+asyncpg://uatu:uatu@localhost:5432/uatu` | set by docker compose       |
-| `ZONES`              | all six                               | zones the recorder records: `estrecho,alboran,murcia,valencia,cataluna,baleares` (`uatu/config.py`) |
-| `ANALYSIS_ZONES`     | all six                               | zones the worker and the dashboard analyse; new ones are calibrated one at a time |
+| `ZONES`              | all seven                             | zones the recorder records: `estrecho,alboran,murcia,valencia,cataluna,baleares,canarias` (`uatu/config.py`) |
+| `ANALYSIS_ZONES`     | all seven                             | zones the worker and the dashboard analyse; new ones are calibrated one at a time |
 | `RAW_ARCHIVE_DIR`    | unset (disabled)                      | `/data/raw` volume in docker compose       |
 | `BATCH_SIZE`         | `1000`                                | rows per database transaction              |
 | `FLUSH_INTERVAL_S`   | `2`                                   | max wait before writing a partial batch    |
