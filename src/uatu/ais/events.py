@@ -575,17 +575,20 @@ def detect_identity_changes(
     A change counts once it has held for `settle`, to a value the vessel had not used: two
     transponders sharing an MMSI flip between their names all day, and a corrupt message makes up a
     name for one report (I DYNASTY and TT-IDYNASTY eight times in an hour; MARELLA EZS*ORER for three
-    minutes). A name changed by a letter or two is a correction, only informative.
+    minutes). A name changed by a letter or two is a correction, only informative. A value many
+    vessels announce at once is no identity but a filler (callsign DATAHUB, from 507 vessels in a
+    week): changing from it or to it is no change.
 
     reports: time-ordered, starting well before `since` so earlier values are known; only changes
     after `since` (and at least `settle` before `now`) are returned. where: last known (lat, lon).
     """
     now = now or (reports[-1].t if reports else since)
+    filler = placeholders(reports)
     values: dict[tuple[int, str], list[tuple[datetime, object]]] = defaultdict(list)
     for r in reports:
         for name in IDENTITY_FIELDS:
             value = getattr(r, name)
-            if value is not None:
+            if value is not None and value not in filler.get(name, ()):
                 values[r.mmsi, name].append((r.t, value))
     events = []
     for (mmsi, name), seen in values.items():
@@ -610,6 +613,24 @@ def detect_identity_changes(
             lat, lon = where[mmsi]
             events.append(Event("identity_change", severity, mmsi, t, lat, lon, details, t))
     return sorted(events, key=lambda e: e.start)
+
+
+PLACEHOLDER_VESSELS = 10  # a name, callsign or IMO announced by this many vessels is a filler
+
+
+def placeholders(reports: Sequence[StaticReport], min_vessels: int = PLACEHOLDER_VESSELS) -> dict[str, set]:
+    """Per field (name, callsign, imo), the values announced by min_vessels or more vessels."""
+    vessels: dict[tuple[str, object], set[int]] = defaultdict(set)
+    for r in reports:
+        for key in ("name", "callsign", "imo"):
+            value = getattr(r, key)
+            if value is not None:
+                vessels[key, value].add(r.mmsi)
+    filler: dict[str, set] = defaultdict(set)
+    for (key, value), mmsis in vessels.items():
+        if len(mmsis) >= min_vessels:
+            filler[key].add(value)
+    return dict(filler)
 
 
 # What a yacht's or ship's name may be prefixed with, or not: sailing and motor yachts and vessels,

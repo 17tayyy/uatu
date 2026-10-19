@@ -220,6 +220,23 @@ def test_identity_changes_only_on_different_known_values():
     assert (e.mmsi, e.severity, e.details) == (1, 2, {"field": "name", "before": "OLD NAME", "after": "NEW NAME"})
 
 
+def test_a_filler_many_vessels_announce_is_no_identity():
+    """18 October: VYACHESLAV PAYSHCHIK from callsign DATAHUB, which 507 vessels announced that week, to UBLY2."""
+    t = datetime.fromtimestamp(T0, UTC)
+    fillers = [StaticReport(100 + k, t - timedelta(days=1), None, None, "DATAHUB", None) for k in range(10)]
+    vessel = [
+        StaticReport(1, t - timedelta(days=1), None, None, "DATAHUB", None),
+        StaticReport(1, t + timedelta(hours=1), None, None, "UBLY2", None),
+        StaticReport(2, t - timedelta(days=1), None, None, "AB12", None),  # a real change, still told
+        StaticReport(2, t + timedelta(hours=1), None, None, "CD34", None),
+    ]
+    reports = sorted([*fillers, *vessel], key=lambda r: r.t)
+    [e] = detect_identity_changes(
+        reports, since=t, where={1: (LAT0, LON0), 2: (LAT0, LON0)}, now=t + timedelta(hours=4)
+    )
+    assert (e.mmsi, e.details["before"], e.details["after"]) == (2, "AB12", "CD34")
+
+
 def test_names_that_flip_or_garble_or_get_corrected_are_not_renames():
     """15 October: I DYNASTY and TT-IDYNASTY eight times in an hour; MARELLA EZS*ORER for three
     minutes; SVITER OUED ALIANE corrected to SVITZER OUED ALIANE."""

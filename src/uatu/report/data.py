@@ -19,6 +19,7 @@ from uatu.ais.events import (
     downgrade_in_crowds,
     downgrade_where_usually_silent,
     name_corrected,
+    placeholders,
 )
 from uatu.ais.sanctions import explain
 from uatu.config import BBox, Zone
@@ -453,15 +454,20 @@ async def _judged_again(engine: AsyncEngine, notable: list[Notable], end: dateti
     proj = LocalProjection((coast[1] + coast[3]) / 2, (coast[0] + coast[2]) / 2)
     events = [Event(n.kind, n.severity, n.mmsi, n.start, n.lat, n.lon, n.details, n.end) for n in notable]
     judged = downgrade_where_usually_silent(downgrade_in_crowds(events, stopped, proj), quiet, proj)
-    return [n for n, e in zip(notable, judged, strict=True) if e.severity >= 2 and not _corrected_name(n)]
+    filler = placeholders(await store.static_reports(engine, since))
+    return [n for n, e in zip(notable, judged, strict=True) if e.severity >= 2 and not _no_identity_change(n, filler)]
 
 
-def _corrected_name(n: Notable) -> bool:
-    """A change of name that is only a correction (as told today: a prefix dropped, a letter fixed)."""
+def _no_identity_change(n: Notable, filler: dict[str, set]) -> bool:
+    """A change of identity that is none, as told today: a name only corrected (a prefix dropped, a
+    letter fixed), or from or to a filler many vessels announce (callsign DATAHUB)."""
     d = n.details
-    return (
-        n.kind == "identity_change" and d.get("field") == "name" and name_corrected(str(d["before"]), str(d["after"]))
-    )
+    if n.kind != "identity_change":
+        return False
+    field_filler = filler.get(str(d.get("field")), set())
+    if d.get("before") in field_filler or d.get("after") in field_filler:
+        return True
+    return d.get("field") == "name" and name_corrected(str(d["before"]), str(d["after"]))
 
 
 async def _transits_by_day(conn: Any, start: datetime, end: datetime) -> list[tuple[str, int, int]]:
